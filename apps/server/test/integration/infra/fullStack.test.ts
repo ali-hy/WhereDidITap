@@ -9,11 +9,12 @@
 //   - TP-15.34 (I): listen_addresses in the stack, and in the image started alone (A-418).
 //   - TP-15.22 (I1, I2): a real install of a throwaway tag (a temporary origin whose default branch
 //     is master), then restores of a seeded dump, a truncated dump and one failing half-way.
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash, createHmac, generateKeyPairSync, pbkdf2Sync, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { generateBaseline, serverFixture } from "../../support/s14.js";
 import {
   buildImage,
   compose,
@@ -539,7 +540,9 @@ describe.skipIf(!INFRA_INT)("TP-15.22 (I): install and restore on a real runner 
     work = mkdtempSync(path.join(tmpdir(), "budmon-tp15-22-"));
     home = path.join(work, "home");
     mkdirSync(home, { mode: 0o700 });
-    // A throwaway origin whose default branch is master, holding this commit tagged TAG.
+    // A throwaway origin whose default branch is master: this commit, then a release commit adding
+    // the server's baseline migration (as a real first release has; before it, migrate builds no
+    // tables, A-179), tagged TAG.
     const origin = path.join(work, "origin.git");
     repoDir = path.join(work, "repo");
     const git = (args: readonly string[], cwd?: string) => {
@@ -550,8 +553,30 @@ describe.skipIf(!INFRA_INT)("TP-15.22 (I): install and restore on a real runner 
     git(["init", "-q", "--bare", "-b", "master", origin]);
     git(["config", "receive.shallowUpdate", "true"], origin);
     git(["push", "-q", origin, "HEAD:refs/heads/master"], ROOT);
-    git(["tag", TAG, "master"], origin);
     git(["clone", "-q", origin, repoDir]);
+    const fixture = serverFixture(work);
+    try {
+      generateBaseline(fixture.dir, TAG);
+      cpSync(fixture.drizzle, path.join(repoDir, "apps/server/drizzle"), { recursive: true });
+    } finally {
+      fixture.remove();
+    }
+    git(["add", "apps/server/drizzle"], repoDir);
+    git(
+      [
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.invalid",
+        "commit",
+        "-q",
+        "-m",
+        `release ${TAG}`,
+      ],
+      repoDir,
+    );
+    git(["push", "-q", "origin", "HEAD:refs/heads/master"], repoDir);
+    git(["tag", TAG, "master"], origin);
 
     // First install: answers piped, then exit 20 listing the placeholders (A-385).
     const first = budmonLocal(["install", TAG], "laptop.tailnet.ts.net\n");
@@ -644,23 +669,30 @@ describe.skipIf(!INFRA_INT)("TP-15.22 (I): install and restore on a real runner 
     sh("sudo", ["rm", "-rf", work]);
   });
 
-  it("TP-15.22 (I1): every container is running, and healthy where it has a health check", () => {
+  it("TP-15.22 (I1): every container is running, and healthy where it has a health check", async () => {
     const ids = ["budmon-main", "budmon-capture"].flatMap((project) =>
       sh("docker", ["ps", "-aq", "--filter", `label=com.docker.compose.project=${project}`])
         .stdout.split("\n")
         .filter((id) => id !== ""),
     );
     expect(ids.length).toBeGreaterThan(0);
-    for (const id of ids) {
-      const state = sh("docker", [
-        "inspect",
-        "-f",
-        "{{.Name}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}",
-        id,
-      ]).stdout.trim();
-      expect(state).toMatch(/ running (healthy|none)$/);
+    const states = () =>
+      ids.map((id) =>
+        sh("docker", [
+          "inspect",
+          "-f",
+          "{{.Name}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}",
+          id,
+        ]).stdout.trim(),
+      );
+    // A health check's first run comes one interval after the start, so "starting" is waited out.
+    let current = states();
+    for (let i = 0; i < 90 && current.some((s) => s.endsWith(" starting")); i += 1) {
+      await new Promise((r) => setTimeout(r, 1_000));
+      current = states();
     }
-  });
+    for (const state of current) expect(state).toMatch(/ running (healthy|none)$/);
+  }, 120_000);
 
   it("TP-15.22 (I1): Postgres starts with its TLS key owned by 999", () => {
     const owner = sh("sudo", [

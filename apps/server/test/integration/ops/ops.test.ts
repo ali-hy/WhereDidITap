@@ -1,6 +1,6 @@
 // F-150 verifyRestore and F-93's erasure:replay and restore:verify. TP-10.8 to TP-10.10, plus
 // extra cases TP-10.13x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Temporal, fixedClock } from "@budmon/shared";
@@ -17,6 +17,32 @@ import { createFsObjectStore } from "../../../src/platform/storage/fsObjectStore
 import { verifyRestore } from "../../../src/platform/ops/restoreVerify.js";
 import { createTestDatabase, type TestDatabase } from "../../support/testDatabase.js";
 import { testWorkerEnv } from "../../support/worker.js";
+
+// TP-10.12 (A-357): the CLI's fs store, with `list` throwing ObjectStoreError("denied") while
+// `denyList.on` is set (runCli takes no store, A-288). Otherwise the real store, unchanged.
+const denyList = vi.hoisted(() => ({ on: false }));
+vi.mock("../../../src/platform/storage/fsObjectStore.js", async (importOriginal) => {
+  const real =
+    await importOriginal<typeof import("../../../src/platform/storage/fsObjectStore.js")>();
+  const { ObjectStoreError } = await import("../../../src/platform/storage/objectStore.js");
+  return {
+    ...real,
+    createFsObjectStore: (cfg: Parameters<typeof real.createFsObjectStore>[0]) => {
+      const store = real.createFsObjectStore(cfg);
+      return {
+        ...store,
+        list: (bucket: Parameters<typeof store.list>[0], prefix: string) =>
+          denyList.on
+            ? {
+                [Symbol.asyncIterator]: () => ({
+                  next: () => Promise.reject(new ObjectStoreError("denied")),
+                }),
+              }
+            : store.list(bucket, prefix),
+      };
+    },
+  };
+});
 
 const EMPTY_JOURNAL = path.join(SERVER_DIR, "test/fixtures/migrations-empty");
 const MIGRATIONS_ONE = path.join(SERVER_DIR, "test/fixtures/migrations-one");
@@ -371,50 +397,43 @@ describe("TP-10.12 (A-357): erasure:replay with a denied store", () => {
   let testDb: TestDatabase;
   let dir: string;
   let env: Record<string, string>;
-  let bucket: string;
 
   beforeAll(async () => {
     testDb = await createTestDatabase();
     dir = mkdtempSync(path.join(tmpdir(), "budmon-erasure-denied-"));
     env = testWorkerEnv(dir, testDb.endpoint, testDb.name, "general");
-    const root = env["OBJECT_STORE_FS_ROOT"] ?? path.join(dir, "objects");
-    bucket = path.join(root, "erasure-log");
-    mkdirSync(path.join(bucket, "records"), { recursive: true });
-    chmodSync(bucket, 0o000);
+    denyList.on = true;
   }, 60_000);
 
   afterAll(async () => {
-    chmodSync(bucket, 0o700);
+    denyList.on = false;
     rmSync(dir, { recursive: true, force: true });
     await testDb.drop();
   });
 
-  it.skipIf(process.getuid?.() === 0)(
-    'TP-10.12 (A-357): cli_failed carries reason "denied", and the exit code is 1',
-    async () => {
-      // The CLI's logger writes to process.stderr (cliLogger); stdout carries only output.
-      const written: string[] = [];
-      const spy = vi
-        .spyOn(process.stderr, "write")
-        .mockImplementation((chunk: string | Uint8Array) => {
-          written.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
-          return true;
-        });
-      let code: number;
-      try {
-        ({ code } = await runWith(["erasure:replay", "--since", "2026-10-01T00:00:00Z"], env));
-      } finally {
-        spy.mockRestore();
-      }
+  it('TP-10.12 (A-357): cli_failed carries reason "denied", and the exit code is 1', async () => {
+    // The CLI's logger writes to process.stderr (cliLogger); stdout carries only output.
+    const written: string[] = [];
+    const spy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        written.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+        return true;
+      });
+    let code: number;
+    try {
+      ({ code } = await runWith(["erasure:replay", "--since", "2026-10-01T00:00:00Z"], env));
+    } finally {
+      spy.mockRestore();
+    }
 
-      expect(code).toBe(1);
-      const lines = written
-        .flatMap((l) => l.split("\n"))
-        .filter((l) => l.startsWith("{"))
-        .map((l) => JSON.parse(l) as Record<string, unknown>);
-      const failed = lines.filter((l) => l["event"] === "cli_failed");
-      expect(failed).toHaveLength(1);
-      expect(failed[0]).toMatchObject({ reason: "denied" });
-    },
-  );
+    expect(code).toBe(1);
+    const lines = written
+      .flatMap((l) => l.split("\n"))
+      .filter((l) => l.startsWith("{"))
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    const failed = lines.filter((l) => l["event"] === "cli_failed");
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toMatchObject({ reason: "denied" });
+  });
 });
