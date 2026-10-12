@@ -5,13 +5,16 @@ check_tag_format() {
   [[ "$1" =~ ${TAG_PATTERN} ]] || die 10 "not a release tag: $1"
 }
 
-# Phase A step 2: a release tag is in origin/main; a hotfix tag in origin/hotfix/<tag> or, after
-# its merge-back, origin/main.
+# Phase A step 2: a release tag is in origin's default branch; a hotfix tag in
+# origin/hotfix/<tag> or, after its merge-back, the default branch. A-408: the default branch is
+# origin/HEAD, refreshed from the remote, never a hard-coded name.
 check_tag_ancestry() {
   local tag="$1" ref
   git -C "${BUDMON_REPO}" fetch --tags origin >/dev/null 2>&1 || die 11 "git fetch failed"
-  local refs=(origin/main)
-  [[ "${tag}" == *-hotfix.* ]] && refs=("origin/hotfix/${tag}" origin/main)
+  git -C "${BUDMON_REPO}" remote set-head origin --auto >/dev/null 2>&1 ||
+    die 11 "can't resolve origin's default branch"
+  local refs=(origin/HEAD)
+  [[ "${tag}" == *-hotfix.* ]] && refs=("origin/hotfix/${tag}" origin/HEAD)
   for ref in "${refs[@]}"; do
     if git -C "${BUDMON_REPO}" merge-base --is-ancestor "${tag}" "${ref}" >/dev/null 2>&1; then
       return 0

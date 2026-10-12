@@ -30,12 +30,33 @@ function describeError(error: unknown): string {
 
 const normalise = (sql: string) => sql.replace(/\s+/g, " ").trim();
 
-/** The non-empty statements of a migration, whitespace-normalised. */
+/**
+ * The statements of a migration (A-409): each loses its `--` comment lines (`-- reviewed:` notes
+ * included), is whitespace-normalised, and is skipped when nothing is left.
+ */
 function statements(sql: string): string[] {
   return sql
     .split(BREAKPOINT)
-    .map(normalise)
+    .map((statement) =>
+      normalise(
+        statement
+          .split(/\r?\n/)
+          .filter((line) => !line.trimStart().startsWith("--"))
+          .join("\n"),
+      ),
+    )
     .filter((s) => s !== "");
+}
+
+/** A-410: the SQLSTATE somewhere in the error's cause chain, if any. */
+function sqlState(error: unknown): string | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && typeof current === "object" && current !== null; depth += 1) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === "string" && /^[0-9A-Z]{5}$/.test(code)) return code;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
 }
 
 /** The repository-relative path of an added migration, inside `serverDir`. */
@@ -70,9 +91,11 @@ export async function checkMergeBack(
       migrationsFolder: path.join(input.serverDir, "drizzle"),
     });
   } catch (error) {
+    // A-410: Drizzle applies the folder as one batch, so every added file is named.
     const files =
       input.hotfixMigrationFiles.length > 0 ? input.hotfixMigrationFiles.join(", ") : "drizzle/";
-    problems.push(`migrations don't apply: ${files}`);
+    const state = sqlState(error);
+    problems.push(`migrations don't apply: ${files}${state === undefined ? "" : ` (${state})`}`);
     // N-1: the cause (Postgres's message for the failing statement) for whoever reads the log.
     process.stderr.write(`checkMergeBack: ${describeError(error)}\n`);
   } finally {

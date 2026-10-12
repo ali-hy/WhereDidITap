@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Stage-0 tagging (LLD §4.17 "Stage-0 tagging", D-12, A-365): tags a release or hotfix commit and
-# pushes the tag. Run from the repository's working tree (a full-history checkout).
+# Stage-0 tagging (LLD §4.17 "Stage-0 tagging", D-12, A-365, A-407): verifies a release or hotfix
+# pull request and names the tag and commit; it never pushes. In tag.yml's `verify` job it writes
+# tag= and commit= to $GITHUB_OUTPUT for the `tag` job; run locally, it prints them and the
+# commands to create the tag by hand. Run from a full-history checkout, with DEFAULT_BRANCH set.
 #
-#   tagRelease.sh release <pr>   a merged release/vX.Y.Z PR: tag vX.Y.Z on the merge commit
-#   tagRelease.sh hotfix <pr>    an open hotfix/vX.Y.Z-hotfix.N PR into main with green checks:
-#                                tag vX.Y.Z-hotfix.N on the PR's head commit
+#   tagRelease.sh release <pr>   a merged release/vX.Y.Z PR: vX.Y.Z on the merge commit
+#   tagRelease.sh hotfix <pr>    an open hotfix/vX.Y.Z-hotfix.N PR into the default branch with
+#                                every check green: vX.Y.Z-hotfix.N on the PR's head commit
 #
-# Exit 0: tagged, or a release PR closed without merge (nothing done). 1: a check failed.
-# 64: usage.
+# Exit 0: verified, or a release PR closed without merge (nothing done, no outputs). 1: a check
+# failed. 64: usage, or DEFAULT_BRANCH unset.
 set -euo pipefail
 
 usage() {
@@ -28,9 +30,10 @@ main() {
     *) usage ;;
   esac
   [[ "$pr" =~ ^[0-9]+$ ]] || usage
-  # A-382: in CI the push needs the token; fail before any check rather than half-run.
-  if [ -n "${CI:-}" ] && [ -z "${GH_TOKEN:-}" ]; then
-    fail "GH_TOKEN missing"
+  # A-408: the default branch comes from the workflow (or the owner), never a hard-coded name.
+  if [ -z "${DEFAULT_BRANCH:-}" ]; then
+    echo "tagRelease: DEFAULT_BRANCH is not set" >&2
+    usage
   fi
 
   local view state head base head_oid merge_oid
@@ -64,10 +67,12 @@ main() {
       fail "branch name invalid: $head"
     fi
     [ "$state" = "OPEN" ] || fail "pull request not open"
-    [ "$base" = "main" ] || fail "base must be main"
-    if ! gh pr checks "$pr" --required >/dev/null; then
-      fail "checks not green"
-    fi
+    [ "$base" = "$DEFAULT_BRANCH" ] || fail "base must be the default branch"
+    # A-414: every check on the head, at least one, each passed or skipped.
+    local checks
+    checks="$(gh pr checks "$pr" --json name,bucket)" || fail "checks not green"
+    jq -e 'length > 0 and all(.[]; .bucket == "pass" or .bucket == "skipping")' \
+      <<<"$checks" >/dev/null || fail "checks not green"
     # N-3: the checks are the head's; a push since the first read would tag an unchecked commit.
     local head_now
     head_now="$(gh pr view "$pr" --json headRefOid --jq .headRefOid)"
@@ -85,10 +90,9 @@ main() {
     done
   fi
 
-  if git rev-parse -q --verify "refs/tags/$tag" >/dev/null ||
-    [ -n "$(git ls-remote --tags origin "refs/tags/$tag")" ]; then
-    fail "tag exists: $tag"
-  fi
+  local remote_tag
+  remote_tag="$(git ls-remote --tags origin "refs/tags/$tag")" || fail "git ls-remote failed"
+  [ -z "$remote_tag" ] || fail "tag exists: $tag"
 
   # Check (i) (F-182) on a checkout of the commit.
   git cat-file -e "${commit}^{commit}" 2>/dev/null || git fetch -q origin "$commit"
@@ -99,18 +103,16 @@ main() {
     fail "check (i) failed on $commit"
   fi
 
-  git tag "$tag" "$commit"
-  # A-380: the token reaches git only for this push, as a one-off header. A-382: outside CI
-  # without a token, the owner's own git credentials push.
-  if [ -n "${GH_TOKEN:-}" ]; then
-    local auth
-    auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-    git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
-      push -q origin "refs/tags/$tag"
+  # A-407: the outputs for tag.yml's `tag` job; never a push from here.
+  if [ -n "${GITHUB_OUTPUT:-}" ]; then
+    printf 'tag=%s\ncommit=%s\n' "$tag" "$commit" >>"$GITHUB_OUTPUT"
+    echo "tagRelease: verified $tag on $commit"
   else
-    git push -q origin "refs/tags/$tag"
+    printf 'tag=%s\ncommit=%s\n' "$tag" "$commit"
+    echo "Verified. To create the tag by hand:"
+    echo "  git tag $tag $commit"
+    echo "  git push origin refs/tags/$tag"
   fi
-  echo "tagRelease: pushed $tag on $commit"
 }
 
 # One line: bash has read all of it before main runs, so the checkout above can't change what

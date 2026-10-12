@@ -4,7 +4,8 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
-    branches: [main]
+    # A-408: whichever is the default branch; jobs compare with it where it matters.
+    branches: [main, master]
 
 permissions:
   contents: read
@@ -185,7 +186,10 @@ jobs:
           fi
       - name: Check (iv), the upgrade harness (F-183)
         if: ${{ startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/') }}
-        run: pnpm --filter @budmon/server test:upgrade
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        # A-411: the release's own upgrade folder, test/upgrade/<vN>/, from the head branch.
+        run: pnpm --filter @budmon/server test:upgrade --version "${HEAD_REF#*/}"
       - name: Merge-back check (F-6b)
         if: ${{ contains(github.event.pull_request.labels.*.name, 'hotfix-merge-back') || contains(github.event.pull_request.labels.*.name, 'infra-merge-back') }}
         env:
@@ -283,7 +287,7 @@ jobs:
 
   dev-smoke:
     name: dev-smoke
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

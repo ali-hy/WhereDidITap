@@ -33,8 +33,37 @@ const RULES: readonly { pattern: string; test: (sql: string) => boolean }[] = [
   { pattern: "DELETE FROM", test: (s) => /\bDELETE\s+FROM\b/i.test(s) },
 ];
 
+/** The two checks an empty table makes harmless (A-412). */
+const EXEMPT_ON_NEW_TABLE = new Set(["ADD CONSTRAINT without NOT VALID", "CREATE UNIQUE INDEX"]);
+const NAME = String.raw`((?:"[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)(?:\.(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_$]*))?)`;
+const CREATE_TABLE = new RegExp(
+  String.raw`^\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?${NAME}`,
+  "i",
+);
+const ALTER_TABLE = new RegExp(
+  String.raw`^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?${NAME}`,
+  "i",
+);
+const INDEX_ON = new RegExp(String.raw`\bON\s+(?:ONLY\s+)?${NAME}`, "i");
+
+/** A table name without quotes or a `public.` prefix (A-412). */
+function tableName(raw: string): string {
+  const unquoted = raw.replaceAll('"', "");
+  return unquoted.startsWith("public.") ? unquoted.slice("public.".length) : unquoted;
+}
+
+/** The table a constraint or unique-index statement applies to. */
+function targetTable(statement: string): string | undefined {
+  const name =
+    ALTER_TABLE.exec(statement)?.[1] ??
+    (/\bCREATE\s+UNIQUE\s+INDEX\b/i.test(statement) ? INDEX_ON.exec(statement)?.[1] : undefined);
+  return name === undefined ? undefined : tableName(name);
+}
+
 export function checkRiskyStatements(sql: string): { line: number; pattern: string }[] {
   const flagged: { line: number; pattern: string }[] = [];
+  /** Tables created by an earlier statement of this file, so still empty (A-412). */
+  const created = new Set<string>();
   let lineBase = 1;
   for (const segment of sql.split(BREAKPOINT)) {
     const lines = segment.split("\n");
@@ -47,10 +76,16 @@ export function checkRiskyStatements(sql: string): { line: number; pattern: stri
         .slice(start)
         .filter((l) => !l.trim().startsWith("--"))
         .join("\n");
-      const rule = RULES.find((r) => r.test(statement));
+      const target = targetTable(statement);
+      const onNewTable = target !== undefined && created.has(target);
+      const rule = RULES.find(
+        (r) => r.test(statement) && !(onNewTable && EXEMPT_ON_NEW_TABLE.has(r.pattern)),
+      );
       if (rule !== undefined && reason.length < 10) {
         flagged.push({ line: lineBase + start, pattern: rule.pattern });
       }
+      const createdName = CREATE_TABLE.exec(statement)?.[1];
+      if (createdName !== undefined) created.add(tableName(createdName));
     }
     lineBase += lines.length - 1;
   }
