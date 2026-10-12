@@ -154,6 +154,18 @@ describe("TP-15.31: laptop images are digest-pinned; Mailpit matches the develop
   });
 });
 
+describe("TP-16.17: the rehearsal overlay's compose config (A-392)", () => {
+  it("TP-16.17: docker compose config of both laptop files and rehearsal/compose.rehearsal.yaml with local.env exits 0", () => {
+    const all = composeConfig([
+      "compose.main.yaml",
+      "compose.capture.yaml",
+      "rehearsal/compose.rehearsal.yaml",
+    ]);
+
+    expect(all.status, all.stderr).toBe(0);
+  });
+});
+
 describe("TP-15.16: compose config and published ports", () => {
   it("TP-15.16: docker compose config of both laptop files with local.env succeeds", () => {
     const both = composeConfig(["compose.main.yaml", "compose.capture.yaml"]);
