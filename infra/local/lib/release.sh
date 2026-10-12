@@ -81,7 +81,11 @@ build_images() {
   [ -e "${dir}/apps/server/QUEUE_UPGRADE" ] && QUEUE_UPGRADE=1
   # A-423: the web image's Sentry DSN, read from site.env (never sourced).
   local web_dsn
-  web_dsn="$(sed -n 's/^WEB_SENTRY_DSN=//p' "${BUDMON_HOME}/site.env" 2>/dev/null | tail -n 1)"
+  # A missing or unreadable site.env reads as "not set" (pipefail would otherwise exit silently).
+  web_dsn=""
+  if [ -r "${BUDMON_HOME}/site.env" ]; then
+    web_dsn="$(sed -n 's/^WEB_SENTRY_DSN=//p' "${BUDMON_HOME}/site.env" | tail -n 1)" || web_dsn=""
+  fi
   if [ -z "${web_dsn}" ] || [ "${web_dsn}" = "${PLACEHOLDER}" ]; then
     die 13 "site.env: WEB_SENTRY_DSN not set"
   fi
