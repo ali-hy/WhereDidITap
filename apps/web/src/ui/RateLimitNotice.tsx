@@ -26,8 +26,15 @@ export function createRateLimitGate(now: () => number = Date.now): {
   return {
     blockedFor,
     block(retryAfterSeconds) {
-      // A-404: a 429 without Retry-After waits the shortest limiter window, 60 s.
-      setExpiresAt(now() + (retryAfterSeconds ?? DEFAULT_RETRY_AFTER_S) * 1000);
+      // A-404, A-415: a missing, non-finite or non-positive Retry-After waits 60 s, the shortest
+      // limiter window.
+      const seconds =
+        retryAfterSeconds !== undefined &&
+        Number.isFinite(retryAfterSeconds) &&
+        retryAfterSeconds > 0
+          ? retryAfterSeconds
+          : DEFAULT_RETRY_AFTER_S;
+      setExpiresAt(now() + seconds * 1000);
       stop();
       timer = setInterval(() => {
         setTick((n) => n + 1);
