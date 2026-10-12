@@ -65,30 +65,38 @@ pg_not_empty() {
   fi
 }
 
+# Step 5 (A-428): everything is built in a temporary directory under BUDMON_HOME; the TLS secrets
+# are written first, then ca.crt and, last, ca.key (the done-marker) are moved into ca/, so an
+# interrupted run leaves no ca/ca.key and runs again in full.
 make_ca_and_tls() {
   local ca="${BUDMON_HOME}/ca" tmp
   [ -f "${ca}/ca.key" ] && return 0
-  mkdir -p "${ca}"
-  chmod 0700 "${ca}"
-  tmp="$(mktemp -d)"
+  rm -rf "${BUDMON_HOME}"/.ca-tmp.*
+  tmp="$(mktemp -d "${BUDMON_HOME}/.ca-tmp.XXXXXX")"
+  chmod 0700 "${tmp}"
   # shellcheck disable=SC2064 # expand now
-  trap "rm -rf '${tmp}'" RETURN
+  trap "rm -rf '${tmp}'" EXIT
   (
     umask 077
     openssl req -x509 -newkey rsa:3072 -nodes -days 825 -subj "/CN=Budmon local CA" \
-      -keyout "${ca}/ca.key" -out "${ca}/ca.crt" >/dev/null 2>&1
+      -keyout "${tmp}/ca.key" -out "${tmp}/ca.crt" >/dev/null 2>&1
     openssl req -new -newkey rsa:3072 -nodes -subj "/CN=db.budmon.internal" \
       -keyout "${tmp}/tls.key" -out "${tmp}/tls.csr" >/dev/null 2>&1
     printf 'subjectAltName=DNS:db.budmon.internal\n' >"${tmp}/ext"
-    openssl x509 -req -in "${tmp}/tls.csr" -CA "${ca}/ca.crt" -CAkey "${ca}/ca.key" \
+    openssl x509 -req -in "${tmp}/tls.csr" -CA "${tmp}/ca.crt" -CAkey "${tmp}/ca.key" \
       -CAserial "${tmp}/ca.srl" -CAcreateserial -days 825 -extfile "${tmp}/ext" \
       -out "${tmp}/tls.crt" >/dev/null 2>&1
   ) || die 1 "creating the private CA and the Postgres certificate failed"
-  chmod 0400 "${ca}/ca.key"
-  chmod 0444 "${ca}/ca.crt"
   write_secret main/postgres/TLS_KEY <"${tmp}/tls.key"
   write_secret main/postgres/TLS_CERT <"${tmp}/tls.crt"
-  write_secret capture/worker-capture/DB_CA_CERT <"${ca}/ca.crt"
+  write_secret capture/worker-capture/DB_CA_CERT <"${tmp}/ca.crt"
+  install -d -m 0700 "${ca}"
+  chmod 0444 "${tmp}/ca.crt"
+  chmod 0400 "${tmp}/ca.key"
+  mv -f "${tmp}/ca.crt" "${ca}/ca.crt"
+  mv -f "${tmp}/ca.key" "${ca}/ca.key"
+  rm -rf "${tmp}"
+  trap - EXIT
 }
 
 permission_probe() {
@@ -130,22 +138,27 @@ cmd_install() {
   if [ ! -f "${BUDMON_HOME}/secrets/.initialised" ]; then
     (cd "${build}" && pnpm --filter @budmon/budmonctl exec tsx src/cli.ts secrets init-local \
       --home "${BUDMON_HOME}" >/dev/null) || die 1 "budmonctl secrets init-local failed"
-    apply_secret_ownership
   fi
+  apply_secret_ownership # A-428: every install
   # 5. The private CA and Postgres's certificate.
   make_ca_and_tls
   # 6. site.env.
-  [ -f "${BUDMON_HOME}/site.env" ] || write_site_env
+  if [ ! -f "${BUDMON_HOME}/site.env" ]; then
+    rm -f "${BUDMON_HOME}"/.site.env.*
+    write_site_env
+  fi
   # 7. Placeholders.
-  local unfilled
-  unfilled="$(unfilled_placeholders)"
+  local unfilled here
+  unfilled_placeholders # A-429: exits 28 when it can't tell
+  unfilled="${UNFILLED}"
   if [ -n "${unfilled}" ]; then
+    here="$(dirname -- "${SELF}")"
     {
       echo "budmon-local: these still hold ${PLACEHOLDER}:"
       while IFS= read -r line; do echo "  ${line}"; done <<<"${unfilled}"
-      echo "Next: run infra/local/gcp-bootstrap.sh --project <project>, then"
-      echo "  budmon-local secret set <role>/<service>/<KEY> for each file above, set the site.env"
-      echo "  keys in ${BUDMON_HOME}/site.env, and run budmon-local install ${tag} again."
+      echo "Next: run ${here}/gcp-bootstrap.sh --project <project>, then"
+      echo "  ${here}/budmon-local secret set <role>/<service>/<KEY> for each file above, set the"
+      echo "  site.env keys in ${BUDMON_HOME}/site.env, and run ${here}/budmon-local install ${tag} again."
     } >&2
     exit 20
   fi
@@ -191,6 +204,7 @@ cmd_install() {
 # ---- upgrade, phase A ----
 
 cmd_upgrade() {
+  refuse_unfinished_restore # 0. A-426
   if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then usage; fi
   local tag="$1" no_dump=()
   if [ "$#" -eq 2 ]; then
@@ -232,6 +246,10 @@ cmd_status() {
     echo "ready: no"
   fi
   if [ -e "${BUDMON_HOME}/maintenance/on" ]; then echo "maintenance: on"; fi
+  if [ -e "$(restore_marker)" ]; then # A-426
+    echo "restore unfinished: see the runbook (A restore didn't finish)"
+    cat "$(restore_marker)"
+  fi
   local leftovers
   leftovers="$(admin_sql "${current}" "SELECT datname FROM pg_database WHERE datname ~ '^budmon_(old|restore_failed)_'" 2>/dev/null || true)"
   if [ -n "${leftovers}" ]; then

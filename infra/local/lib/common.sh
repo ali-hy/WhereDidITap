@@ -112,14 +112,29 @@ admin_sql() {
     psql -v ON_ERROR_STOP=1 -X -q -U budmon_admin -d postgres -At
 }
 
+# A-433: a SECONDS deadline; probe at least once, sleep 1 s after a failed probe.
 wait_postgres() {
-  local tag="$1" i
-  for ((i = 0; i < PG_READY_TIMEOUT; i++)); do
+  local tag="$1" deadline=$((SECONDS + PG_READY_TIMEOUT))
+  while :; do
     if compose_for "${tag}" main exec -T -u postgres postgres pg_isready -U budmon_admin \
       >/dev/null 2>&1 </dev/null; then
       return 0
     fi
+    [ "${SECONDS}" -lt "${deadline}" ] || return 1
     sleep 1
   done
-  return 1
+}
+
+# ---- restore.inprogress (A-426) ----
+
+restore_marker() {
+  echo "${BUDMON_HOME}/restore.inprogress"
+}
+
+# Exit 27 while a restore hasn't finished (restore step 0, upgrade phase A step 0).
+refuse_unfinished_restore() {
+  if [ -e "$(restore_marker)" ]; then
+    die 27 "a restore didn't finish (restore.inprogress): see the runbook (A restore didn't finish)"
+  fi
+  return 0
 }

@@ -6,6 +6,8 @@ up_both() {
   compose_for "${tag}" main up -d </dev/null && compose_for "${tag}" capture up -d </dev/null
 }
 
+# api, worker-general and worker-capture only: postgres, caddy and mailpit keep running. A failing
+# stop isn't fatal (the connection block and terminations cover a service still running).
 stop_app() {
   local tag="$1"
   compose_for "${tag}" main stop api worker-general </dev/null || true
@@ -13,10 +15,11 @@ stop_app() {
 }
 
 # The API's readiness (directly, not through Caddy, which answers 503 in maintenance) and both
-# workers' heartbeats, within BUDMON_READY_TIMEOUT seconds.
+# workers' heartbeats, within BUDMON_READY_TIMEOUT seconds (A-433: a SECONDS deadline, probed at
+# least once).
 wait_ready() {
-  local tag="$1" i
-  for ((i = 0; i < READY_TIMEOUT; i++)); do
+  local tag="$1" deadline=$((SECONDS + READY_TIMEOUT))
+  while :; do
     if compose_for "${tag}" main exec -T api node dist/main/healthcheck.js --ready \
       >/dev/null 2>&1 </dev/null &&
       compose_for "${tag}" main exec -T worker-general node dist/main/healthcheck.js --heartbeat \
@@ -25,9 +28,9 @@ wait_ready() {
         --heartbeat >/dev/null 2>&1 </dev/null; then
       return 0
     fi
+    [ "${SECONDS}" -lt "${deadline}" ] || return 1
     sleep 1
   done
-  return 1
 }
 
 maintenance_on() {
@@ -48,8 +51,20 @@ run_migrate() {
   compose_for "${tag}" main --profile tools run --rm "$@" migrate </dev/null 2>&1
 }
 
+# Phase B step 8 (A-426): drops nothing while restore.inprogress exists or while budmon can't be
+# confirmed to exist; the upgrade still succeeds.
 drop_leftover_databases() {
-  local tag="$1" db
+  local tag="$1" db count
+  if [ -e "$(restore_marker)" ]; then
+    echo "budmon-local: leftover databases kept: a restore didn't finish (restore.inprogress)" >&2
+    return 0
+  fi
+  count="$(admin_sql "${tag}" "SELECT count(*) FROM pg_database WHERE datname = 'budmon'" \
+    2>/dev/null)" || count=""
+  if [ "${count}" != 1 ]; then
+    echo "budmon-local: leftover databases kept: can't confirm budmon exists" >&2
+    return 0
+  fi
   while IFS= read -r db; do
     [[ "${db}" =~ ^budmon_(old|restore_failed)_[0-9]{8}T[0-9]{6}Z$ ]] || continue
     admin_sql "${tag}" "DROP DATABASE IF EXISTS ${db} WITH (FORCE)" >/dev/null || true
@@ -104,6 +119,8 @@ cmd_upgrade_continue() {
   # 4. Migrate with the new release.
   local out
   if ! out="$(run_migrate "${tag}")"; then
+    # A-435: migrate's structured, redacted log lines, then the reason.
+    printf '%s\n' "${out}" >&2
     die 15 "migrate failed for ${tag}"
   fi
 
@@ -165,7 +182,18 @@ rename_db() {
   return 1
 }
 
+# restore.inprogress (A-426): tag, from, old, failed; mode 0600, written atomically.
+write_restore_marker() {
+  local tmp
+  tmp="$(mktemp "${BUDMON_HOME}/.restore.XXXXXX")"
+  printf 'tag=%s\nfrom=%s\nold=%s\nfailed=%s\n' "$1" "$2" "$3" "$4" >"${tmp}"
+  chmod 0600 "${tmp}"
+  mv -f "${tmp}" "$(restore_marker)"
+}
+
 cmd_restore() {
+  # 0. A-426: never over an unfinished restore.
+  refuse_unfinished_restore
   [ "$#" -eq 1 ] || usage
   local file="$1" name tag
   name="$(basename -- "${file}")"
@@ -250,42 +278,65 @@ cmd_restore() {
     </dev/null >/dev/null || restore_fail 1 "re-applying the cluster bootstrap failed"
 
   # 6. The dump's release migrates and verifies it, as the migrate service.
-  run_migrate "${tag}" -e DB_NAME=budmon_restore >/dev/null ||
+  local migrate_out
+  if ! migrate_out="$(run_migrate "${tag}" -e DB_NAME=budmon_restore)"; then
+    printf '%s\n' "${migrate_out}" >&2 # A-435
     restore_fail 15 "migrate of budmon_restore failed"
+  fi
   compose_for "${tag}" main --profile tools run --rm -e DB_NAME=budmon_restore migrate \
     node dist/main/cli.js restore:verify </dev/null ||
     restore_fail 6 "restore:verify failed for budmon_restore"
 
-  # 7. The switch.
+  # 7. The switch. From the marker on, a failure names where the data is (A-426).
   maintenance_on
   stop_app "${current}"
-  local old="budmon_old_${stamp}"
+  local old="budmon_old_${stamp}" failed="budmon_restore_failed_${stamp}"
+  local incomplete="restore rollback incomplete:"
+  local runbook="maintenance stays on; see the runbook (A restore didn't finish)"
+  write_restore_marker "${tag}" "${current}" "${old}" "${failed}"
   admin_sql "${current}" "ALTER DATABASE budmon WITH ALLOW_CONNECTIONS false" >/dev/null || true
   if ! rename_db "${current}" budmon "${old}"; then
-    admin_sql "${current}" "ALTER DATABASE budmon WITH ALLOW_CONNECTIONS true" >/dev/null || true
+    admin_sql "${current}" "ALTER DATABASE budmon WITH ALLOW_CONNECTIONS true" >/dev/null ||
+      restore_fail 26 "${incomplete} budmon holds the data from before the restore but refuses connections; ${runbook}"
+    rm -f "$(restore_marker)"
     restore_fail 24 "budmon is still in use; nothing was renamed"
   fi
   if ! rename_db "${current}" budmon_restore budmon; then
-    rename_db "${current}" "${old}" budmon || true
-    admin_sql "${current}" "ALTER DATABASE budmon WITH ALLOW_CONNECTIONS true" >/dev/null || true
+    rename_db "${current}" "${old}" budmon ||
+      restore_fail 26 "${incomplete} budmon is missing; the data from before the restore is in ${old} and the restored copy in budmon_restore; ${runbook}"
+    admin_sql "${current}" "ALTER DATABASE budmon WITH ALLOW_CONNECTIONS true" >/dev/null ||
+      restore_fail 26 "${incomplete} budmon holds the data from before the restore but refuses connections; ${runbook}"
+    rm -f "$(restore_marker)"
     restore_fail 24 "budmon_restore is still in use; the names are restored"
   fi
+  # Not fatal by itself: the readiness wait then fails and the rollback runs.
   admin_sql "${current}" "ALTER DATABASE budmon WITH ALLOW_CONNECTIONS true" >/dev/null || true
 
-  # 8. and 9. Start the dump's release.
+  # 8. Start the dump's release.
   up_both "${tag}" || true
   if ! wait_ready "${tag}"; then
-    compose_for "${tag}" main stop </dev/null || true
-    compose_for "${tag}" capture stop </dev/null || true
-    admin_sql "${current}" "ALTER DATABASE budmon WITH ALLOW_CONNECTIONS false" >/dev/null || true
-    rename_db "${current}" budmon "budmon_restore_failed_${stamp}" || true
-    rename_db "${current}" "${old}" budmon || true
-    admin_sql "${current}" "ALTER DATABASE budmon WITH ALLOW_CONNECTIONS true" >/dev/null || true
-    up_both "${current}" || true
-    restore_fail 16 "${tag} isn't ready on the restored database; ${current} and its database are back, maintenance stays on"
+    # 9. The rollback (A-426), each step checked.
+    stop_app "${tag}" # r1
+    wait_postgres "${current}" || # r2
+      restore_fail 26 "${incomplete} budmon holds the restored copy and the data from before the restore is in ${old}; ${runbook}"
+    admin_sql "${current}" "ALTER DATABASE budmon WITH ALLOW_CONNECTIONS false" >/dev/null || true # r3
+    rename_db "${current}" budmon "${failed}" || # r4
+      restore_fail 26 "${incomplete} budmon holds the restored copy and the data from before the restore is in ${old}; ${runbook}"
+    rename_db "${current}" "${old}" budmon || # r5
+      restore_fail 26 "${incomplete} budmon is missing; the data from before the restore is in ${old} and the restored copy in ${failed}; ${runbook}"
+    admin_sql "${current}" "ALTER DATABASE budmon WITH ALLOW_CONNECTIONS true" >/dev/null || # r6
+      restore_fail 26 "${incomplete} budmon holds the data from before the restore but refuses connections; ${runbook}"
+    rm -f "$(restore_marker)" # r7
+    if up_both "${current}"; then # r8
+      restore_fail 16 "${tag} isn't ready on the restored database; ${current} and its database are back, maintenance stays on"
+    fi
+    restore_fail 17 "${tag} isn't ready on the restored database; the database is back but starting ${current} failed: run budmon-local start"
   fi
+
+  # 9. Record the switch.
   state_write "${tag}" "${current}"
   link_bin "${tag}"
+  rm -f "$(restore_marker)"
   maintenance_off
   say "restored ${name} with ${tag}; the previous database is kept as ${old}"
   : "${previous}"

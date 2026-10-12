@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Stage-0 tagging (LLD §4.17 "Stage-0 tagging", D-12, A-365, A-407): verifies a release or hotfix
-# pull request and names the tag and commit; it never pushes. In tag.yml's `verify` job it writes
-# tag= and commit= to $GITHUB_OUTPUT for the `tag` job; run locally, it prints them and the
-# commands to create the tag by hand. Run from a full-history checkout, with DEFAULT_BRANCH set.
+# Stage-0 tagging (LLD §4.17 "Stage-0 tagging", D-12, A-365, A-407, A-437): checks a release or
+# hotfix pull request and names the tag and commit; it never pushes, never checks the commit out and
+# runs no pnpm, node or tsx (check (i) is tag.yml's `verify` job). In tag.yml's `resolve` job it
+# writes tag= and commit= to $GITHUB_OUTPUT; run locally, it prints them and the commands to finish
+# by hand. Run from a full-history checkout of the default branch, with DEFAULT_BRANCH set.
 #
 #   tagRelease.sh release <pr>   a merged release/vX.Y.Z PR: vX.Y.Z on the merge commit
 #   tagRelease.sh hotfix <pr>    an open hotfix/vX.Y.Z-hotfix.N PR into the default branch with
@@ -94,27 +95,18 @@ main() {
   remote_tag="$(git ls-remote --tags origin "refs/tags/$tag")" || fail "git ls-remote failed"
   [ -z "$remote_tag" ] || fail "tag exists: $tag"
 
-  # Check (i) (F-182) on a checkout of the commit.
-  git cat-file -e "${commit}^{commit}" 2>/dev/null || git fetch -q origin "$commit"
-  git checkout -q --detach "$commit"
-  # A-380: the commit's code runs without the token.
-  if ! env -u GH_TOKEN -u GITHUB_TOKEN pnpm install --frozen-lockfile ||
-    ! env -u GH_TOKEN -u GITHUB_TOKEN pnpm db:check-migrations; then
-    fail "check (i) failed on $commit"
-  fi
-
   # A-407: the outputs for tag.yml's `tag` job; never a push from here.
   if [ -n "${GITHUB_OUTPUT:-}" ]; then
     printf 'tag=%s\ncommit=%s\n' "$tag" "$commit" >>"$GITHUB_OUTPUT"
-    echo "tagRelease: verified $tag on $commit"
+    echo "tagRelease: resolved $tag on $commit"
   else
     printf 'tag=%s\ncommit=%s\n' "$tag" "$commit"
-    echo "Verified. To create the tag by hand:"
+    echo "Resolved. Run check (i) on the commit, then create the tag by hand:"
+    echo "  git checkout --detach $commit && pnpm install --frozen-lockfile && pnpm db:check-migrations"
     echo "  git tag $tag $commit"
     echo "  git push origin refs/tags/$tag"
   fi
 }
 
-# One line: bash has read all of it before main runs, so the checkout above can't change what
-# executes next.
+# The body is one function called on the last line, so bash has read all of it before it runs.
 main "$@"; exit $?

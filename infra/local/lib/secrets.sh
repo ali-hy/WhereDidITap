@@ -29,14 +29,15 @@ allowed_secret() {
   [[ " ${allowed} " == *" ${key} "* ]]
 }
 
-# Hands each service directory to its container's UID: files 0400, directory 0500.
+# Hands each service directory to its container's UID: files 0400, directory 0500. Runs on every
+# install (A-428); the files are listed by find under sudo, so it also works once the directory
+# belongs to the service UID at 0500.
 apply_secret_ownership() {
   local dir uid path
   for dir in "${SERVICE_DIRS[@]}"; do
     uid="$(service_uid "${dir}")"
     path="${BUDMON_HOME}/secrets/${dir}"
-    # The files are still the WSL user's here (F-191 just wrote them), so the glob can list them.
-    sudo chmod 0400 "${path}"/*
+    sudo find "${path}" -maxdepth 1 -type f -exec chmod 0400 {} +
     sudo chmod 0500 "${path}"
     sudo chown -R "${uid}:${uid}" "${path}"
   done
@@ -89,7 +90,12 @@ site_default() {
     S3_BUCKET_EXPORTS) echo "budmon-exports" ;;
     S3_BUCKET_ERASURE_LOG) echo "budmon-erasure-log" ;;
     GOOGLE_SIGNIN_CALLBACK_ORIGIN) echo "http://localhost:8080" ;;
-    GOOGLE_SIGNIN_APP_ORIGINS) echo "${SITE_PUBLIC_ORIGIN},http://localhost:8080" ;;
+    GOOGLE_SIGNIN_APP_ORIGINS)
+      # A-430: no default while PUBLIC_ORIGIN is unfilled, so a blank answer is __FILL_ME__.
+      if [ "${SITE_PUBLIC_ORIGIN}" != "${PLACEHOLDER}" ]; then
+        echo "${SITE_PUBLIC_ORIGIN},http://localhost:8080"
+      fi
+      ;;
     SMTP_URL) echo "smtp://mailpit:1025" ;;
     EMAIL_FROM) echo "Budmon <no-reply@budmon.local>" ;;
     *) echo "" ;;
@@ -166,13 +172,31 @@ write_site_env() {
   mv -f "${tmp}" "${BUDMON_HOME}/site.env"
 }
 
-# Prints every secret file and site.env key still equal to __FILL_ME__, by path or name only.
+# Install step 7: sets UNFILLED to every secret file whose whole content is __FILL_ME__ and every
+# site.env key whose value contains it (A-430), by path or name only. Fails closed (A-429): exit 28
+# when secrets/ can't be searched or site.env can't be read.
 unfilled_placeholders() {
-  local f
-  while IFS= read -r f; do
-    if [ -n "${f}" ]; then echo "${f#"${BUDMON_HOME}/secrets/"}"; fi
-  done < <(sudo grep -rlx "${PLACEHOLDER}" "${BUDMON_HOME}/secrets" 2>/dev/null || true)
-  if [ -f "${BUDMON_HOME}/site.env" ]; then
-    sed -n "s/^\([A-Z0-9_]*\)=${PLACEHOLDER}\$/site.env \1/p" "${BUDMON_HOME}/site.env"
+  local out status line files=()
+  # shellcheck disable=SC2016 # expanded by the inner sh
+  out="$(sudo -- sh -c 'grep -rlx -e "$1" -- "$2"; printf "status=%s\n" "$?"' sh \
+    "${PLACEHOLDER}" "${BUDMON_HOME}/secrets" 2>/dev/null)" || true
+  status="${out##*$'\n'}"
+  case "${status}" in
+    status=0 | status=1) ;;
+    status=*) die 28 "placeholder check failed: can't search secrets/ (grep status ${status#status=})" ;;
+    *) die 28 "placeholder check failed: can't search secrets/ (sudo failed)" ;;
+  esac
+  if [ "${status}" = status=0 ]; then
+    while IFS= read -r line; do
+      if [ -n "${line}" ]; then files+=("${line#"${BUDMON_HOME}/secrets/"}"); fi
+    done <<<"${out%$'\n'*}"
   fi
+  [ -r "${BUDMON_HOME}/site.env" ] || die 28 "placeholder check failed: can't read site.env"
+  local keys
+  keys="$(sed -n "s/^\([A-Z0-9_]*\)=.*${PLACEHOLDER}.*\$/site.env \1/p" "${BUDMON_HOME}/site.env")" ||
+    die 28 "placeholder check failed: can't read site.env"
+  UNFILLED=""
+  if [ "${#files[@]}" -gt 0 ]; then UNFILLED="$(printf '%s\n' "${files[@]}")"; fi
+  if [ -n "${keys}" ]; then UNFILLED="${UNFILLED:+${UNFILLED}$'\n'}${keys}"; fi
+  return 0
 }

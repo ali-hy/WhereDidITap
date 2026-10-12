@@ -68,9 +68,22 @@
 		file_server
 	}
 
+	# A-431: /assets/* is file_server only; a missing asset is a bare 404 that nothing caches, never
+	# index.html under an immutable header.
+	handle /assets/* {
+		root * /srv/web
+		@asset file
+		handle @asset {
+			header Cache-Control "public, max-age=31536000, immutable"
+			file_server
+		}
+		handle {
+			header Cache-Control "no-store"
+			respond 404
+		}
+	}
+
 	handle {
-		@assets path /assets/*
-		header @assets Cache-Control "public, max-age=31536000, immutable"
 		root * /srv/web
 		try_files {path} /index.html
 		file_server

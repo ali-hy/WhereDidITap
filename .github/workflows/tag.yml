@@ -1,10 +1,12 @@
 name: Tag
 
-# Stage-0 tagging (LLD §4.17 "Stage-0 tagging", D-12, A-407, A-408): a merged release/* pull request
-# into the default branch is tagged on its merge commit; a hotfix pull request is tagged on its head
-# when dispatched with its number. `verify` runs every check, check (i) included, with read-only
-# permissions; `tag` holds the only write permission and runs no repository code. The stage-1 LLD
-# replaces this with the App-based chain.
+# Stage-0 tagging (LLD §4.17 "Stage-0 tagging", D-12, A-407, A-408, A-437): a merged release/* pull
+# request into the default branch is tagged on its merge commit; a hotfix pull request is tagged on
+# its head when dispatched with its number. Three jobs, so code from the tagged commit can't shape
+# the values: `resolve` (read-only, a default-branch checkout, no pnpm or Node) alone produces the
+# tag and commit; `verify` runs check (i) on that commit and has no outputs and no token; `tag`
+# holds the only write permission, runs no repository code and reads only `resolve`'s outputs. The
+# stage-1 LLD replaces this with the App-based chain.
 
 on:
   pull_request:
@@ -26,8 +28,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  verify:
-    name: verify
+  resolve:
+    name: resolve
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.merged == true &&
@@ -39,19 +41,16 @@ jobs:
       pull-requests: read
       checks: read
     outputs:
-      tag: ${{ steps.verify.outputs.tag }}
-      commit: ${{ steps.verify.outputs.commit }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      commit: ${{ steps.resolve.outputs.commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
           fetch-depth: 0 # tags and history, for the ancestry checks
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-      - name: Verify the pull request and run check (i) (tagRelease.sh)
-        id: verify
+      - name: Resolve the tag and commit (tagRelease.sh)
+        id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -65,10 +64,35 @@ jobs:
             bash tools/ci/tagRelease.sh release "$PR_FROM_EVENT"
           fi
 
+  verify:
+    name: verify
+    needs: resolve
+    if: needs.resolve.outputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.commit }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Check (i) on the commit (F-182)
+        env:
+          COMMIT: ${{ needs.resolve.outputs.commit }}
+        run: |
+          [ "$(git rev-parse HEAD)" = "$COMMIT" ] || { echo "checkout is not $COMMIT" >&2; exit 1; }
+          pnpm install --frozen-lockfile
+          pnpm db:check-migrations
+
   tag:
     name: tag
-    needs: verify
-    if: needs.verify.outputs.tag != ''
+    needs: [resolve, verify]
+    if: needs.resolve.outputs.tag != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -76,8 +100,8 @@ jobs:
       - name: Create the tag through the API
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.verify.outputs.tag }}
-          COMMIT: ${{ needs.verify.outputs.commit }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          COMMIT: ${{ needs.resolve.outputs.commit }}
           REPO: ${{ github.repository }}
         run: |
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-hotfix\.[0-9]+)?$ ]] || { echo "invalid tag: $TAG" >&2; exit 1; }

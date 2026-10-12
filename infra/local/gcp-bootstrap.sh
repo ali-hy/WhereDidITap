@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # F-179: the stage-0 Google Cloud resources, created when missing (idempotent), run once by the
 # owner in WSL2 after `budmon-local install` stops at its placeholder check:
-#   infra/local/gcp-bootstrap.sh --project <project id>
+#   ~/src/budmon/infra/local/gcp-bootstrap.sh --project <project id>
 # Creates the capture KMS key, the budmon-capture service account (decrypt on that key only), the
 # Gmail push topic and subscription and Cloud KMS Data Access audit logging; then writes the key's
 # public key into the three CAPTURE_PUBLIC_KEY files and CAPTURE_KEY_VERSION into site.env.
@@ -36,6 +36,13 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 [[ "${project}" =~ ^[a-z][a-z0-9-]{0,29}$ ]] || usage
+
+# A-427: never PATH; the budmon-local next to this script.
+BUDMON_LOCAL="$(dirname -- "$(realpath -- "$0")")/budmon-local"
+if [ ! -f "${BUDMON_LOCAL}" ] || [ ! -x "${BUDMON_LOCAL}" ]; then
+  echo "gcp-bootstrap: budmon-local not found next to gcp-bootstrap.sh" >&2
+  exit 2
+fi
 
 if [ ! -f "${BUDMON_HOME}/secrets/.initialised" ] || [ ! -f "${BUDMON_HOME}/site.env" ]; then
   echo "gcp-bootstrap: run budmon-local install <tag> first" >&2
@@ -96,15 +103,21 @@ elif ! jq -e '[.auditConfigs[]? | select(.service == "cloudkms.googleapis.com")
   g projects set-iam-policy "${project}" "${tmp}/policy.json" >/dev/null
 fi
 
-# The newest enabled key version (1 for a new key): its public key and CAPTURE_KEY_VERSION.
-latest="$(g kms keys versions list --key="${KEY}" "${key_flags[@]}" --filter=state=ENABLED \
-  --sort-by=~name --limit=1 --format='value(name)' 2>/dev/null || true)"
-version="${latest##*/}"
-[[ "${version}" =~ ^[0-9]+$ ]] || version=1
+# The newest enabled key version (A-434): the largest trailing number, sorted numerically.
+if ! names="$(g kms keys versions list --key="${KEY}" "${key_flags[@]}" --filter=state=ENABLED \
+  --format='value(name)')"; then
+  echo "gcp-bootstrap: listing key versions failed" >&2
+  exit 1
+fi
+version="$(sed -n 's|.*/\([0-9][0-9]*\)$|\1|p' <<<"${names}" | sort -n | tail -n 1)"
+if [ -z "${version}" ]; then
+  echo "gcp-bootstrap: no enabled key version" >&2
+  exit 1
+fi
 g kms keys versions get-public-key "${version}" --key="${KEY}" "${key_flags[@]}" \
   --output-file=/dev/stdout >"${tmp}/public.pem"
 for target in main/api main/worker-general capture/worker-capture; do
-  budmon-local secret set "${target}/CAPTURE_PUBLIC_KEY" <"${tmp}/public.pem"
+  "${BUDMON_LOCAL}" secret set "${target}/CAPTURE_PUBLIC_KEY" <"${tmp}/public.pem"
 done
 
 version_name="projects/${project}/locations/${LOCATION}/keyRings/${KEYRING}/cryptoKeys/${KEY}/cryptoKeyVersions/${version}"
@@ -117,4 +130,5 @@ fi
 chmod 0600 "${site}"
 
 echo "gcp-bootstrap: done. Create the capture service account's key straight into its file:"
-echo "  gcloud iam service-accounts keys create /dev/stdout --iam-account=${sa} | budmon-local secret set capture/worker-capture/GCP_CREDENTIALS"
+printf '  gcloud iam service-accounts keys create /dev/stdout --iam-account=%s | %q secret set capture/worker-capture/GCP_CREDENTIALS\n' \
+  "${sa}" "${BUDMON_LOCAL}"

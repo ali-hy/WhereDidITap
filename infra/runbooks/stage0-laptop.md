@@ -40,11 +40,13 @@ in the platform LLD (F-178); its commands print a one-line reason for every fail
 9. **Google Cloud:** `~/src/budmon/infra/local/gcp-bootstrap.sh --project <project id>`. Then run
    the service-account key command it prints, which writes the key straight into its secret file.
 10. **The remaining placeholders:** for each file the install listed,
-    `budmon-local secret set <role>/<service>/<KEY>` (it prompts without echo; or pipe the value
-    in). Edit the listed `site.env` keys in `~/.budmon/site.env`.
+    `~/src/budmon/infra/local/budmon-local secret set <role>/<service>/<KEY>` (it prompts without
+    echo; or pipe the value in). Edit the listed `site.env` keys in `~/.budmon/site.env`.
 11. **Install again:** `~/src/budmon/infra/local/budmon-local install <tag>`. It builds the images,
     sets up Postgres, migrates and starts both stacks.
-12. **PATH:** add `export PATH="$HOME/.budmon/bin:$PATH"` to `~/.bashrc`, and open a new shell.
+12. **PATH:** now that the install has created `~/.budmon/bin/budmon-local`, add
+    `export PATH="$HOME/.budmon/bin:$PATH"` to `~/.bashrc` and open a new shell. From here on,
+    `budmon-local` means that one.
 13. **Tailscale Serve:** in Windows PowerShell, run the command the install printed:
     `tailscale serve --bg --https=443 http://127.0.0.1:8080`.
 14. **Check:** open `https://<laptop>.<tailnet>.ts.net` on the laptop and on the phone (at home and
@@ -103,5 +105,21 @@ laptop's browser when the connection shows "needs reconnect".
   (`BUDMON_FIRST_SETUP=1 docker compose --project-directory ~/.budmon/releases/<tag> -p budmon-main -f ~/.budmon/releases/<tag>/compose.main.yaml --env-file ~/.budmon/releases/<tag>/local.env up -d postgres`
   with `BUDMON_TAG=<tag>` and `BUDMON_HOME=~/.budmon` exported), then `budmon-local restore` the
   chosen dump.
+- **A restore didn't finish** (`restore` exit 26, or `upgrade`/`restore` exit 27 "a restore didn't
+  finish"): the data is safe but not where the stack expects it, and nothing may drop a
+  `budmon_old_*` database until this is fixed. Maintenance stays on and the app services are
+  stopped.
+  1. `cat ~/.budmon/restore.inprogress`: `old` is the database holding the data from before the
+     restore, `failed` the name for the restored copy.
+  2. If Postgres isn't running: `docker start budmon-main-postgres-1`.
+  3. `docker exec -it -u postgres budmon-main-postgres-1 psql -U budmon_admin -d postgres`, then
+     `\l`.
+  4. If `budmon` exists and isn't the data you want, `ALTER DATABASE budmon RENAME TO <failed>;`.
+  5. `ALTER DATABASE <old> RENAME TO budmon;` and `ALTER DATABASE budmon WITH ALLOW_CONNECTIONS true;`.
+  6. Check that `\l` shows `budmon` and no `<old>`, then quit `psql`.
+  7. `rm ~/.budmon/restore.inprogress`, `budmon-local start`, `budmon-local maintenance off`.
+
+  Never drop a `budmon_old_*` database by hand while `restore.inprogress` exists.
+
 - **A command says "release copy mismatch"** (exit 3): run it as `budmon-local …` from `~/.budmon/bin`,
   not from the clone.

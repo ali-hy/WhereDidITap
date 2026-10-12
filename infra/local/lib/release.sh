@@ -31,7 +31,16 @@ build_dir() {
 make_worktree() {
   local tag="$1" dir
   dir="$(build_dir "${tag}")"
-  [ -d "${dir}" ] && return 0
+  if [ -d "${dir}" ]; then
+    # A-428: reused only at the tag's commit; otherwise recreated.
+    local want have
+    want="$(git -C "${BUDMON_REPO}" rev-parse -q --verify "refs/tags/${tag}^{commit}" 2>/dev/null)" || want=""
+    have="$(git -C "${dir}" rev-parse HEAD 2>/dev/null)" || have=""
+    if [ -n "${want}" ] && [ "${have}" = "${want}" ]; then
+      return 0
+    fi
+    git -C "${BUDMON_REPO}" worktree remove --force "${dir}" >/dev/null 2>&1 || rm -rf "${dir}"
+  fi
   mkdir -p "${BUDMON_HOME}/build"
   git -C "${BUDMON_REPO}" worktree add --detach "${dir}" "${tag}" >/dev/null 2>&1 ||
     die 11 "git worktree add failed for ${tag}"

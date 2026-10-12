@@ -129,6 +129,9 @@ services:
   postgres:
     image: budmon/postgres:${BUDMON_TAG:?BUDMON_TAG is not set}
     restart: unless-stopped
+    # A-432: USER postgres (999), no gosu or chown step, so no capability is needed.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     mem_limit: 1g
     shm_size: 256m
     networks:
