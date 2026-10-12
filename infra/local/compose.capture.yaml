@@ -1,0 +1,53 @@
+# F-175: the laptop's capture project (budmon-capture): worker-capture alone, reaching Postgres only
+# over TLS on the internal budmon_capture_db network, and the internet through its own bridge.
+name: budmon-capture
+
+services:
+  worker-capture:
+    image: budmon/server:${BUDMON_TAG:?BUDMON_TAG is not set}
+    user: "10003:10003"
+    command: ["node", "--import", "./dist/main/instrument.js", "dist/main/worker.js"]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    stop_grace_period: 45s
+    mem_limit: 384m
+    env_file:
+      - local.env
+      - ${BUDMON_HOME:?BUDMON_HOME is not set}/site.env
+    environment:
+      BUDMON_RELEASE: ${BUDMON_TAG:?BUDMON_TAG is not set}
+      DB_HOST: db.budmon.internal
+      DB_USER: budmon_capture
+      WORKER_ROLES: capture
+      DB_SSLMODE: verify-full
+      DB_SSL_ROOT_CERT_FILE: /run/secrets/DB_CA_CERT
+      DB_PASSWORD_FILE: /run/secrets/DB_PASSWORD
+      MAILBOX_HMAC_KEY_FILE: /run/secrets/MAILBOX_HMAC_KEY
+      GCP_CREDENTIALS_FILE: /run/secrets/GCP_CREDENTIALS
+      GOOGLE_OAUTH_CLIENT_SECRET_FILE: /run/secrets/GOOGLE_OAUTH_CLIENT_SECRET
+      CAPTURE_PUBLIC_KEY_FILE: /run/secrets/CAPTURE_PUBLIC_KEY
+    extra_hosts:
+      - "db.budmon.internal:${PG_CAPTURE_IP}"
+    networks:
+      capture-db:
+        ipv4_address: ${WORKER_CAPTURE_IP}
+      capture-egress: {}
+    volumes:
+      - type: bind
+        source: ${BUDMON_HOME}/secrets/capture/worker-capture
+        target: /run/secrets
+        read_only: true
+    healthcheck:
+      test: ["CMD", "node", "dist/main/healthcheck.js", "--heartbeat"]
+      interval: 15s
+      retries: 4
+
+networks:
+  capture-db:
+    external: true
+    name: budmon_capture_db
+  capture-egress:
+    driver: bridge

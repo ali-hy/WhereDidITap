@@ -1,0 +1,1244 @@
+[
+  {
+    "code": "ADP",
+    "name": "Andorran Peseta",
+    "minorUnits": 0,
+    "active": false
+  },
+  {
+    "code": "AED",
+    "name": "United Arab Emirates Dirham",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "AFA",
+    "name": "Afghan Afghani (1927–2002)",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "AFN",
+    "name": "Afghan Afghani",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "ALL",
+    "name": "Albanian Lek",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "AMD",
+    "name": "Armenian Dram",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "ANG",
+    "name": "Netherlands Antillean Guilder",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "AOA",
+    "name": "Angolan Kwanza",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "AOR",
+    "name": "Angolan Readjusted Kwanza (1995–1999)",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "ARS",
+    "name": "Argentine Peso",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "ATS",
+    "name": "Austrian Schilling",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "AUD",
+    "name": "Australian Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "AWG",
+    "name": "Aruban Florin",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "AZM",
+    "name": "Azerbaijani Manat (1993–2006)",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "AZN",
+    "name": "Azerbaijani Manat",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "BAM",
+    "name": "Bosnia-Herzegovina Convertible Mark",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "BBD",
+    "name": "Barbadian Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "BDT",
+    "name": "Bangladeshi Taka",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "BEF",
+    "name": "Belgian Franc",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "BGL",
+    "name": "Bulgarian Hard Lev",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "BGN",
+    "name": "Bulgarian Lev",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "BHD",
+    "name": "Bahraini Dinar",
+    "minorUnits": 3,
+    "active": true
+  },
+  {
+    "code": "BIF",
+    "name": "Burundian Franc",
+    "minorUnits": 0,
+    "active": true
+  },
+  {
+    "code": "BMD",
+    "name": "Bermudan Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "BND",
+    "name": "Brunei Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "BOB",
+    "name": "Bolivian Boliviano",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "BRL",
+    "name": "Brazilian Real",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "BSD",
+    "name": "Bahamian Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "BTN",
+    "name": "Bhutanese Ngultrum",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "BWP",
+    "name": "Botswanan Pula",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "BYB",
+    "name": "Belarusian Ruble (1994–1999)",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "BYN",
+    "name": "Belarusian Ruble",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "BYR",
+    "name": "Belarusian Ruble (2000–2016)",
+    "minorUnits": 0,
+    "active": false
+  },
+  {
+    "code": "BZD",
+    "name": "Belize Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "CAD",
+    "name": "Canadian Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "CDF",
+    "name": "Congolese Franc",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "CHF",
+    "name": "Swiss Franc",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "CLP",
+    "name": "Chilean Peso",
+    "minorUnits": 0,
+    "active": true
+  },
+  {
+    "code": "CNY",
+    "name": "Chinese Yuan",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "COP",
+    "name": "Colombian Peso",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "CRC",
+    "name": "Costa Rican Colón",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "CSD",
+    "name": "Serbian Dinar (2002–2006)",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "CUC",
+    "name": "Cuban Convertible Peso",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "CUP",
+    "name": "Cuban Peso",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "CVE",
+    "name": "Cape Verdean Escudo",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "CYP",
+    "name": "Cypriot Pound",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "CZK",
+    "name": "Czech Koruna",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "DEM",
+    "name": "German Mark",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "DJF",
+    "name": "Djiboutian Franc",
+    "minorUnits": 0,
+    "active": true
+  },
+  {
+    "code": "DKK",
+    "name": "Danish Krone",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "DOP",
+    "name": "Dominican Peso",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "DZD",
+    "name": "Algerian Dinar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "EEK",
+    "name": "Estonian Kroon",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "EGP",
+    "name": "Egyptian Pound",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "ERN",
+    "name": "Eritrean Nakfa",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "ESP",
+    "name": "Spanish Peseta",
+    "minorUnits": 0,
+    "active": false
+  },
+  {
+    "code": "ETB",
+    "name": "Ethiopian Birr",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "EUR",
+    "name": "Euro",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "FIM",
+    "name": "Finnish Markka",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "FJD",
+    "name": "Fijian Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "FKP",
+    "name": "Falkland Islands Pound",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "FRF",
+    "name": "French Franc",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "GBP",
+    "name": "British Pound",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "GEL",
+    "name": "Georgian Lari",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "GHC",
+    "name": "Ghanaian Cedi (1979–2007)",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "GHS",
+    "name": "Ghanaian Cedi",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "GIP",
+    "name": "Gibraltar Pound",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "GMD",
+    "name": "Gambian Dalasi",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "GNF",
+    "name": "Guinean Franc",
+    "minorUnits": 0,
+    "active": true
+  },
+  {
+    "code": "GRD",
+    "name": "Greek Drachma",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "GTQ",
+    "name": "Guatemalan Quetzal",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "GWP",
+    "name": "Guinea-Bissau Peso",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "GYD",
+    "name": "Guyanaese Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "HKD",
+    "name": "Hong Kong Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "HNL",
+    "name": "Honduran Lempira",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "HRK",
+    "name": "Croatian Kuna",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "HTG",
+    "name": "Haitian Gourde",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "HUF",
+    "name": "Hungarian Forint",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "IDR",
+    "name": "Indonesian Rupiah",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "IEP",
+    "name": "Irish Pound",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "ILS",
+    "name": "Israeli New Shekel",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "INR",
+    "name": "Indian Rupee",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "IQD",
+    "name": "Iraqi Dinar",
+    "minorUnits": 3,
+    "active": true
+  },
+  {
+    "code": "IRR",
+    "name": "Iranian Rial",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "ISK",
+    "name": "Icelandic Króna",
+    "minorUnits": 0,
+    "active": true
+  },
+  {
+    "code": "ITL",
+    "name": "Italian Lira",
+    "minorUnits": 0,
+    "active": false
+  },
+  {
+    "code": "JMD",
+    "name": "Jamaican Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "JOD",
+    "name": "Jordanian Dinar",
+    "minorUnits": 3,
+    "active": true
+  },
+  {
+    "code": "JPY",
+    "name": "Japanese Yen",
+    "minorUnits": 0,
+    "active": true
+  },
+  {
+    "code": "KES",
+    "name": "Kenyan Shilling",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "KGS",
+    "name": "Kyrgystani Som",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "KHR",
+    "name": "Cambodian Riel",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "KMF",
+    "name": "Comorian Franc",
+    "minorUnits": 0,
+    "active": true
+  },
+  {
+    "code": "KPW",
+    "name": "North Korean Won",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "KRW",
+    "name": "South Korean Won",
+    "minorUnits": 0,
+    "active": true
+  },
+  {
+    "code": "KWD",
+    "name": "Kuwaiti Dinar",
+    "minorUnits": 3,
+    "active": true
+  },
+  {
+    "code": "KYD",
+    "name": "Cayman Islands Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "KZT",
+    "name": "Kazakhstani Tenge",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "LAK",
+    "name": "Laotian Kip",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "LBP",
+    "name": "Lebanese Pound",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "LKR",
+    "name": "Sri Lankan Rupee",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "LRD",
+    "name": "Liberian Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "LSL",
+    "name": "Lesotho Loti",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "LTL",
+    "name": "Lithuanian Litas",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "LUF",
+    "name": "Luxembourgian Franc",
+    "minorUnits": 0,
+    "active": false
+  },
+  {
+    "code": "LVL",
+    "name": "Latvian Lats",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "LYD",
+    "name": "Libyan Dinar",
+    "minorUnits": 3,
+    "active": true
+  },
+  {
+    "code": "MAD",
+    "name": "Moroccan Dirham",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "MDL",
+    "name": "Moldovan Leu",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "MGA",
+    "name": "Malagasy Ariary",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "MGF",
+    "name": "Malagasy Franc",
+    "minorUnits": 0,
+    "active": false
+  },
+  {
+    "code": "MKD",
+    "name": "Macedonian Denar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "MMK",
+    "name": "Myanmar Kyat",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "MNT",
+    "name": "Mongolian Tugrik",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "MOP",
+    "name": "Macanese Pataca",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "MRO",
+    "name": "Mauritanian Ouguiya (1973–2017)",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "MRU",
+    "name": "Mauritanian Ouguiya",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "MTL",
+    "name": "Maltese Lira",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "MUR",
+    "name": "Mauritian Rupee",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "MVR",
+    "name": "Maldivian Rufiyaa",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "MWK",
+    "name": "Malawian Kwacha",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "MXN",
+    "name": "Mexican Peso",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "MYR",
+    "name": "Malaysian Ringgit",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "MZM",
+    "name": "Mozambican Metical (1980–2006)",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "MZN",
+    "name": "Mozambican Metical",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "NAD",
+    "name": "Namibian Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "NGN",
+    "name": "Nigerian Naira",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "NIO",
+    "name": "Nicaraguan Córdoba",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "NLG",
+    "name": "Dutch Guilder",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "NOK",
+    "name": "Norwegian Krone",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "NPR",
+    "name": "Nepalese Rupee",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "NZD",
+    "name": "New Zealand Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "OMR",
+    "name": "Omani Rial",
+    "minorUnits": 3,
+    "active": true
+  },
+  {
+    "code": "PAB",
+    "name": "Panamanian Balboa",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "PEN",
+    "name": "Peruvian Sol",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "PGK",
+    "name": "Papua New Guinean Kina",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "PHP",
+    "name": "Philippine Peso",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "PKR",
+    "name": "Pakistani Rupee",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "PLN",
+    "name": "Polish Zloty",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "PTE",
+    "name": "Portuguese Escudo",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "PYG",
+    "name": "Paraguayan Guarani",
+    "minorUnits": 0,
+    "active": true
+  },
+  {
+    "code": "QAR",
+    "name": "Qatari Riyal",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "ROL",
+    "name": "Romanian Leu (1952–2006)",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "RON",
+    "name": "Romanian Leu",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "RSD",
+    "name": "Serbian Dinar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "RUB",
+    "name": "Russian Ruble",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "RUR",
+    "name": "Russian Ruble (1991–1998)",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "RWF",
+    "name": "Rwandan Franc",
+    "minorUnits": 0,
+    "active": true
+  },
+  {
+    "code": "SAR",
+    "name": "Saudi Riyal",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "SBD",
+    "name": "Solomon Islands Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "SCR",
+    "name": "Seychellois Rupee",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "SDD",
+    "name": "Sudanese Dinar (1992–2007)",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "SDG",
+    "name": "Sudanese Pound",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "SEK",
+    "name": "Swedish Krona",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "SGD",
+    "name": "Singapore Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "SHP",
+    "name": "St. Helena Pound",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "SIT",
+    "name": "Slovenian Tolar",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "SKK",
+    "name": "Slovak Koruna",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "SLE",
+    "name": "Sierra Leonean Leone",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "SLL",
+    "name": "Sierra Leonean Leone (1964—2022)",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "SOS",
+    "name": "Somali Shilling",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "SRD",
+    "name": "Surinamese Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "SRG",
+    "name": "Surinamese Guilder",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "SSP",
+    "name": "South Sudanese Pound",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "STD",
+    "name": "São Tomé & Príncipe Dobra (1977–2017)",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "STN",
+    "name": "São Tomé & Príncipe Dobra",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "SVC",
+    "name": "Salvadoran Colón",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "SYP",
+    "name": "Syrian Pound",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "SZL",
+    "name": "Swazi Lilangeni",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "THB",
+    "name": "Thai Baht",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "TJS",
+    "name": "Tajikistani Somoni",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "TMM",
+    "name": "Turkmenistani Manat (1993–2009)",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "TMT",
+    "name": "Turkmenistani Manat",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "TND",
+    "name": "Tunisian Dinar",
+    "minorUnits": 3,
+    "active": true
+  },
+  {
+    "code": "TOP",
+    "name": "Tongan Paʻanga",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "TPE",
+    "name": "Timorese Escudo",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "TRL",
+    "name": "Turkish Lira (1922–2005)",
+    "minorUnits": 0,
+    "active": false
+  },
+  {
+    "code": "TRY",
+    "name": "Turkish Lira",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "TTD",
+    "name": "Trinidad & Tobago Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "TWD",
+    "name": "New Taiwan Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "TZS",
+    "name": "Tanzanian Shilling",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "UAH",
+    "name": "Ukrainian Hryvnia",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "UGX",
+    "name": "Ugandan Shilling",
+    "minorUnits": 0,
+    "active": true
+  },
+  {
+    "code": "USD",
+    "name": "US Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "UYU",
+    "name": "Uruguayan Peso",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "UZS",
+    "name": "Uzbekistani Som",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "VEB",
+    "name": "Venezuelan Bolívar (1871–2008)",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "VED",
+    "name": "Bolívar Soberano",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "VEF",
+    "name": "Venezuelan Bolívar (2008–2018)",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "VES",
+    "name": "Venezuelan Bolívar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "VND",
+    "name": "Vietnamese Dong",
+    "minorUnits": 0,
+    "active": true
+  },
+  {
+    "code": "VUV",
+    "name": "Vanuatu Vatu",
+    "minorUnits": 0,
+    "active": true
+  },
+  {
+    "code": "WST",
+    "name": "Samoan Tala",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "XAF",
+    "name": "Central African CFA Franc",
+    "minorUnits": 0,
+    "active": true
+  },
+  {
+    "code": "XCD",
+    "name": "East Caribbean Dollar",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "XCG",
+    "name": "Caribbean guilder",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "XOF",
+    "name": "West African CFA Franc",
+    "minorUnits": 0,
+    "active": true
+  },
+  {
+    "code": "XPF",
+    "name": "CFP Franc",
+    "minorUnits": 0,
+    "active": true
+  },
+  {
+    "code": "YER",
+    "name": "Yemeni Rial",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "YUM",
+    "name": "Yugoslavian New Dinar (1994–2002)",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "ZAR",
+    "name": "South African Rand",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "ZMK",
+    "name": "Zambian Kwacha (1968–2012)",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "ZMW",
+    "name": "Zambian Kwacha",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "ZWD",
+    "name": "Zimbabwean Dollar (1980–2008)",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "ZWG",
+    "name": "Zimbabwean Gold",
+    "minorUnits": 2,
+    "active": true
+  },
+  {
+    "code": "ZWL",
+    "name": "Zimbabwean Dollar (2009–2024)",
+    "minorUnits": 2,
+    "active": false
+  },
+  {
+    "code": "ZWR",
+    "name": "Zimbabwean Dollar (2008)",
+    "minorUnits": 2,
+    "active": false
+  }
+]

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- §8.2: the platform's strings. Error strings share the web catalogue's IDs and texts (§8.1), with
+     dots as underscores; the product name stays literal (A-401: Android strings aren't ICU). -->
+<resources>
+    <string name="app_name" translatable="false">Budmon</string>
+    <string name="home_placeholder">Nothing here yet.</string>
+
+    <!-- S-1 UpdateRequiredScreen -->
+    <string name="update_required_title">Update Budmon to continue</string>
+    <string name="update_required_body">This version is no longer supported. Updating takes about a minute.</string>
+    <plurals name="update_required_pending">
+        <item quantity="one">%1$s entries you saved offline are kept and will sync after you update.</item>
+        <item quantity="other">%1$s entries you saved offline are kept and will sync after you update.</item>
+    </plurals>
+    <string name="update_required_button">Update Budmon</string>
+    <string name="update_required_offline">Record an entry offline</string>
+    <string name="update_download_failed">Couldn\'t open the download. Ask the person who invited you for the latest version.</string>
+    <string name="update_required_icon">Update required</string>
+
+    <!-- C-4 UpdateCard -->
+    <string name="update_available">A new version of Budmon is available.</string>
+    <string name="update_action">Update</string>
+    <string name="update_later">Later</string>
+
+    <!-- S-2 ErrorFallbackScreen -->
+    <string name="error_fallback_title">Something went wrong on our side</string>
+    <string name="error_fallback_body">Try again in a moment. If it keeps happening, share this reference with the person who invited you.</string>
+    <string name="error_fallback_retry">Try again</string>
+    <string name="error_fallback_home">Go to home</string>
+    <string name="error_fallback_still_failing">Still not working.</string>
+    <string name="error_reference">Reference: %1$s</string>
+
+    <!-- C-1 OfflineBanner -->
+    <string name="offline_banner">You\'re offline. New entries are saved on this phone and sync when you\'re back online.</string>
+    <string name="offline_nothing_loaded">You\'re offline. Connect to see this.</string>
+    <string name="offline_last_updated">Offline: last updated %1$s</string>
+    <plurals name="back_online_syncing">
+        <item quantity="one">Back online. Syncing %d entry…</item>
+        <item quantity="other">Back online. Syncing %d entries…</item>
+    </plurals>
+    <string name="back_online">Back online.</string>
+
+    <!-- C-2 SyncIndicator and SyncChip -->
+    <plurals name="sync_waiting">
+        <item quantity="one">%1$s waiting to sync</item>
+        <item quantity="other">%1$s waiting to sync</item>
+    </plurals>
+    <plurals name="sync_in_progress">
+        <item quantity="one">Syncing %1$s…</item>
+        <item quantity="other">Syncing %1$s…</item>
+    </plurals>
+    <plurals name="sync_attention">
+        <item quantity="one">%1$s needs attention</item>
+        <item quantity="other">%1$s need attention</item>
+    </plurals>
+    <string name="chip_not_synced">Not yet synced</string>
+    <string name="chip_failed">Couldn\'t sync: tap to fix</string>
+    <string name="chip_needs_confirmation">Check before syncing</string>
+
+    <!-- Errors (F-253, §8.1) -->
+    <string name="error_generic_not_changed">Something went wrong on our side. Nothing was changed. Try again in a moment.</string>
+    <string name="error_generic_unknown_outcome">We couldn\'t confirm this was saved. Check before trying again.</string>
+    <string name="error_generic_read">Something went wrong on our side. Try again in a moment.</string>
+    <string name="error_validation_form">Some details need fixing.</string>
+    <plurals name="error_rate_limited">
+        <item quantity="one">Too many attempts. Try again in %d minute.</item>
+        <item quantity="other">Too many attempts. Try again in %d minutes.</item>
+    </plurals>
+    <string name="error_unavailable">Budmon is temporarily unavailable. Try again in a few minutes.</string>
+    <string name="error_not_found">This item doesn\'t exist or you no longer have access to it.</string>
+    <string name="error_forbidden">You don\'t have permission to do this.</string>
+</resources>

@@ -1,0 +1,91 @@
+# F-175: the laptop's Caddy (in the web image, mounted read-only). Plain HTTP on :8080; Tailscale
+# Serve on Windows terminates TLS. Logs keep bare paths: no query strings (A-4), no headers.
+{
+	auto_https off
+	admin off
+	log {
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp "\?.*$" ""
+				request>headers delete
+				resp_headers delete
+				request>remote_ip ip_mask 24 64
+				request>client_ip ip_mask 24 64
+			}
+		}
+	}
+}
+
+:8080 {
+	log {
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp "\?.*$" ""
+				request>headers delete
+				resp_headers delete
+				request>remote_ip ip_mask 24 64
+				request>client_ip ip_mask 24 64
+			}
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		Referrer-Policy "no-referrer"
+		X-Content-Type-Options "nosniff"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://*.ingest.de.sentry.io https://*.ingest.sentry.io; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+	}
+
+	@maint file {
+		root /
+		try_files /srv/maintenance/on
+	}
+
+	handle /api/* {
+		handle @maint {
+			header Content-Type "application/json"
+			header Retry-After "120"
+			respond `{"defined":true,"code":"SERVICE_UNAVAILABLE","status":503,"message":"Service unavailable","data":{"outcome":"not_applied"}}` 503
+		}
+		reverse_proxy api:3000 {
+			lb_try_duration 10s
+			lb_try_interval 250ms
+		}
+	}
+
+	handle /health/ready {
+		handle @maint {
+			respond `{"status":"maintenance"}` 503
+		}
+		reverse_proxy api:3000
+	}
+
+	handle /version.json {
+		header Cache-Control "no-store"
+		root * /srv/web
+		file_server
+	}
+
+	# A-431: /assets/* is file_server only; a missing asset is a bare 404 that nothing caches, never
+	# index.html under an immutable header.
+	handle /assets/* {
+		root * /srv/web
+		@asset file
+		handle @asset {
+			header Cache-Control "public, max-age=31536000, immutable"
+			file_server
+		}
+		handle {
+			header Cache-Control "no-store"
+			respond 404
+		}
+	}
+
+	handle {
+		root * /srv/web
+		try_files {path} /index.html
+		file_server
+	}
+}

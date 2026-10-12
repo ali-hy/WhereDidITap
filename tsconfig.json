@@ -1,0 +1,6 @@
+{
+  "extends": "./packages/config/tsconfig/node.json",
+  "compilerOptions": { "noEmit": true },
+  "include": ["vitest.config.ts", "packages/*/**/*.ts", "tools/**/*.ts", "infra/budmonctl/**/*.ts"],
+  "exclude": ["**/node_modules", "**/dist"]
+}

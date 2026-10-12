@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "num": "1",
+      "den": "2",
+      "expected": "0"
+    },
+    {
+      "num": "-1",
+      "den": "2",
+      "expected": "0"
+    },
+    {
+      "num": "3",
+      "den": "2",
+      "expected": "2"
+    },
+    {
+      "num": "-3",
+      "den": "2",
+      "expected": "-2"
+    },
+    {
+      "num": "5",
+      "den": "2",
+      "expected": "2"
+    },
+    {
+      "num": "-5",
+      "den": "2",
+      "expected": "-2"
+    },
+    {
+      "num": "7",
+      "den": "2",
+      "expected": "4"
+    },
+    {
+      "num": "-7",
+      "den": "2",
+      "expected": "-4"
+    },
+    {
+      "num": "1",
+      "den": "3",
+      "expected": "0"
+    },
+    {
+      "num": "-1",
+      "den": "3",
+      "expected": "0"
+    },
+    {
+      "num": "2",
+      "den": "3",
+      "expected": "1"
+    },
+    {
+      "num": "-2",
+      "den": "3",
+      "expected": "-1"
+    },
+    {
+      "num": "0",
+      "den": "1",
+      "expected": "0"
+    },
+    {
+      "num": "10",
+      "den": "1",
+      "expected": "10"
+    },
+    {
+      "num": "-10",
+      "den": "1",
+      "expected": "-10"
+    },
+    {
+      "num": "9",
+      "den": "4",
+      "expected": "2"
+    },
+    {
+      "num": "-9",
+      "den": "4",
+      "expected": "-2"
+    },
+    {
+      "num": "11",
+      "den": "4",
+      "expected": "3"
+    },
+    {
+      "num": "25",
+      "den": "10",
+      "expected": "2"
+    },
+    {
+      "num": "35",
+      "den": "10",
+      "expected": "4"
+    },
+    {
+      "num": "12345678901234567891",
+      "den": "2",
+      "expected": "6172839450617283946"
+    },
+    {
+      "num": "-12345678901234567891",
+      "den": "2",
+      "expected": "-6172839450617283946"
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "name": "budmon",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.6",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:coverage && pnpm test:int",
+    "test": "vitest run --project=!server-int",
+    "test:int": "vitest run --project=server-int",
+    "lint": "eslint . && pnpm lint:css && pnpm lint:catalogs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc -p tsconfig.json && tsc -p apps/server/tsconfig.json && tsc -p apps/web/tsconfig.json",
+    "test:coverage": "vitest run --project=shared --coverage",
+    "dev": "pnpm --filter @budmon/server dev",
+    "db:reset": "pnpm --filter @budmon/server db:reset",
+    "db:seed": "pnpm --filter @budmon/server db:seed",
+    "db:migrate": "pnpm --filter @budmon/server db:migrate",
+    "db:release-migration": "pnpm --filter @budmon/server db:release-migration",
+    "db:pending-report": "pnpm --filter @budmon/server db:pending-report",
+    "db:check-migrations": "pnpm --filter @budmon/server db:check-migrations",
+    "db:check-risky": "pnpm --filter @budmon/server db:check-risky",
+    "test:bats": "bash infra/local/test/setup-bats.sh && .tools/bats/bats-core/bin/bats infra/local/test",
+    "test:infra": "bash infra/local/test/run-integration.sh",
+    "contract:openapi": "pnpm --filter @budmon/contract contract:openapi",
+    "lint:css": "stylelint \"apps/web/src/**/*.css\"",
+    "lint:catalogs": "pnpm --filter @budmon/tools-ci lint:catalogs",
+    "test:e2e": "pnpm --filter @budmon/web test:e2e",
+    "check:all": "pnpm check && pnpm test:e2e && cd apps/android && ./gradlew check"
+  },
+  "devDependencies": {
+    "@budmon/config": "workspace:*",
+    "@budmon/shared": "workspace:*",
+    "@budmon/test-support": "workspace:*",
+    "@budmon/tools-ci": "workspace:*",
+    "@types/node": "24.19.1",
+    "@vitest/coverage-v8": "5.0.3",
+    "eslint": "10.12.0",
+    "prettier": "3.9.9",
+    "stylelint": "17.16.0",
+    "stylelint-use-logical": "2.1.3",
+    "typescript": "5.9.3",
+    "vitest": "5.0.3",
+    "yaml": "2.9.1"
+  }
+}

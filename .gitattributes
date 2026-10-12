@@ -1,0 +1,21 @@
+# Line endings (HLD D-29: the owner's laptop runs Windows; scripts run in WSL2 and containers).
+* text=auto eol=lf
+
+# Shell scripts stay LF on every checkout, or bash fails on "\r".
+*.sh text eol=lf
+*.bash text eol=lf
+*.bats text eol=lf
+gradlew text eol=lf
+infra/local/budmon-local text eol=lf
+
+# Windows-only scripts.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files: no line-ending conversion and no textual diff.
+*.png binary
+*.jpg binary
+*.jar binary
+*.keystore binary
+*.dump binary
