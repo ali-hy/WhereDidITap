@@ -28,6 +28,10 @@ main() {
     *) usage ;;
   esac
   [[ "$pr" =~ ^[0-9]+$ ]] || usage
+  # A-382: in CI the push needs the token; fail before any check rather than half-run.
+  if [ -n "${CI:-}" ] && [ -z "${GH_TOKEN:-}" ]; then
+    fail "GH_TOKEN missing"
+  fi
 
   local view state head base head_oid merge_oid
   view="$(gh pr view "$pr" --json state,headRefName,baseRefName,headRefOid,mergeCommit)"
@@ -92,7 +96,8 @@ main() {
   fi
 
   git tag "$tag" "$commit"
-  # A-380: the token reaches git only for this push, as a one-off header.
+  # A-380: the token reaches git only for this push, as a one-off header. A-382: outside CI
+  # without a token, the owner's own git credentials push.
   if [ -n "${GH_TOKEN:-}" ]; then
     local auth
     auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"

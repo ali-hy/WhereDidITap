@@ -76,6 +76,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, WEB_DIR, "VITE_");
   const pseudo = (process.env["VITE_PSEUDO_LOCALES"] ?? env["VITE_PSEUDO_LOCALES"]) === "1";
   const fixtures = (process.env["VITE_FIXTURES"] ?? env["VITE_FIXTURES"]) === "1";
+  const e2eApi = `http://127.0.0.1:${process.env["E2E_API_PORT"] ?? "8787"}`;
   return {
     plugins: [
       solid(),
@@ -84,11 +85,11 @@ export default defineConfig(({ mode }) => {
       budmonFixtures(fixtures),
       budmonVersion(),
     ],
-    // F-222 (A-329): `vite preview` in e2e:serve proxies the in-process API.
+    // F-222 (A-329): `vite preview` in e2e:serve proxies the in-process API (A-395: its port).
     preview: {
       proxy: {
-        "^/api(/|$)": { target: "http://127.0.0.1:8787", changeOrigin: false },
-        "^/dev/objects(/|$)": { target: "http://127.0.0.1:8787", changeOrigin: false },
+        "^/api(/|$)": { target: e2eApi, changeOrigin: false },
+        "^/dev/objects(/|$)": { target: e2eApi, changeOrigin: false },
       },
     },
     server: {

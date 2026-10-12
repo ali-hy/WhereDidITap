@@ -24,8 +24,19 @@ import { POSTGRES_IMAGE } from "../test/setup/postgresImage.js";
 import { POSTGRES_COMMAND } from "../test/support/postgres.js";
 
 const API_HOST = "127.0.0.1";
-const API_PORT = 8787;
-const PREVIEW_PORT = 4173;
+/** A-395: a port from the environment, or the default; anything but 1 to 65535 is an error. */
+function portFrom(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const port = Number(raw);
+  if (!/^[0-9]+$/.test(raw) || port < 1 || port > 65535) {
+    throw new Error(`${name} must be a port number`);
+  }
+  return port;
+}
+
+const API_PORT = portFrom("E2E_API_PORT", 8787);
+const PREVIEW_PORT = portFrom("E2E_WEB_PORT", 4173);
 const DATABASE = "budmon";
 
 const secret = (bytes: number) => randomBytes(bytes).toString("base64");
@@ -175,7 +186,12 @@ async function main(): Promise<() => Promise<void>> {
 
     // 3. The web app with fixtures and pseudo-locales, then vite preview (proxying the API).
     const outDir = path.join(dir, "web");
-    const buildEnv = { VITE_FIXTURES: "1", VITE_PSEUDO_LOCALES: "1" };
+    // A-395: vite.config.ts's preview proxy targets E2E_API_PORT.
+    const buildEnv = {
+      VITE_FIXTURES: "1",
+      VITE_PSEUDO_LOCALES: "1",
+      E2E_API_PORT: String(API_PORT),
+    };
     if ((await exited(vite(["build", "--outDir", outDir], buildEnv))) !== 0) {
       throw new Error("vite build failed");
     }
