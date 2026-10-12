@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # The Postgres image (F-170). Its base is the integration tests' POSTGRES_IMAGE exactly (A-61,
 # TP-15.30). Build context: this directory, plus the named context `sql` for the cluster-bootstrap
 # script (A-393):

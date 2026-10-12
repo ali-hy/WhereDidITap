@@ -79,10 +79,17 @@ build_images() {
   fi
   # shellcheck disable=SC2034 # read by cmd_upgrade_continue
   [ -e "${dir}/apps/server/QUEUE_UPGRADE" ] && QUEUE_UPGRADE=1
+  # A-423: the web image's Sentry DSN, read from site.env (never sourced).
+  local web_dsn
+  web_dsn="$(sed -n 's/^WEB_SENTRY_DSN=//p' "${BUDMON_HOME}/site.env" 2>/dev/null | tail -n 1)"
+  if [ -z "${web_dsn}" ] || [ "${web_dsn}" = "${PLACEHOLDER}" ]; then
+    die 13 "site.env: WEB_SENTRY_DSN not set"
+  fi
   count="$(git -C "${dir}" rev-list --count "${tag}")"
   docker build -f "${dir}/images/server/Dockerfile" -t "budmon/server:${tag}" "${dir}" ||
     die 13 "docker build of the server image failed"
   docker build -f "${dir}/images/web/Dockerfile" --build-arg "BUDMON_BUILD_NUMBER=${count}" \
+    --build-arg "VITE_SENTRY_DSN=${web_dsn}" \
     -t "budmon/web:${tag}" "${dir}" || die 13 "docker build of the web image failed"
   docker build --build-context "sql=${dir}/apps/server/src/platform/db/sql" \
     -t "budmon/postgres:${tag}" "${dir}/images/postgres" ||

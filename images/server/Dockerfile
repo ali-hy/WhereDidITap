@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # The server image (api, workers, migrate, cli): F-24's esbuild bundle with the server's own
 # production dependencies (A-43). Build context: the repository root (A-393).
 #   docker build -f images/server/Dockerfile -t budmon/server:<tag> .

@@ -219,8 +219,10 @@ cmd_restore() {
   # A-388: psql -Atc as budmon_admin in the Postgres container.
   db_size="$(compose_for "${current}" main exec -T -u postgres postgres \
     psql -X -U budmon_admin -d postgres -Atc "SELECT pg_database_size('budmon')" </dev/null |
-    tr -dc '0-9')"
-  need=$((3 * dump_size + ${db_size:-0}))
+    tr -d '[:space:]')" || db_size=""
+  # A-420: an unreadable size never counts as 0, which would under-estimate the space needed.
+  [[ "${db_size}" =~ ^[0-9]+$ ]] || die 23 "disk space check failed: can't read the database size"
+  need=$((3 * dump_size + db_size))
   have="$(free_bytes "${BUDMON_HOME}/pg")"
   if [ "$(stat -c %d -- "${BUDMON_HOME}/dumps")" != "$(stat -c %d -- "${BUDMON_HOME}/pg")" ]; then
     have_dumps="$(free_bytes "${BUDMON_HOME}/dumps")"

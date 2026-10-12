@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # The web image: the built SPA (F-221, version.json) served by Caddy with infra/local/Caddyfile
 # (F-175). Build context: the repository root (A-393).
 #   docker build -f images/web/Dockerfile --build-arg BUDMON_BUILD_NUMBER=<n> -t budmon/web:<tag> .

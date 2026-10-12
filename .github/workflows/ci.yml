@@ -214,6 +214,7 @@ jobs:
     permissions:
       contents: read
     outputs:
+      android: ${{ steps.diff.outputs.android }}
       infra: ${{ steps.diff.outputs.infra }}
       infra-lint: ${{ steps.diff.outputs.infra-lint }}
     steps:
@@ -227,10 +228,12 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: |
           git -c core.quotePath=false diff --no-renames --name-only "origin/${BASE_REF}...HEAD" > "$RUNNER_TEMP/changed.txt"
-          # A-391: the laptop stack's integration tests.
-          if grep -qE '^(infra/|images/|apps/server/)' "$RUNNER_TEMP/changed.txt"; then echo "infra=true" >> "$GITHUB_OUTPUT"; else echo "infra=false" >> "$GITHUB_OUTPUT"; fi
-          # §10.1: the static infrastructure checks.
-          if grep -qE '^(infra/|images/|\.github/)' "$RUNNER_TEMP/changed.txt"; then echo "infra-lint=true" >> "$GITHUB_OUTPUT"; else echo "infra-lint=false" >> "$GITHUB_OUTPUT"; fi
+          # The android job (A-351).
+          if grep -qE '^(apps/android/|packages/shared/test-vectors/|packages/contract/openapi\.json|\.github/workflows/ci\.yml)' "$RUNNER_TEMP/changed.txt"; then echo "android=true" >> "$GITHUB_OUTPUT"; else echo "android=false" >> "$GITHUB_OUTPUT"; fi
+          # The infra-int job (A-391).
+          if grep -qE '^(infra/|images/|apps/server/|\.dockerignore|\.github/workflows/ci\.yml)' "$RUNNER_TEMP/changed.txt"; then echo "infra=true" >> "$GITHUB_OUTPUT"; else echo "infra=false" >> "$GITHUB_OUTPUT"; fi
+          # The infra-lint job.
+          if grep -qE '^(infra/|images/|tools/ci/|\.github/)' "$RUNNER_TEMP/changed.txt"; then echo "infra-lint=true" >> "$GITHUB_OUTPUT"; else echo "infra-lint=false" >> "$GITHUB_OUTPUT"; fi
 
   infra-lint:
     name: infra-lint

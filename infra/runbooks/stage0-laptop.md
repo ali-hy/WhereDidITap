@@ -25,7 +25,8 @@ in the platform LLD (F-178); its commands print a one-line reason for every fail
 7. **External accounts:**
    - Backblaze B2: buckets `budmon-exports` and `budmon-erasure-log` (region `eu-central-003`), a
      read-only application key for the API and a read-write key for the worker;
-   - Sentry: a project `budmon-server` (its DSN) with e-mail alerts;
+   - Sentry: two projects, `budmon-server` and `budmon-web` (a DSN each; the install asks for
+     both), with e-mail alerts;
    - Google Cloud, in the project used below:
      - the Gmail OAuth client (web application) with the redirect
        `http://localhost:8080/api/v1/…` (Gmail is connected from the laptop's own browser);

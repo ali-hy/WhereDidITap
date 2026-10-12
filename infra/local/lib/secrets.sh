@@ -80,7 +80,7 @@ cmd_secret() {
 
 SITE_KEYS=(PUBLIC_ORIGIN GOOGLE_OAUTH_CLIENT_ID S3_ENDPOINT S3_REGION S3_BUCKET_EXPORTS
   S3_BUCKET_ERASURE_LOG SENTRY_DSN GOOGLE_SIGNIN_CLIENT_ID GOOGLE_SIGNIN_ANDROID_CLIENT_IDS
-  GOOGLE_SIGNIN_CALLBACK_ORIGIN GOOGLE_SIGNIN_APP_ORIGINS SMTP_URL EMAIL_FROM)
+  GOOGLE_SIGNIN_CALLBACK_ORIGIN GOOGLE_SIGNIN_APP_ORIGINS SMTP_URL EMAIL_FROM WEB_SENTRY_DSN)
 
 site_default() {
   case "$1" in
@@ -102,7 +102,7 @@ site_valid() {
   case "${key}" in
     PUBLIC_ORIGIN) [[ "${v}" =~ ^[a-z0-9-]+\.[a-z0-9-]+\.ts\.net$ ]] ;;
     GOOGLE_OAUTH_CLIENT_ID | GOOGLE_SIGNIN_CLIENT_ID) [[ "${v}" == *.apps.googleusercontent.com ]] ;;
-    S3_ENDPOINT | SENTRY_DSN) [[ "${v}" =~ ^https://[^[:space:]]+$ ]] ;;
+    S3_ENDPOINT | SENTRY_DSN | WEB_SENTRY_DSN) [[ "${v}" =~ ^https://[^[:space:]]+$ ]] ;;
     S3_REGION) [ -n "${v}" ] ;;
     S3_BUCKET_EXPORTS | S3_BUCKET_ERASURE_LOG) [[ "${v}" =~ ^[A-Za-z0-9-]{6,50}$ ]] ;;
     GOOGLE_SIGNIN_ANDROID_CLIENT_IDS)
