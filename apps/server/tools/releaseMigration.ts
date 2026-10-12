@@ -4,6 +4,7 @@
 // CLI (package scripts): `tsx tools/releaseMigration.ts generate <version>` prints the new file's
 // path (or nothing when there are no changes); `tsx tools/releaseMigration.ts pending` prints the
 // pending SQL. Both print the ambiguities on stderr.
+import { spawn } from "node:child_process";
 import {
   cpSync,
   mkdtempSync,
@@ -13,31 +14,65 @@ import {
   rmSync,
   symlinkSync,
 } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-/** The parts of node-pty's IPty that F-180 uses. */
-export interface PtyLike {
-  onData(listener: (data: string) => void): { dispose(): void };
-  onExit(listener: (e: { exitCode: number; signal?: number }) => void): { dispose(): void };
+/** A process running under a pseudo-terminal (A-377). */
+export interface PtyProcess {
+  onData(cb: (chunk: string) => void): void;
+  onExit(cb: (code: number) => void): void;
   write(data: string): void;
-  kill(signal?: string): void;
+  kill(): void;
 }
 
-/** node-pty's `spawn` (injected). */
+/** Runs a shell command under a pseudo-terminal of the given size (injected). */
 export type SpawnPty = (
-  file: string,
-  args: string[] | string,
-  options: {
-    cols?: number;
-    rows?: number;
-    cwd?: string;
-    env?: Record<string, string | undefined>;
-    name?: string;
-  },
-) => PtyLike;
+  command: string,
+  opts: { cwd: string; cols: number; rows: number },
+) => PtyProcess;
+
+/**
+ * A-377: util-linux `script` gives the command a real pty, so drizzle-kit's prompts work with no
+ * native module: `script -qfec "stty cols <c> rows <r>; <command>" /dev/null`.
+ */
+export const scriptPty: SpawnPty = (command, opts) => {
+  const child = spawn(
+    "script",
+    ["-qfec", `stty cols ${String(opts.cols)} rows ${String(opts.rows)}; ${command}`, "/dev/null"],
+    {
+      cwd: opts.cwd,
+      stdio: "pipe",
+      env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0", TERM: "xterm" },
+    },
+  );
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  const dataListeners: ((chunk: string) => void)[] = [];
+  const emit = (chunk: string) => {
+    for (const cb of dataListeners) cb(chunk);
+  };
+  child.stdout.on("data", emit);
+  child.stderr.on("data", emit);
+  // A write after the child has gone must not crash the caller.
+  child.stdin.on("error", () => undefined);
+  return {
+    onData: (cb) => {
+      dataListeners.push(cb);
+    },
+    onExit: (cb) => {
+      child.on("close", (code, signal) => {
+        cb(code ?? (signal === null ? 1 : 128));
+      });
+    },
+    write: (data) => {
+      child.stdin.write(data);
+    },
+    kill: () => {
+      child.kill("SIGTERM");
+    },
+  };
+};
 
 const VERSION = /^v\d+\.\d+\.\d+(-hotfix\.\d+)?$/;
 const QUESTION =
@@ -67,12 +102,11 @@ async function generate(
   /** Where the next prompt is looked for: after the last one answered. */
   let scanFrom = 0;
 
-  const pty = spawnPty("pnpm", ["exec", "drizzle-kit", "generate", "--name", name], {
+  // `name` is a validated version or "pending": no shell metacharacters.
+  const pty = spawnPty(`pnpm exec drizzle-kit generate --name ${name}`, {
+    cwd: dir,
     cols: 80,
     rows: 24,
-    cwd: dir,
-    env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
-    name: "xterm",
   });
 
   const exitCode = await new Promise<number>((resolve, reject) => {
@@ -93,7 +127,7 @@ async function generate(
       pty.write("\r");
       scanFrom = output.length;
     });
-    pty.onExit(({ exitCode: code }) => {
+    pty.onExit((code) => {
       clearTimeout(timer);
       resolve(code);
     });
@@ -112,7 +146,7 @@ async function generate(
 /** F-180: the release's migration file, generated in serverDir/drizzle. */
 export async function generateReleaseMigration(
   input: { version: string; serverDir: string; timeoutMs?: number },
-  deps: { spawnPty: SpawnPty },
+  deps: { spawnPty: SpawnPty } = { spawnPty: scriptPty },
 ): Promise<{ file: string | null; ambiguities: string[] }> {
   if (!VERSION.test(input.version)) {
     throw new RangeError("version must be vX.Y.Z or vX.Y.Z-hotfix.N");
@@ -131,7 +165,7 @@ export async function generateReleaseMigration(
  */
 export async function pendingSchemaReport(
   input: { serverDir: string; timeoutMs?: number },
-  deps: { spawnPty: SpawnPty },
+  deps: { spawnPty: SpawnPty } = { spawnPty: scriptPty },
 ): Promise<{ sql: string; ambiguities: string[] }> {
   const dir = mkdtempSync(path.join(tmpdir(), "budmon-pending-"));
   try {
@@ -158,19 +192,13 @@ export async function pendingSchemaReport(
 
 const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-/** node-pty's `spawn`, required on first use (so callers whose deps are stubs never load it). */
-export const nodePtySpawn: SpawnPty = (file, args, options) => {
-  const pty = createRequire(import.meta.url)("node-pty") as { spawn: SpawnPty };
-  return pty.spawn(file, args, options);
-};
-
 if (
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
 ) {
   const [command, version] = process.argv.slice(2);
   try {
-    const spawnPty = nodePtySpawn;
+    const spawnPty = scriptPty;
     if (command === "generate" && version !== undefined) {
       const result = await generateReleaseMigration(
         { version, serverDir: SERVER_DIR },

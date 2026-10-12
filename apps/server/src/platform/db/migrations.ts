@@ -29,7 +29,8 @@ export class JournalInvalidError extends Error {
   }
 }
 
-const JOURNAL_TAG = /^[0-9]{4}_[a-z0-9_]+$/;
+// A-376: release tags such as 0001_v0.1.0-hotfix.1 keep their dots and hyphens.
+const JOURNAL_TAG = /^[0-9]{4}_[a-z0-9][a-z0-9_.-]*$/;
 
 export function readJournal(
   migrationsFolder: string,

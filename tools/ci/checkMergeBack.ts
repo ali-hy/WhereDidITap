@@ -8,7 +8,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { nodePtySpawn, pendingSchemaReport } from "../../apps/server/tools/releaseMigration.js";
+import { scriptPty, pendingSchemaReport } from "../../apps/server/tools/releaseMigration.js";
 import {
   buildSchemaDatabase,
   startPostgresContainer,
@@ -67,10 +67,7 @@ export async function checkMergeBack(
   }
 
   // 2. None of the added statements is still in the pending report.
-  const report = await deps.pendingReport(
-    { serverDir: input.serverDir },
-    { spawnPty: nodePtySpawn },
-  );
+  const report = await deps.pendingReport({ serverDir: input.serverDir }, { spawnPty: scriptPty });
   const pending = normalise(report.sql);
   for (const file of input.hotfixMigrationFiles) {
     for (const statement of statements(readFileSync(inServerDir(input.serverDir, file), "utf8"))) {

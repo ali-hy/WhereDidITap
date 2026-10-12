@@ -85,12 +85,22 @@ main() {
   # Check (i) (F-182) on a checkout of the commit.
   git cat-file -e "${commit}^{commit}" 2>/dev/null || git fetch -q origin "$commit"
   git checkout -q --detach "$commit"
-  if ! pnpm install --frozen-lockfile || ! pnpm db:check-migrations; then
+  # A-380: the commit's code runs without the token.
+  if ! env -u GH_TOKEN -u GITHUB_TOKEN pnpm install --frozen-lockfile ||
+    ! env -u GH_TOKEN -u GITHUB_TOKEN pnpm db:check-migrations; then
     fail "check (i) failed on $commit"
   fi
 
   git tag "$tag" "$commit"
-  git push -q origin "refs/tags/$tag"
+  # A-380: the token reaches git only for this push, as a one-off header.
+  if [ -n "${GH_TOKEN:-}" ]; then
+    local auth
+    auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+    git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
+      push -q origin "refs/tags/$tag"
+  else
+    git push -q origin "refs/tags/$tag"
+  fi
   echo "tagRelease: pushed $tag on $commit"
 }
 

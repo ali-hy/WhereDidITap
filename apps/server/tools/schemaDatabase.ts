@@ -24,13 +24,6 @@ const PASSWORDS = Object.fromEntries(
   ROLES.map((role) => [role, randomBytes(24).toString("base64url")]),
 ) as Record<DbLoginRole, string>;
 
-/** The superuser URL with another database name. */
-export function databaseUrl(superuserUrl: string, name: string): string {
-  const url = new URL(superuserUrl);
-  url.pathname = `/${encodeURIComponent(name)}`;
-  return url.toString();
-}
-
 async function withSuperuser<T>(
   superuserUrl: string,
   fn: (client: pg.Client) => Promise<T>,
@@ -97,11 +90,15 @@ export async function buildSchemaDatabase(input: {
   }
 }
 
-/** A Postgres container from the pinned test image, for the CLIs (F-182, F-6b). */
-export async function startPostgresContainer(): Promise<{
+/** A started Postgres: its superuser URL, pg_dump inside its container (A-378), and stop. */
+export interface StartedPostgres {
   superuserUrl: string;
+  pgDump(database: string, args: readonly string[]): Promise<string>;
   stop(): Promise<void>;
-}> {
+}
+
+/** A Postgres container from the pinned test image, for the CLIs (F-182, F-6b). */
+export async function startPostgresContainer(): Promise<StartedPostgres> {
   const [{ PostgreSqlContainer }, { POSTGRES_IMAGE }] = await Promise.all([
     import("@testcontainers/postgresql"),
     import("../test/setup/postgresImage.js"),
@@ -109,6 +106,20 @@ export async function startPostgresContainer(): Promise<{
   const container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
   return {
     superuserUrl: container.getConnectionUri(),
+    // A-378: the container's own pg_dump, the same major version as the server.
+    pgDump: async (database, args) => {
+      const result = await container.exec([
+        "pg_dump",
+        "-U",
+        container.getUsername(),
+        ...args,
+        database,
+      ]);
+      if (result.exitCode !== 0) {
+        throw new Error(`pg_dump failed (exit ${String(result.exitCode)}): ${result.stderr}`);
+      }
+      return result.stdout;
+    },
     stop: async () => {
       await container.stop();
     },
