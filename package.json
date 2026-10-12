@@ -24,6 +24,8 @@
     "db:pending-report": "pnpm --filter @budmon/server db:pending-report",
     "db:check-migrations": "pnpm --filter @budmon/server db:check-migrations",
     "db:check-risky": "pnpm --filter @budmon/server db:check-risky",
+    "test:bats": "bash infra/local/test/setup-bats.sh && .tools/bats/bats-core/bin/bats infra/local/test",
+    "test:infra": "bash infra/local/test/run-integration.sh",
     "contract:openapi": "pnpm --filter @budmon/contract contract:openapi",
     "lint:css": "stylelint \"apps/web/src/**/*.css\"",
     "lint:catalogs": "pnpm --filter @budmon/tools-ci lint:catalogs",

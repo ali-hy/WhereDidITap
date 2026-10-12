@@ -196,6 +196,84 @@ jobs:
           mapfile -t added < <(git -C "$GITHUB_WORKSPACE" -c core.quotePath=false diff --no-renames --name-only --diff-filter=A origin/main...HEAD -- 'apps/server/drizzle/*.sql')
           ./node_modules/.bin/tsx checkMergeBack.ts "${args[@]}" "${added[@]}"
 
+  changes:
+    name: changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      infra: ${{ steps.diff.outputs.infra }}
+      infra-lint: ${{ steps.diff.outputs.infra-lint }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the base branch, for the three-dot diff
+      - name: Paths changed by the pull request
+        id: diff
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git -c core.quotePath=false diff --no-renames --name-only "origin/${BASE_REF}...HEAD" > "$RUNNER_TEMP/changed.txt"
+          # A-391: the laptop stack's integration tests.
+          if grep -qE '^(infra/|images/|apps/server/)' "$RUNNER_TEMP/changed.txt"; then echo "infra=true" >> "$GITHUB_OUTPUT"; else echo "infra=false" >> "$GITHUB_OUTPUT"; fi
+          # §10.1: the static infrastructure checks.
+          if grep -qE '^(infra/|images/|\.github/)' "$RUNNER_TEMP/changed.txt"; then echo "infra-lint=true" >> "$GITHUB_OUTPUT"; else echo "infra-lint=false" >> "$GITHUB_OUTPUT"; fi
+
+  infra-lint:
+    name: infra-lint
+    needs: changes
+    if: needs.changes.outputs.infra-lint == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - name: shellcheck
+        run: shellcheck -x infra/local/budmon-local infra/local/gcp-bootstrap.sh infra/local/lib/*.sh images/postgres/*.sh infra/local/test/setup-bats.sh tools/ci/*.sh
+      - name: bats (TP-15.20 to TP-15.29)
+        run: pnpm test:bats
+      - name: Compose files resolve (TP-15.16)
+        run: |
+          home="$RUNNER_TEMP/budmon-home"
+          mkdir -p "$home"
+          printf 'PUBLIC_ORIGIN=https://laptop.tailnet.ts.net\n' > "$home/site.env"
+          BUDMON_HOME="$home" BUDMON_TAG=ci docker compose --project-directory infra/local -f infra/local/compose.main.yaml -f infra/local/compose.capture.yaml --env-file infra/local/local.env config --quiet
+      - name: actionlint (A-367)
+        run: |
+          bash tools/ci/setup-actionlint.sh
+          .tools/actionlint/actionlint
+
+  infra-int:
+    name: infra-int
+    needs: changes
+    if: needs.changes.outputs.infra == 'true' || startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: The three images (A-393)
+        run: |
+          docker build -f images/server/Dockerfile -t budmon/server:tp15 .
+          docker build -f images/web/Dockerfile -t budmon/web:tp15 .
+          docker build --build-context sql=apps/server/src/platform/db/sql -t budmon/postgres:tp15 images/postgres
+      - name: The laptop stack's integration tests (A-391)
+        run: pnpm test:infra
+
   dev-smoke:
     name: dev-smoke
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

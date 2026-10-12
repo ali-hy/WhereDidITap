@@ -100,5 +100,7 @@ export async function initLocalSecrets(
   }
   // The marker last, so an interrupted run is visible as "secrets exist, not initialised".
   await deps.writeFile(path.join(secrets, ".initialised"), "", 0o600);
+  // A-405: relative to secrets/, in write order, ending with the marker.
+  files.push(".initialised");
   return { files };
 }

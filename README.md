@@ -105,4 +105,6 @@ report in other pull requests' job summary. Tags are pushed by `tag.yml` (`tools
 Stage 0 runs the whole stack on the owner's laptop; stage 1 and 2 move it to hosted
 infrastructure without code changes. The stage model, and the environments for development and CI
 are described in the
-[platform HLD](docs/design/platform/hld.md). Only development and CI exist so far.
+[platform HLD](docs/design/platform/hld.md). The stage-0 laptop installation and its operation
+(`infra/local/budmon-local`) are in the
+[stage-0 runbook](infra/runbooks/stage0-laptop.md).
