@@ -1,8 +1,8 @@
 # §2.4 pins for the Android app (S-13). Kotlin and kotlinx-serialization come from S-4's spike (A-129).
 [versions]
-agp = "8.13.0"
+agp = "9.4.0"
 kotlin = "2.2.20"
-ksp = "2.2.20-2.0.2"
+ksp = "2.3.12"
 kotlinxSerialization = "1.9.0"
 coroutines = "1.10.2"
 composeBom = "2025.09.00"
@@ -22,7 +22,7 @@ sentry = "8.59.0"
 openapiGenerator = "7.14.0"
 ktlintGradle = "13.1.0"
 ktlint = "1.8.0"
-lint = "31.13.0"
+lint = "32.4.0"
 junit = "4.13.2"
 robolectric = "4.17"
 mockk = "1.14.11"
@@ -79,7 +79,6 @@ androidx-test-runner = { module = "androidx.test:runner", version.ref = "android
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
-kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
