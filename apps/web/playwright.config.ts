@@ -6,11 +6,13 @@
 // candidates (selected with --project).
 import { defineConfig, devices } from "@playwright/test";
 
-// A-329: F-222 serves vite preview on 127.0.0.1:4173.
+// A-329: F-222 serves vite preview on 127.0.0.1:4173; A-395: E2E_WEB_PORT overrides the port
+// (E2E_API_PORT the API's, read by F-222), so parallel runs don't collide.
 // Tests tagged @perf (TP-12.4) run only in the perf project (§10.1: release candidates).
 const PERF = /@perf/;
 
-const BASE_URL = process.env["E2E_BASE_URL"] ?? "http://127.0.0.1:4173";
+const BASE_URL =
+  process.env["E2E_BASE_URL"] ?? `http://127.0.0.1:${process.env["E2E_WEB_PORT"] ?? "4173"}`;
 
 export default defineConfig({
   testDir: "e2e",

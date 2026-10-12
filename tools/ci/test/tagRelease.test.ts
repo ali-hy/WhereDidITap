@@ -119,11 +119,17 @@ function fixture(): Fixture {
   return { work, origin, git, commits: { release, merge, hotfix1, head2, headOnBase } };
 }
 
+/** The environment without CI or tokens, so each case sets exactly what it tests (A-382). */
+function baseEnv(): Record<string, string | undefined> {
+  const drop = new Set(["CI", "GITHUB_ACTIONS", "GH_TOKEN", "GITHUB_TOKEN"]);
+  return Object.fromEntries(Object.entries(process.env).filter(([key]) => !drop.has(key)));
+}
+
 function run(
   f: Fixture,
   mode: string,
   pr: Record<string, unknown>,
-  opts: { checksExit?: number; checkIExit?: number } = {},
+  opts: { checksExit?: number; checkIExit?: number; env?: Record<string, string> } = {},
 ) {
   const prJson = path.join(f.work, "..", "pr.json");
   const log = path.join(f.work, "..", "stub.log");
@@ -133,13 +139,14 @@ function run(
     cwd: f.work,
     encoding: "utf8",
     env: {
-      ...process.env,
+      ...baseEnv(),
       ...GIT_ENV,
       PATH: `${stubs}:${process.env["PATH"] ?? ""}`,
       PR_JSON: prJson,
       STUB_LOG: log,
       GH_CHECKS_EXIT: String(opts.checksExit ?? 0),
       CHECK_I_EXIT: String(opts.checkIExit ?? 0),
+      ...opts.env,
     },
   });
   const remoteTags = execFileSync("git", ["ls-remote", "--tags", f.origin], { encoding: "utf8" });
@@ -298,7 +305,7 @@ describe("TP-14.10 (A-365): tagRelease.sh modes", () => {
     const r = spawnSync("bash", [SCRIPT, "deploy", "12"], {
       cwd: f.work,
       encoding: "utf8",
-      env: { ...process.env, ...GIT_ENV, PATH: `${stubs}:${process.env["PATH"] ?? ""}` },
+      env: { ...baseEnv(), ...GIT_ENV, PATH: `${stubs}:${process.env["PATH"] ?? ""}` },
     });
 
     expect(r.status, `${r.stdout}${r.stderr}`).toBe(64);
@@ -306,5 +313,28 @@ describe("TP-14.10 (A-365): tagRelease.sh modes", () => {
     expect(execFileSync("git", ["ls-remote", "--tags", f.origin], { encoding: "utf8" })).toBe(
       before,
     );
+  }, 60_000);
+});
+
+// A-382: an empty GH_TOKEN is allowed only outside CI.
+describe("TP-14.10 (A-382): GH_TOKEN and CI", () => {
+  it("TP-14.10: with CI set and an empty GH_TOKEN: exit 1, GH_TOKEN missing, before any check", () => {
+    const f = fixture();
+
+    const r = run(f, "release", releasePr(f), { env: { CI: "true", GH_TOKEN: "" } });
+
+    expect(r.status, r.output).toBe(1);
+    expect(r.output).toContain("GH_TOKEN missing");
+    expect(r.log).toBe("");
+    expect(r.remoteTag("v1.3.0")).toBeNull();
+  }, 60_000);
+
+  it("TP-14.10: without CI and with no GH_TOKEN: a plain push (no extraheader) of the tag", () => {
+    const f = fixture();
+
+    const r = run(f, "release", releasePr(f));
+
+    expect(r.status, r.output).toBe(0);
+    expect(r.remoteTag("v1.3.0")).toBe(f.commits.merge);
   }, 60_000);
 });
