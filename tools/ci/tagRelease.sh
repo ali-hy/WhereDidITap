@@ -68,6 +68,10 @@ main() {
     if ! gh pr checks "$pr" --required >/dev/null; then
       fail "checks not green"
     fi
+    # N-3: the checks are the head's; a push since the first read would tag an unchecked commit.
+    local head_now
+    head_now="$(gh pr view "$pr" --json headRefOid --jq .headRefOid)"
+    [ "$head_now" = "$head_oid" ] || fail "head changed during the checks: $head_oid -> $head_now"
     commit="$head_oid"
     git cat-file -e "${commit}^{commit}" 2>/dev/null || git fetch -q origin "$commit"
     local required=("$version")

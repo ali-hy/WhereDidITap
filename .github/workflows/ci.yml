@@ -174,7 +174,10 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
-          mapfile -t added < <(git -c core.quotePath=false diff --no-renames --name-only --diff-filter=A "origin/${BASE_REF}...HEAD" -- 'apps/server/drizzle/*.sql')
+          # A failing diff stops the step (bash -e); a process substitution would hide it.
+          list="$(git -c core.quotePath=false diff --no-renames --name-only --diff-filter=A "origin/${BASE_REF}...HEAD" -- 'apps/server/drizzle/*.sql')"
+          added=()
+          if [ -n "$list" ]; then mapfile -t added <<<"$list"; fi
           if [ "${#added[@]}" -eq 0 ]; then
             echo "No added migrations."
           else
@@ -186,6 +189,7 @@ jobs:
       - name: Merge-back check (F-6b)
         if: ${{ contains(github.event.pull_request.labels.*.name, 'hotfix-merge-back') || contains(github.event.pull_request.labels.*.name, 'infra-merge-back') }}
         env:
+          BASE_REF: ${{ github.base_ref }}
           HOTFIX_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'hotfix-merge-back') }}
           INFRA_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'infra-merge-back') }}
         working-directory: tools/ci # A-28
@@ -193,7 +197,10 @@ jobs:
           args=()
           if [ "$HOTFIX_LABEL" = "true" ]; then args+=(--kind hotfix); fi
           if [ "$INFRA_LABEL" = "true" ]; then args+=(--kind infra); fi
-          mapfile -t added < <(git -C "$GITHUB_WORKSPACE" -c core.quotePath=false diff --no-renames --name-only --diff-filter=A origin/main...HEAD -- 'apps/server/drizzle/*.sql')
+          # A failing diff stops the step (bash -e); a process substitution would hide it.
+          list="$(git -C "$GITHUB_WORKSPACE" -c core.quotePath=false diff --no-renames --name-only --diff-filter=A "origin/${BASE_REF}...HEAD" -- 'apps/server/drizzle/*.sql')"
+          added=()
+          if [ -n "$list" ]; then mapfile -t added <<<"$list"; fi
           ./node_modules/.bin/tsx checkMergeBack.ts "${args[@]}" "${added[@]}"
 
   changes:

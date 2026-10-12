@@ -56,13 +56,25 @@ export const scriptPty: SpawnPty = (command, opts) => {
   child.stderr.on("data", emit);
   // A write after the child has gone must not crash the caller.
   child.stdin.on("error", () => undefined);
+  // N-2: a spawn failure is reported through onExit (127), never thrown as an unhandled event.
+  child.on("error", () => undefined);
   return {
     onData: (cb) => {
       dataListeners.push(cb);
     },
     onExit: (cb) => {
+      let reported = false;
+      const report = (code: number) => {
+        if (reported) return;
+        reported = true;
+        cb(code);
+      };
       child.on("close", (code, signal) => {
-        cb(code ?? (signal === null ? 1 : 128));
+        report(code ?? (signal === null ? 1 : 128));
+      });
+      // N-2: `script` missing or not executable: the shell's "command not found" status.
+      child.on("error", () => {
+        report(127);
       });
     },
     write: (data) => {

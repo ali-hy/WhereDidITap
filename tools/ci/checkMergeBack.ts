@@ -17,6 +17,17 @@ import {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const BREAKPOINT = "--> statement-breakpoint";
 
+/** An error's message and its causes' messages. */
+function describeError(error: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current instanceof Error; depth += 1) {
+    parts.push(current.message);
+    current = current.cause;
+  }
+  return parts.length > 0 ? parts.join(": ") : String(error);
+}
+
 const normalise = (sql: string) => sql.replace(/\s+/g, " ").trim();
 
 /** The non-empty statements of a migration, whitespace-normalised. */
@@ -58,10 +69,12 @@ export async function checkMergeBack(
       mode: "migrate",
       migrationsFolder: path.join(input.serverDir, "drizzle"),
     });
-  } catch {
+  } catch (error) {
     const files =
       input.hotfixMigrationFiles.length > 0 ? input.hotfixMigrationFiles.join(", ") : "drizzle/";
     problems.push(`migrations don't apply: ${files}`);
+    // N-1: the cause (Postgres's message for the failing statement) for whoever reads the log.
+    process.stderr.write(`checkMergeBack: ${describeError(error)}\n`);
   } finally {
     await pg.stop();
   }
