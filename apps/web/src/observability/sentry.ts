@@ -1,9 +1,17 @@
 // F-217: web Sentry with F-35's allowlist: no PII, no Replay, no browser tracing.
+import { ORPCError } from "@orpc/client";
 import * as Sentry from "@sentry/solid";
 
 type Json = Record<string, unknown>;
 
 const ERROR_KEY = /^[A-Z][A-Z0-9_]{1,63}$/;
+
+/** B-5: the error key of a defined oRPC error (the contract's), else undefined. */
+function definedErrorKey(exception: unknown): string | undefined {
+  if (!(exception instanceof ORPCError)) return undefined;
+  const e = exception as ORPCError<string, unknown>;
+  return e.defined && ERROR_KEY.test(e.code) ? e.code : undefined;
+}
 const FRAME_FUNCTION = /^(?:(?:async|new) )?[A-Za-z_$][A-Za-z0-9_$.<>[\]]{0,99}$/;
 const FRAME_FILENAME = /^[A-Za-z0-9_@./<>:-]{1,200}$/;
 const HEX32 = /^[0-9a-f]{32}$/;
@@ -58,8 +66,13 @@ export function scrubWebBreadcrumb(b: Json): Json | null {
   return out;
 }
 
-/** F-35's allowlist, plus the request URL and transaction without their queries. */
-export function scrubWebEvent(e: Json): Json | null {
+/**
+ * F-35's allowlist, plus the request URL and transaction without their queries. An exception's
+ * value is never its message: the error key of a defined oRPC error (from the hint's original
+ * exception, B-5), else the class name.
+ */
+export function scrubWebEvent(e: Json, hint?: { originalException?: unknown }): Json | null {
+  const key = definedErrorKey(hint?.originalException);
   const out: Json = {};
   for (const k of ["event_id", "timestamp", "platform", "level", "release", "environment"]) {
     if (e[k] !== undefined) out[k] = e[k];
@@ -71,14 +84,14 @@ export function scrubWebEvent(e: Json): Json | null {
     if (url !== undefined) out["request"] = { url: stripToPath(url) };
   }
   if (isObject(e["exception"]) && Array.isArray(e["exception"]["values"])) {
+    const values = (e["exception"]["values"] as unknown[]).filter(isObject);
     out["exception"] = {
-      values: (e["exception"]["values"] as unknown[]).filter(isObject).map((v) => {
+      values: values.map((v, i) => {
         const type = str(v["type"]) ?? "Error";
-        const value = str(v["value"]);
-        // Never the message: the error key when it is one, else the class name.
+        // Sentry lists the original exception last; chained causes before it.
         const entry: Json = {
           type,
-          value: value !== undefined && ERROR_KEY.test(value) ? value : type,
+          value: i === values.length - 1 && key !== undefined ? key : type,
         };
         const stacktrace = scrubFrames(v["stacktrace"]);
         if (stacktrace !== undefined) entry["stacktrace"] = stacktrace;
@@ -139,7 +152,8 @@ export function initWebSentry(cfg: { dsn?: string; release: string; environment:
     // The defaults only: no browser tracing (no client spans, D-24) and no Replay.
     integrations: (defaults: { name: string }[]) =>
       defaults.filter((i) => !/replay|tracing/i.test(i.name)),
-    beforeSend: (event: unknown) => scrubWebEvent(event as Json),
+    beforeSend: (event: unknown, hint: { originalException?: unknown } | undefined) =>
+      scrubWebEvent(event as Json, hint),
     beforeBreadcrumb: (crumb: unknown) => scrubWebBreadcrumb(crumb as Json),
   };
   Sentry.init(options as unknown as Parameters<typeof Sentry.init>[0]);

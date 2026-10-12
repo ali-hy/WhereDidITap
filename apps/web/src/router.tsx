@@ -7,7 +7,7 @@ import {
   type AnyRoute,
   type ErrorComponentProps,
 } from "@tanstack/solid-router";
-import type { JSX } from "solid-js";
+import { createSignal, type JSX } from "solid-js";
 import { toAppError } from "./api/errors.js";
 import { HomePlaceholder } from "./pages/HomePlaceholder.js";
 import { NotFound } from "./pages/NotFound.js";
@@ -26,13 +26,24 @@ function RootLayout(): JSX.Element {
 }
 
 export async function createAppRouter() {
+  // A-397: whether the last Try again failed. It lives here, above the error component, which the
+  // router remounts after invalidate(); cleared on success and on a pathname change.
+  const [retryFailed, setRetryFailed] = createSignal(false);
   // Assigned below; the error component only runs once the router exists.
-  let invalidate: () => Promise<void> = () => Promise.resolve();
+  let retry: () => Promise<void> = () => Promise.resolve();
   const rootRoute = createRootRoute({
     component: RootLayout,
-    errorComponent: (props: ErrorComponentProps) => (
-      <ErrorFallback error={toAppError(props.error)} onRetry={() => invalidate()} />
-    ),
+    errorComponent: (props: ErrorComponentProps) => {
+      const error = toAppError(props.error);
+      return (
+        <ErrorFallback
+          error={error}
+          {...(error.requestId === undefined ? {} : { requestId: error.requestId })}
+          stillFailing={retryFailed()}
+          onRetry={() => retry()}
+        />
+      );
+    },
     notFoundComponent: NotFound,
   });
   const indexRoute = createRoute({
@@ -49,16 +60,25 @@ export async function createAppRouter() {
   }
 
   const router = createRouter({ routeTree: rootRoute.addChildren(children) });
-  invalidate = () => router.invalidate();
-
-  // A-333: after a client-side navigation (never the first load), focus the new page's h1 and
-  // announce its text.
-  let firstLoad = true;
-  router.subscribe("onResolved", () => {
-    if (firstLoad) {
-      firstLoad = false;
-      return;
+  // A-397: Try again re-runs the loaders and rejects while any match is still in error.
+  retry = async () => {
+    await router.invalidate();
+    if (router.state.matches.some((m) => m.status === "error")) {
+      setRetryFailed(true);
+      throw new Error("still failing");
     }
+    setRetryFailed(false);
+  };
+
+  // A-333, A-402: after a client-side navigation to another pathname (never the first load, and
+  // never for search, hash or invalidate()), focus the new page's h1 and announce its text.
+  let pathname: string | undefined;
+  router.subscribe("onResolved", (event) => {
+    const next = event.toLocation.pathname;
+    const previous = pathname;
+    pathname = next;
+    if (previous === undefined || previous === next) return;
+    setRetryFailed(false);
     setTimeout(() => {
       const h1 = document.querySelector<HTMLElement>("main h1");
       if (h1 === null) return;

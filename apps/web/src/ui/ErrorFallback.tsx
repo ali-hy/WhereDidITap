@@ -4,6 +4,7 @@ import { createSignal, Show, type JSX } from "solid-js";
 import type { AppError } from "../api/errors.js";
 import { messages } from "../i18n/messages.js";
 import { useI18n } from "../i18n/useI18n.js";
+import { Icon } from "./icons/Icon.js";
 
 /** Marks where the reference goes inside the translated sentence (private use, never shown). */
 const SLOT = "";
@@ -12,6 +13,8 @@ export function ErrorFallback(props: {
   error: AppError;
   requestId?: string;
   onRetry: () => Promise<void>;
+  /** A-397: the root layout's retryFailed, which survives the fallback's remount. */
+  stillFailing?: boolean;
 }): JSX.Element {
   const { t } = useI18n();
   const [busy, setBusy] = createSignal(false);
@@ -57,13 +60,18 @@ export function ErrorFallback(props: {
           disabled={busy()}
           onClick={() => void retry()}
         >
+          {/* B-6: a decorative spinner while the retry runs (§8.1 S-2). */}
+          <Show when={busy()}>
+            <Icon name="refresh" class="me-2 inline animate-spin" />
+          </Show>
           {t(messages.errorFallbackRetry)}
         </button>
         <a href="/">{t(messages.errorFallbackHome)}</a>
       </div>
-      <Show when={stillFailing()}>
-        <p role="status">{t(messages.errorFallbackStillFailing)}</p>
-      </Show>
+      {/* A-400: the status element is always rendered and filled when the retry failed. */}
+      <p role="status">
+        {stillFailing() || props.stillFailing === true ? t(messages.errorFallbackStillFailing) : ""}
+      </p>
     </section>
   );
 }

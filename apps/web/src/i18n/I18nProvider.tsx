@@ -13,7 +13,8 @@ import {
   resolveLocale,
   type Temporal,
 } from "@budmon/shared";
-import { createSignal, onMount, type JSX } from "solid-js";
+import { batch, createSignal, onMount, type JSX } from "solid-js";
+import { APP_NAME } from "../app/brand.js";
 import en from "./messages/en.json";
 import { I18nContext, type I18n } from "./useI18n.js";
 
@@ -84,8 +85,11 @@ export function I18nProvider(props: { initialLocale: string; children: JSX.Eleme
     const next = resolveLocale(requested, supportedLocales(), "en");
     const messages = await loadCatalog(next);
     if (request !== latestRequest) return;
-    setIntl(intlFor(next, messages));
-    setLocaleSignal(next);
+    // N-2: one update, so nothing reads the new locale with the old messages.
+    batch(() => {
+      setIntl(intlFor(next, messages));
+      setLocaleSignal(next);
+    });
     document.documentElement.lang = next;
     document.documentElement.dir = directionOf(next);
   };
@@ -99,10 +103,11 @@ export function I18nProvider(props: { initialLocale: string; children: JSX.Eleme
   const i18n: I18n = {
     locale,
     dir,
+    // A-401: every call gets appName, isolated like any simple argument.
     t: (d, v) =>
       intl().formatMessage(
         d,
-        v === undefined ? undefined : (isolateNamedArguments(simpleNames(d), v) as FormatValues),
+        isolateNamedArguments(simpleNames(d), { appName: APP_NAME, ...v }) as FormatValues,
       ) as string,
     formatMoney: (m, minorUnits) =>
       formatMoneyIn(m, { locale: intlLocaleOf(locale()), minorUnits }),

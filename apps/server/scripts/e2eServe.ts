@@ -35,20 +35,57 @@ function portFrom(name: string, fallback: number): number {
   return port;
 }
 
-const API_PORT = portFrom("E2E_API_PORT", 8787);
-const PREVIEW_PORT = portFrom("E2E_WEB_PORT", 4173);
 const DATABASE = "budmon";
 
 const secret = (bytes: number) => randomBytes(bytes).toString("base64");
 const keyRing = () => JSON.stringify({ current: "k1", keys: { k1: secret(32) } });
 
-/** Runs `pnpm --filter @budmon/web exec vite <args>`; resolves when it exits 0. */
+/** N-6: what pnpm and Vite need from the caller's environment; nothing else is passed on. */
+const CHILD_ENV_KEYS = [
+  "PATH",
+  "HOME",
+  "TMPDIR",
+  "LANG",
+  "LC_ALL",
+  "CI",
+  "COREPACK_HOME",
+  "PNPM_HOME",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+];
+
+/** Runs `pnpm --filter @budmon/web exec vite <args>` with only the listed environment. */
 function vite(args: readonly string[], env: Record<string, string>): ChildProcess {
+  const base: Record<string, string> = {};
+  for (const key of CHILD_ENV_KEYS) {
+    const value = process.env[key];
+    if (value !== undefined) base[key] = value;
+  }
   return spawn("pnpm", ["--filter", "@budmon/web", "exec", "vite", ...args], {
     cwd: path.join(serverRoot(), "../.."),
-    env: { ...process.env, ...env },
+    env: { ...base, ...env },
     stdio: "inherit",
   });
+}
+
+/** B-8: resolves once `url` answers; rejects if `child` exits first or `timeoutMs` passes. */
+async function waitForUrl(url: string, child: ChildProcess, timeoutMs: number): Promise<void> {
+  const state = { exited: false };
+  child.once("exit", () => {
+    state.exited = true;
+  });
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (state.exited) throw new Error("vite preview exited during start-up");
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(2_000) });
+      if (res.ok) return;
+    } catch {
+      // Not listening yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error("vite preview didn't answer in time");
 }
 
 /** The configuration, or the problems on stderr and a thrown error. */
@@ -68,15 +105,27 @@ function exited(child: ChildProcess): Promise<number> {
   });
 }
 
-async function main(): Promise<() => Promise<void>> {
-  const stops: (() => Promise<void>)[] = [];
-  const stopAll = async () => {
+/** Everything started so far, stopped in reverse order (also by SIGTERM/SIGINT during start-up). */
+const stops: (() => Promise<void>)[] = [];
+let stopping: Promise<void> | undefined;
+const stopAll = (): Promise<void> => {
+  stopping ??= (async () => {
     for (const stop of stops.reverse()) await stop().catch(() => undefined);
-  };
-  try {
-    // 1. Postgres, the schema (push) and the seeders.
+  })();
+  return stopping;
+};
+
+async function main(): Promise<void> {
+  // A-395: inside the try below, so a bad port is reported like any start-up failure.
+  const API_PORT = portFrom("E2E_API_PORT", 8787);
+  const PREVIEW_PORT = portFrom("E2E_WEB_PORT", 4173);
+  {
+    // 1. Postgres, the schema (push) and the seeders. B-7: a random superuser and password.
+    // (Testcontainers 12 has no option to publish the port on loopback only.)
     const container: StartedPostgreSqlContainer = await new PostgreSqlContainer(POSTGRES_IMAGE)
       .withCommand(POSTGRES_COMMAND)
+      .withUsername("budmon_e2e_su")
+      .withPassword(randomBytes(24).toString("base64url"))
       .start();
     stops.push(async () => {
       await container.stop();
@@ -208,28 +257,25 @@ async function main(): Promise<() => Promise<void>> {
       ],
       buildEnv,
     );
+    const previewExit = exited(preview);
     stops.push(async () => {
       preview.kill("SIGTERM");
-      await exited(preview);
+      await previewExit;
     });
-    return stopAll;
-  } catch (error) {
-    await stopAll();
-    throw error;
+    await waitForUrl(`http://127.0.0.1:${String(PREVIEW_PORT)}/`, preview, 120_000);
   }
 }
 
+// B-8: the handlers come first, so a signal during start-up stops what has started.
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.on(signal, () => {
+    void stopAll().then(() => process.exit(0));
+  });
+}
 try {
-  const stop = await main();
-  let stopping = false;
-  for (const signal of ["SIGTERM", "SIGINT"] as const) {
-    process.on(signal, () => {
-      if (stopping) return;
-      stopping = true;
-      void stop().then(() => process.exit(0));
-    });
-  }
+  await main();
 } catch (error) {
   process.stderr.write(`${failureLine("e2e:serve", error)}\n`);
+  await stopAll();
   process.exit(1);
 }

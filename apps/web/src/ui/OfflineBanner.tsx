@@ -18,8 +18,9 @@ export function OfflineBanner(): JSX.Element {
     setState("offline");
   };
   const online = () => {
-    clearTimeout(timer);
     if (state() !== "offline") return;
+    // N-3: only a real back-online transition restarts the timer.
+    clearTimeout(timer);
     setState("back");
     timer = setTimeout(() => setState("hidden"), BACK_ONLINE_MS);
   };

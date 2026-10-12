@@ -67,21 +67,50 @@ const VALIDATION: Readonly<Record<string, MessageDescriptor>> = {
   unrecognized_keys: messages.validationUnrecognizedKeys,
 };
 
-/** Field issues go to their fields; the summary holds the form message and unmapped issues. */
+/**
+ * Field issues go to their fields (A-399). When every issue names a field there's no summary and
+ * the first invalid field in DOM order takes focus; otherwise the summary (the form message plus
+ * the unmapped issues) appears and takes focus.
+ */
 export function applyServerIssues(
   issues: readonly Issue[],
   fields: Readonly<Record<string, { id: string; label: string; setError: (m: string) => void }>>,
   t: Translate,
-): { summary: SummaryEntry[] } {
-  const summary: SummaryEntry[] = [{ text: t(messages.errorValidationForm) }];
+): { summary: SummaryEntry[]; focus: { fieldId: string } | "summary" } {
+  const unmapped: SummaryEntry[] = [];
+  const invalid: string[] = [];
   for (const issue of issues) {
     const path = issue.path.join(".");
     const field = Object.hasOwn(fields, path) ? fields[path] : undefined;
     if (field !== undefined) {
       field.setError(t(VALIDATION[issue.code] ?? messages.validationInvalid));
+      invalid.push(field.id);
     } else {
-      summary.push({ text: t(messages.errorValidationUnknownField, { label: path }) });
+      unmapped.push({ text: t(messages.errorValidationUnknownField, { label: path }) });
     }
   }
-  return { summary };
+  const first = firstInDocumentOrder(invalid);
+  if (unmapped.length === 0 && first !== undefined) {
+    document.getElementById(first)?.focus();
+    return { summary: [], focus: { fieldId: first } };
+  }
+  return { summary: [{ text: t(messages.errorValidationForm) }, ...unmapped], focus: "summary" };
+}
+
+/** The id whose element comes first in the document (ids without an element last). */
+function firstInDocumentOrder(ids: readonly string[]): string | undefined {
+  let first: { id: string; el: HTMLElement | null } | undefined;
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (first === undefined) {
+      first = { id, el };
+    } else if (
+      el !== null &&
+      (first.el === null ||
+        (el.compareDocumentPosition(first.el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0)
+    ) {
+      first = { id, el };
+    }
+  }
+  return first?.id;
 }

@@ -34,11 +34,17 @@ export function createRateLimitGate(now: () => number = Date.now): {
   };
 }
 
+/**
+ * A-400: a permanent status region, rendered whether or not the gate is closed and filled only
+ * while it is, so the message is announced when it appears.
+ */
 export function RateLimitNotice(props: { secondsLeft: number }): JSX.Element {
   const { t } = useI18n();
   return (
     <p role="status">
-      {t(messages.errorRateLimited, { minutes: Math.ceil(props.secondsLeft / 60) })}
+      {props.secondsLeft > 0
+        ? t(messages.errorRateLimited, { minutes: Math.ceil(props.secondsLeft / 60) })
+        : ""}
     </p>
   );
 }

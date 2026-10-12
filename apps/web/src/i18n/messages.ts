@@ -47,7 +47,7 @@ export const messages = defineMessages({
   errorReference: { id: "error.reference", defaultMessage: "Reference: {ref}" },
   errorUnavailable: {
     id: "error.unavailable",
-    defaultMessage: "Budmon is temporarily unavailable. Try again in a few minutes.",
+    defaultMessage: "{appName} is temporarily unavailable. Try again in a few minutes.",
   },
   errorValidationForm: { id: "error.validation.form", defaultMessage: "Some details need fixing." },
   errorValidationUnknownField: {
@@ -59,11 +59,11 @@ export const messages = defineMessages({
   offlineBannerWeb: { id: "offline.banner.web", defaultMessage: "You're offline." },
   updateRequiredWeb: {
     id: "update.required.web",
-    defaultMessage: "This version of Budmon is out of date. Reload to continue.",
+    defaultMessage: "This version of {appName} is out of date. Reload to continue.",
   },
   updateWebAvailable: {
     id: "update.web.available",
-    defaultMessage: "Budmon has been updated. Reload to get the latest version.",
+    defaultMessage: "{appName} has been updated. Reload to get the latest version.",
   },
   updateWebReload: { id: "update.web.reload", defaultMessage: "Reload" },
   validationInvalid: { id: "validation.invalid", defaultMessage: "Enter a valid value." },

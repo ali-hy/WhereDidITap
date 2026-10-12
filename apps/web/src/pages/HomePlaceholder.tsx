@@ -1,6 +1,6 @@
 // F-216: the home page until identity replaces it.
 import type { JSX } from "solid-js";
-import { APP_NAME } from "../appInfo.js";
+import { APP_NAME } from "../app/brand.js";
 import { messages } from "../i18n/messages.js";
 import { useI18n } from "../i18n/useI18n.js";
 

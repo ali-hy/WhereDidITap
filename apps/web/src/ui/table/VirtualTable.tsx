@@ -1,6 +1,6 @@
 // F-219: a virtualised grid over an infinite list (D-7, A-338 to A-343).
 import { createTable, tableFeatures } from "@tanstack/solid-table";
-import { createVirtualizer } from "@tanstack/solid-virtual";
+import { createVirtualizer, defaultRangeExtractor } from "@tanstack/solid-virtual";
 import { createEffect, createSignal, For, onMount, Show, type JSX } from "solid-js";
 import { messageForError } from "../../api/errorMessages.js";
 import { messages } from "../../i18n/messages.js";
@@ -46,6 +46,8 @@ export function VirtualTable<T>(props: {
   });
   const headers = () => table.getHeaderGroups()[0]?.headers ?? [];
 
+  const [stop, setStop] = createSignal<Stop>({ row: 0, col: -1 });
+
   const virtualizer = createVirtualizer({
     get count() {
       return props.source.rowCount();
@@ -53,9 +55,17 @@ export function VirtualTable<T>(props: {
     getScrollElement: () => scroller ?? null,
     estimateSize: () => props.rowHeight,
     overscan: OVERSCAN,
+    // B-3: the tab-stop row is always rendered, so Tab always finds the grid's one tabindex 0.
+    rangeExtractor: (range) => {
+      const indexes = defaultRangeExtractor(range);
+      const row = stop().row;
+      if (row < range.count && !indexes.includes(row)) {
+        indexes.push(row);
+        indexes.sort((a, b) => a - b);
+      }
+      return indexes;
+    },
   });
-
-  const [stop, setStop] = createSignal<Stop>({ row: 0, col: -1 });
 
   // Page requests (A-338, A-340): never while in error.
   onMount(() => {
@@ -114,6 +124,10 @@ export function VirtualTable<T>(props: {
   };
 
   const onKeyDown = (event: KeyboardEvent) => {
+    // B-2: only the rows and cells navigate; a control inside the grid (the error row's Try
+    // again) keeps its own keys.
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || !target.matches("[data-row], [data-col]")) return;
     const current = stop();
     const lastRow = props.source.rowCount() - 1;
     const lastCol = props.columns.length - 1;
@@ -163,6 +177,12 @@ export function VirtualTable<T>(props: {
     if (current.row !== row || current.col !== col) setStop({ row, col });
   };
 
+  /** A-396: the header row counts, so n data rows are n + 1 ARIA rows; -1 while unknown. */
+  const totalRows = () => {
+    const total = props.source.totalCount();
+    return total === null ? -1 : total + 1;
+  };
+
   const tabIndexOf = (row: number, col: number) =>
     stop().row === row && stop().col === col ? 0 : -1;
 
@@ -171,7 +191,7 @@ export function VirtualTable<T>(props: {
       ref={grid}
       role="grid"
       aria-label={props.label}
-      aria-rowcount={props.source.totalCount() ?? -1}
+      aria-rowcount={totalRows()}
       aria-colcount={props.columns.length}
       class="flex h-full flex-col"
       onKeyDown={onKeyDown}

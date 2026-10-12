@@ -72,11 +72,22 @@ function budmonVersion(): Plugin {
   };
 }
 
+/** A-395, N-6: E2E_API_PORT (default 8787), validated as e2eServe's portFrom does. */
+function e2eApiPort(): number {
+  const raw = process.env["E2E_API_PORT"];
+  if (raw === undefined || raw === "") return 8787;
+  const port = Number(raw);
+  if (!/^[0-9]+$/.test(raw) || port < 1 || port > 65535) {
+    throw new Error("E2E_API_PORT must be a port number");
+  }
+  return port;
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, WEB_DIR, "VITE_");
   const pseudo = (process.env["VITE_PSEUDO_LOCALES"] ?? env["VITE_PSEUDO_LOCALES"]) === "1";
   const fixtures = (process.env["VITE_FIXTURES"] ?? env["VITE_FIXTURES"]) === "1";
-  const e2eApi = `http://127.0.0.1:${process.env["E2E_API_PORT"] ?? "8787"}`;
+  const e2eApi = `http://127.0.0.1:${String(e2eApiPort())}`;
   return {
     plugins: [
       solid(),

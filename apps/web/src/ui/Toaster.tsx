@@ -2,6 +2,7 @@
 // hover or focus. Errors are announced assertively, the rest politely.
 import { Toast, toaster } from "@kobalte/core/toast";
 import { Show, type JSX } from "solid-js";
+import { announce } from "./a11y.js";
 
 const DURATION_MS = 6000;
 
@@ -37,23 +38,58 @@ function autoDismiss(id: number): {
     timer = undefined;
     remaining = Math.max(0, remaining - (Date.now() - startedAt));
   };
+  // B-4: hover and focus pause independently; the timer runs only when neither holds.
+  let hovered = false;
+  let focused = false;
+  const update = () => {
+    if (hovered || focused) pause();
+    else resume();
+  };
   resume();
   return {
     attach(el) {
-      for (const type of ["pointerenter", "pointermove", "mouseenter", "focusin"]) {
-        el.addEventListener(type, pause, { capture: true });
-      }
-      for (const type of ["pointerleave", "mouseleave", "focusout"]) {
+      const leaves = (event: Event) => {
+        const next = (event as MouseEvent | FocusEvent).relatedTarget;
+        return !(next instanceof Node && el.contains(next));
+      };
+      for (const type of ["pointerenter", "pointermove", "mouseenter"]) {
         el.addEventListener(
           type,
-          (event) => {
-            const next = (event as MouseEvent | FocusEvent).relatedTarget;
-            if (next instanceof Node && el.contains(next)) return;
-            resume();
+          () => {
+            hovered = true;
+            update();
           },
           { capture: true },
         );
       }
+      for (const type of ["pointerleave", "mouseleave"]) {
+        el.addEventListener(
+          type,
+          (event) => {
+            if (!leaves(event)) return;
+            hovered = false;
+            update();
+          },
+          { capture: true },
+        );
+      }
+      el.addEventListener(
+        "focusin",
+        () => {
+          focused = true;
+          update();
+        },
+        { capture: true },
+      );
+      el.addEventListener(
+        "focusout",
+        (event) => {
+          if (!leaves(event)) return;
+          focused = false;
+          update();
+        },
+        { capture: true },
+      );
     },
   };
 }
@@ -70,6 +106,7 @@ export function showToast(t: ToastOptions): string {
       toastId={props.toastId}
       priority={t.tone === "error" ? "high" : "low"}
       persistent
+      aria-live="off"
       data-tone={t.tone}
       class="flex items-center gap-4 rounded p-3 shadow"
     >
@@ -88,6 +125,8 @@ export function showToast(t: ToastOptions): string {
       </Show>
     </Toast>
   ));
+  // A-400: announced through F-218's permanent regions, not Kobalte's per-toast live region.
+  announce(t.message, t.tone === "error" ? "assertive" : "polite");
   if (t.persistent !== true) {
     attach = autoDismiss(id).attach;
     // The toast may already have rendered inside show().
@@ -102,7 +141,7 @@ export function dismissToast(id: string): void {
 
 export function Toaster(): JSX.Element {
   return (
-    <Toast.Region>
+    <Toast.Region aria-live="off">
       <Toast.List class="fixed bottom-4 end-4 flex flex-col gap-2" />
     </Toast.Region>
   );
