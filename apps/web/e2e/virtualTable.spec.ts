@@ -21,7 +21,66 @@ async function focused(page: Page): Promise<{ row: number; col: number | null; i
   });
 }
 
+/**
+ * Counts the rows the fixture has loaded: wraps window.fetch before the app starts and sums the
+ * items of each /__fixtures/api/rows response, tracking requests still in flight. A virtualised grid
+ * doesn't render every loaded row, so the DOM can't say this.
+ */
+async function trackLoadedRows(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __rows: { loaded: number; inFlight: number } };
+    w.__rows = { loaded: 0, inFlight: 0 };
+    const original = window.fetch.bind(window);
+    window.fetch = async (...args: Parameters<typeof fetch>) => {
+      const url = String(args[0] instanceof Request ? args[0].url : args[0]);
+      if (!url.includes("/__fixtures/api/rows")) return original(...args);
+      w.__rows.inFlight += 1;
+      try {
+        const res = await original(...args);
+        const body = (await res.clone().json()) as { items?: unknown[] };
+        w.__rows.loaded += body.items?.length ?? 0;
+        return res;
+      } finally {
+        w.__rows.inFlight -= 1;
+      }
+    };
+  });
+}
+
+/** Loaded row count once no page request is in flight (stable for 300 ms). */
+async function settledLoadedRows(page: Page): Promise<number> {
+  const read = () =>
+    page.evaluate(
+      () => (window as unknown as { __rows: { loaded: number; inFlight: number } }).__rows,
+    );
+  let previous = -1;
+  await expect
+    .poll(
+      async () => {
+        const now = await read();
+        const stable = now.inFlight === 0 && now.loaded === previous;
+        previous = now.loaded;
+        return stable;
+      },
+      { intervals: [300] },
+    )
+    .toBe(true);
+  return previous;
+}
+
+/**
+ * F-219 scrolls the target into view and then focuses it in an animation frame, so focus is checked
+ * by polling; each key press waits for the previous one's focus to land.
+ */
+async function expectFocus(
+  page: Page,
+  expected: Partial<{ row: number; col: number | null; inView: boolean }>,
+): Promise<void> {
+  await expect.poll(() => focused(page)).toMatchObject(expected);
+}
+
 async function open(page: Page): Promise<void> {
+  await trackLoadedRows(page);
   await page.goto(ROUTE);
   await page.getByRole("grid", { name: "Synthetic rows" }).waitFor();
   await page.locator('[role="row"][aria-rowindex="2"]').waitFor();
@@ -34,32 +93,32 @@ test("TP-12.3: Tab lands on row 2; ArrowDown ×3 and End move focus in view; Ent
   await open(page);
 
   await page.keyboard.press("Tab");
-  expect((await focused(page)).row).toBe(2);
+  await expectFocus(page, { row: 2 });
 
-  for (let i = 0; i < 3; i += 1) await page.keyboard.press("ArrowDown");
-  expect(await focused(page)).toMatchObject({ row: 5, col: null, inView: true });
+  for (let row = 3; row <= 5; row += 1) {
+    await page.keyboard.press("ArrowDown");
+    await expectFocus(page, { row, col: null });
+  }
+  await expectFocus(page, { row: 5, col: null, inView: true });
 
+  // F-219: End goes to the last row loaded when it's pressed (header is aria-rowindex 1). Landing
+  // near the end then loads the next page (A-340), which mustn't move focus.
+  const loadedAtEnd = await settledLoadedRows(page);
+  expect(loadedAtEnd + 1).toBeGreaterThan(5);
   await page.keyboard.press("End");
-  const last = await focused(page);
-  expect(last.row).toBeGreaterThan(5);
-  expect(last.inView).toBe(true);
-  const lastLoaded = await page.evaluate(() =>
-    Math.max(
-      ...[...document.querySelectorAll('[role="row"]:not([data-placeholder])')].map((r) =>
-        Number(r.getAttribute("aria-rowindex") ?? "0"),
-      ),
-    ),
-  );
-  expect(last.row).toBe(lastLoaded);
+  await expectFocus(page, { row: loadedAtEnd + 1, inView: true });
+
+  await settledLoadedRows(page);
+  await expectFocus(page, { row: loadedAtEnd + 1, inView: true });
 
   await page.keyboard.press("Enter");
   // A-373: located by its text; the offline banner's status region is always mounted too.
   await expect(page.getByRole("status").filter({ hasText: "Activated row" })).toHaveText(
-    `Activated row ${String(last.row - 2)}`,
+    `Activated row ${String(loadedAtEnd - 1)}`,
   );
 
   await page.keyboard.press("ArrowRight");
-  expect(await focused(page)).toMatchObject({ row: last.row, col: 1 });
+  await expectFocus(page, { row: loadedAtEnd + 1, col: 1 });
 });
 
 test("TP-12.3: in ar-XB, Tab then ArrowLeft enters cell 1, ArrowLeft again goes to cell 2 (keys reversed)", async ({
@@ -69,11 +128,13 @@ test("TP-12.3: in ar-XB, Tab then ArrowLeft enters cell 1, ArrowLeft again goes 
   await open(page);
 
   await page.keyboard.press("Tab");
-  await page.keyboard.press("ArrowLeft");
-  expect(await focused(page)).toMatchObject({ row: 2, col: 1 });
+  await expectFocus(page, { row: 2, col: null });
 
   await page.keyboard.press("ArrowLeft");
-  expect(await focused(page)).toMatchObject({ row: 2, col: 2 });
+  await expectFocus(page, { row: 2, col: 1 });
+
+  await page.keyboard.press("ArrowLeft");
+  await expectFocus(page, { row: 2, col: 2 });
 });
 
 test("TP-12.4 @perf: D-7 targets on 100,000 rows", async ({ page }) => {
