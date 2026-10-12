@@ -1,4 +1,4 @@
-// F-180 against the real drizzle-kit under a real pty, and F-181's pending report. TP-14.2, TP-14.3.
+// F-180 against the real drizzle-kit under scriptPty (A-377, util-linux script(1)), and F-181's pending report. TP-14.2, TP-14.3.
 // The projects are throwaway copies of a tiny Drizzle project (not the server schema), so a rename
 // prompt can be provoked deterministically.
 import { execFileSync } from "node:child_process";
@@ -7,7 +7,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SERVER_DIR } from "../../support/platform.js";
-import { generatePlain, loadReleaseMigration, realSpawnPty } from "../../support/s14.js";
+import { readJournal } from "../../../src/platform/db/migrations.js";
+import { generatePlain, loadReleaseMigration, loadScriptPty } from "../../support/s14.js";
 
 const CONFIG = `import { defineConfig } from "drizzle-kit";
 export default defineConfig({ dialect: "postgresql", schema: "./schema.ts", out: "./drizzle" });
@@ -45,7 +46,7 @@ describe("TP-14.2: generateReleaseMigration with the real drizzle-kit (F-180)", 
 
     const result = await generateReleaseMigration(
       { version: "v0.2.0", serverDir: dir },
-      { spawnPty: await realSpawnPty() },
+      { spawnPty: await loadScriptPty() },
     );
 
     expect(result.ambiguities).toHaveLength(1);
@@ -54,6 +55,11 @@ describe("TP-14.2: generateReleaseMigration with the real drizzle-kit (F-180)", 
     expect(sql).toMatch(/ADD COLUMN "memo"/);
     expect(sql).toMatch(/DROP COLUMN "note"/);
     expect(path.basename(result.file ?? "")).toMatch(/^\d{4}_v0\.2\.0\.sql$/);
+    // A-376: the version-named journal tags (the baseline 0000_v0.1.0 and this one) pass readJournal.
+    expect(readJournal(path.join(dir, "drizzle")).map((e) => e.tag)).toEqual([
+      "0000_v0.1.0",
+      "0001_v0.2.0",
+    ]);
   }, 180_000);
 });
 
@@ -81,7 +87,7 @@ describe("TP-14.3: pendingSchemaReport doesn't touch the repository (F-181)", ()
     // A-361: deps are { spawnPty } (the real node-pty here), and input takes timeoutMs.
     const report = await pendingSchemaReport(
       { serverDir: dir, timeoutMs: 150_000 },
-      { spawnPty: await realSpawnPty() },
+      { spawnPty: await loadScriptPty() },
     );
 
     expect(report.sql).toMatch(/ADD COLUMN "memo"/);
@@ -96,7 +102,7 @@ describe("TP-14.3: pendingSchemaReport doesn't touch the repository (F-181)", ()
 
     const report = await pendingSchemaReport(
       { serverDir: dir },
-      { spawnPty: await realSpawnPty() },
+      { spawnPty: await loadScriptPty() },
     );
 
     expect(report).toEqual({ sql: "", ambiguities: [] });

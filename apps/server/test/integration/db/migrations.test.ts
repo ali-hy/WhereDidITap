@@ -228,6 +228,46 @@ describe("TP-2.13: a malformed journal is an error (A-150)", () => {
     },
   );
 
+  // A-376: tags are ^[0-9]{4}_[a-z0-9][a-z0-9_.-]*$, so F-180's version names are accepted.
+  it("TP-2.13 (A-376): tags 0001_v0.1.0 and 0002_v0.1.0-hotfix.1 are accepted", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "budmon-journal-"));
+    try {
+      mkdirSync(path.join(dir, "meta"));
+      const tags = ["0001_v0.1.0", "0002_v0.1.0-hotfix.1"];
+      writeFileSync(
+        path.join(dir, "meta", "_journal.json"),
+        JSON.stringify({ entries: tags.map((tag, idx) => ({ idx, tag, when: 1 + idx })) }),
+      );
+      for (const tag of tags) writeFileSync(path.join(dir, `${tag}.sql`), "SELECT 1;");
+
+      expect(readJournal(dir).map((e) => e.tag)).toEqual(tags);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Each .sql file exists (0005_a/b.sql in a subfolder), so only the pattern can reject the tag.
+  it.each([["0003_V1"], ["0004_.x"], ["0005_a/b"]])(
+    "TP-2.13 (A-376): tag %s throws JournalInvalidError",
+    (tag) => {
+      const dir = mkdtempSync(path.join(tmpdir(), "budmon-journal-"));
+      try {
+        mkdirSync(path.join(dir, "meta"));
+        writeFileSync(
+          path.join(dir, "meta", "_journal.json"),
+          JSON.stringify({ entries: [{ idx: 0, tag, when: 1 }] }),
+        );
+        const sql = path.join(dir, `${tag}.sql`);
+        mkdirSync(path.dirname(sql), { recursive: true });
+        writeFileSync(sql, "SELECT 1;");
+
+        expect(() => readJournal(dir)).toThrow(JournalInvalidError);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("TP-2.13: applyCommittedMigrations with a malformed journal throws JournalInvalidError before creating schema drizzle (A-162)", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "budmon-journal-"));
     const database = await freshDatabase("malformed_journal");

@@ -62,9 +62,7 @@ describe("TP-14.7: the upgrade harness at the baseline (F-183)", () => {
   it("TP-14.7 (A-368): with a tag and no test/upgrade/<vN>/ folder, the previous schema is migrated to HEAD and the harness passes", async () => {
     const fixture = serverFixture();
     try {
-      // F-180's naming (`NNNN_<version>`). Open question: A-160's journal tag rule
-      // (^[0-9]{4}_[a-z0-9_]+$) rejects the dots, so this fails with JournalInvalidError until the
-      // planner reconciles them; with a dot-free name the harness passes.
+      // F-180's naming (`NNNN_<version>`), which A-376's journal tag pattern accepts.
       generatePlain(fixture.dir, "v0.1.0");
       const dir = repo();
       const drizzle = path.join(dir, "apps/server/drizzle");

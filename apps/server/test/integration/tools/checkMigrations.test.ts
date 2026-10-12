@@ -1,14 +1,17 @@
 // F-182 checkMigrationsReproduceSchema (check (i)). TP-14.4. Fixture projects are throwaway copies of
 // the server project (support/s14.ts) whose drizzle/ folder is built per case; Postgres is a
 // container started for this file (F-182 bootstraps clusters, so its contract takes a superuser).
+// A-378: pg_dump runs inside that container (the handle's pgDump), so client and server match.
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   type ServerFixture,
+  type SpawnPty,
   type StartedPostgres,
   generatePlain,
   loadCheckMigrations,
+  loadScriptPty,
   serverFixture,
   startPostgres,
 } from "../../support/s14.js";
@@ -24,14 +27,33 @@ afterAll(async () => {
   await pg.stop();
 });
 
-/** startPostgres hands out the file's container; F-182 may stop it, which this ignores. */
+/** Every pgDump output the check received, to inspect the normalised comparison (A-379). */
+const dumps: string[] = [];
+
+/**
+ * startPostgres hands out the file's container; F-182 may stop it, which this ignores. pgDump adds
+ * pg_dump 18's `\restrict <key>` / `\unrestrict <key>` lines with a fresh key per call whether or
+ * not the server's pg_dump wrote them, so a clean result shows they're stripped (A-379).
+ */
 const deps = {
   startPostgres: () =>
     Promise.resolve({
       superuserUrl: pg.superuserUrl,
+      pgDump: async (database: string, args: readonly string[]) => {
+        const key = Math.random().toString(36).slice(2);
+        const dump = `\\restrict ${key}\n${await pg.pgDump(database, args)}\n\\unrestrict ${key}\n`;
+        dumps.push(dump);
+        return dump;
+      },
       stop: () => Promise.resolve(),
     }),
+  spawnPty: (...args: Parameters<SpawnPty>) => spawnPty(...args),
 };
+
+let spawnPty: SpawnPty;
+beforeAll(async () => {
+  spawnPty = await loadScriptPty();
+});
 
 function fixtureWithBaseline(): ServerFixture {
   const f = serverFixture();
@@ -51,11 +73,16 @@ describe("TP-14.4: migrations reproduce the schema (F-182)", () => {
     const { checkMigrationsReproduceSchema } = await loadCheckMigrations();
     const f = fixtureWithBaseline();
 
+    const before = dumps.length;
+
     expect(await checkMigrationsReproduceSchema({ serverDir: f.dir }, deps)).toEqual({
       ok: true,
       snapshotClean: true,
       dumpDiff: "",
     });
+    // A-378: both schemas were dumped through the container's pg_dump, each with its own
+    // \restrict key, and the comparison still found no difference (A-379).
+    expect(dumps.length - before).toBeGreaterThanOrEqual(2);
   }, 300_000);
 
   it("TP-14.4: a migration missing a column: not ok, and dumpDiff mentions the column", async () => {
@@ -73,6 +100,8 @@ describe("TP-14.4: migrations reproduce the schema (F-182)", () => {
     expect(result.ok).toBe(false);
     expect(result.snapshotClean).toBe(true);
     expect(result.dumpDiff).toMatch(/response_status/);
+    // A-379: the normalised dumps carry no \restrict or \unrestrict line.
+    expect(result.dumpDiff).not.toMatch(/^[-+ ]?\\(un)?restrict\b/m);
   }, 300_000);
 
   it("TP-14.4: a stale snapshot: snapshotClean false and not ok", async () => {
@@ -106,6 +135,7 @@ describe("TP-14.4: migrations reproduce the schema (F-182)", () => {
           started += 1;
           return deps.startPostgres();
         },
+        spawnPty: deps.spawnPty,
       },
     );
 

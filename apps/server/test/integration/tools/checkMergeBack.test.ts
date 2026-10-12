@@ -45,7 +45,11 @@ afterAll(async () => {
 });
 
 const startShared = () =>
-  Promise.resolve({ superuserUrl: pg.superuserUrl, stop: () => Promise.resolve() });
+  Promise.resolve({
+    superuserUrl: pg.superuserUrl,
+    pgDump: pg.pgDump,
+    stop: () => Promise.resolve(),
+  });
 
 const HOTFIX_OK = 'ALTER TABLE "idempotency_records" ADD COLUMN "hotfix_probe" text;';
 const HOTFIX_BAD = 'ALTER TABLE "no_such_table" ADD COLUMN "x" text;';

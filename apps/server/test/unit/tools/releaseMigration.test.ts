@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type PtyLike, type SpawnPty, loadReleaseMigration } from "../../support/s14.js";
+import { type PtyProcess, type SpawnPty, loadReleaseMigration } from "../../support/s14.js";
 
 const QUESTION =
   "Is total_minor column in transactions table created or renamed from another column?";
@@ -26,8 +26,8 @@ afterEach(() => {
 });
 
 /**
- * A scripted pty: `script` runs when spawned, with helpers to emit output and exit. Writes are
- * recorded.
+ * A scripted PtyProcess (A-377): `script` runs when spawned, with helpers to emit output and exit.
+ * Writes are recorded.
  */
 function fakePty(
   script: (pty: {
@@ -38,17 +38,15 @@ function fakePty(
 ) {
   const writes: string[] = [];
   const killed = { value: false };
-  let dataListener: (d: string) => void = () => undefined;
-  let exitListener: (e: { exitCode: number }) => void = () => undefined;
+  let dataListener: (chunk: string) => void = () => undefined;
+  let exitListener: (code: number) => void = () => undefined;
   const spawn = vi.fn<SpawnPty>(() => {
-    const pty: PtyLike = {
-      onData: (l) => {
-        dataListener = l;
-        return { dispose: () => undefined };
+    const pty: PtyProcess = {
+      onData: (cb) => {
+        dataListener = cb;
       },
-      onExit: (l) => {
-        exitListener = l;
-        return { dispose: () => undefined };
+      onExit: (cb) => {
+        exitListener = cb;
       },
       write: (d) => {
         writes.push(d);
@@ -63,7 +61,7 @@ function fakePty(
           dataListener(s);
         },
         exit: (code) => {
-          exitListener({ exitCode: code });
+          exitListener(code);
         },
         writes,
       });
@@ -130,16 +128,9 @@ describe("TP-14.1: generateReleaseMigration (F-180)", () => {
     await generateReleaseMigration({ version: "v1.2.0-hotfix.3", serverDir }, { spawnPty: spawn });
 
     expect(spawn).toHaveBeenCalledTimes(1);
-    const [file, args, options] = spawn.mock.calls[0] ?? [];
-    expect([file, ...(Array.isArray(args) ? args : [args])]).toEqual([
-      "pnpm",
-      "exec",
-      "drizzle-kit",
-      "generate",
-      "--name",
-      "v1.2.0-hotfix.3",
-    ]);
-    expect(options).toMatchObject({ cwd: serverDir, cols: 80, rows: 24 });
+    const [command, options] = spawn.mock.calls[0] ?? [];
+    expect(command).toBe("pnpm exec drizzle-kit generate --name v1.2.0-hotfix.3");
+    expect(options).toEqual({ cwd: serverDir, cols: 80, rows: 24 });
   });
 
   it('TP-14.1: output "No schema changes" returns file null', async () => {
@@ -221,4 +212,38 @@ describe("TP-14.1: generateReleaseMigration (F-180)", () => {
     expect(result.ambiguities).toHaveLength(2);
     expect(result.ambiguities[1]).toContain(second);
   });
+});
+
+// A-377: the real scriptPty (util-linux script(1)) gives the child a TTY and forwards writes.
+describe("TP-14.1 (A-377): scriptPty", () => {
+  it("TP-14.1: the child sees a TTY on stdin and receives a written line; exit 0", async () => {
+    const { scriptPty } = await loadReleaseMigration();
+    const pty = scriptPty(`bash -c '[ -t 0 ] && echo TTY; read x; echo got:$x'`, {
+      cwd: serverDir,
+      cols: 80,
+      rows: 24,
+    });
+    let output = "";
+    const exited = new Promise<number>((resolve) => {
+      pty.onExit(resolve);
+    });
+    pty.onData((chunk) => {
+      output += chunk;
+    });
+
+    pty.write("abc\r");
+    const code = await Promise.race([
+      exited,
+      new Promise<never>((_r, reject) =>
+        setTimeout(() => {
+          pty.kill();
+          reject(new Error(`scriptPty timed out; output: ${JSON.stringify(output)}`));
+        }, 10_000),
+      ),
+    ]);
+
+    expect(code).toBe(0);
+    expect(output).toContain("TTY");
+    expect(output).toContain("got:abc");
+  }, 15_000);
 });

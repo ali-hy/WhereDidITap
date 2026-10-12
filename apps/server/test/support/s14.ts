@@ -1,5 +1,5 @@
 // S-14 helpers (test-architect): loaders for the release-migration tools (F-180 to F-182, F-184),
-// which don't exist yet, and throwaway copies of the server project for drizzle-kit to work in.
+//  and throwaway copies of the server project for drizzle-kit to work in.
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,26 +11,21 @@ import { SERVER_DIR } from "./platform.js";
 
 // ---- Hand-declared shapes (F-180 to F-184) ----
 
-/** The parts of node-pty's IPty that F-180 uses. */
-export interface PtyLike {
-  onData: (listener: (data: string) => void) => { dispose: () => void };
-  onExit: (listener: (e: { exitCode: number; signal?: number }) => void) => { dispose: () => void };
+/** F-180's pty process (A-377): a fake in TP-14.1, `scriptPty` in the integration cases. */
+export interface PtyProcess {
+  onData: (cb: (chunk: string) => void) => void;
+  onExit: (cb: (code: number) => void) => void;
   write: (data: string) => void;
-  kill: (signal?: string) => void;
+  kill: () => void;
 }
 export type SpawnPty = (
-  file: string,
-  args: string[] | string,
-  options: {
-    cols?: number;
-    rows?: number;
-    cwd?: string;
-    env?: Record<string, string | undefined>;
-    name?: string;
-  },
-) => PtyLike;
+  command: string,
+  opts: { cwd: string; cols: number; rows: number },
+) => PtyProcess;
 
 export interface ReleaseMigrationModule {
+  /** A-377: util-linux script(1) gives the command a real pty; no native module. */
+  scriptPty: SpawnPty;
   generateReleaseMigration: (
     input: { version: string; serverDir: string; timeoutMs?: number },
     deps: { spawnPty: SpawnPty },
@@ -44,13 +39,15 @@ export interface ReleaseMigrationModule {
 
 export interface StartedPostgres {
   superuserUrl: string;
+  /** A-378: pg_dump runs inside the POSTGRES_IMAGE container, so client and server match. */
+  pgDump: (database: string, args: readonly string[]) => Promise<string>;
   stop: () => Promise<void>;
 }
 
 export interface CheckMigrationsModule {
   checkMigrationsReproduceSchema: (
     input: { serverDir: string },
-    deps: { startPostgres: () => Promise<StartedPostgres> },
+    deps: { startPostgres: () => Promise<StartedPostgres>; spawnPty: SpawnPty },
   ) => Promise<{ ok: boolean; snapshotClean: boolean; dumpDiff: string }>;
 }
 
@@ -69,10 +66,9 @@ export const loadReleaseMigration = () =>
 export const loadCheckMigrations = () => load<CheckMigrationsModule>(`${TOOLS}/checkMigrations.ts`);
 export const loadCheckRisky = () => load<CheckRiskyModule>(`${TOOLS}/checkRisky.ts`);
 
-/** node-pty's spawn, loaded at run time (it arrives with S-14). */
-export async function realSpawnPty(): Promise<SpawnPty> {
-  const pty = await load<{ spawn: SpawnPty }>("node-pty");
-  return pty.spawn;
+/** F-180's real scriptPty (A-377). */
+export async function loadScriptPty(): Promise<SpawnPty> {
+  return (await loadReleaseMigration()).scriptPty;
 }
 
 // ---- Server project fixtures ----
@@ -128,6 +124,20 @@ export async function startPostgres(): Promise<StartedPostgres> {
     .start();
   return {
     superuserUrl: container.getConnectionUri(),
+    pgDump: async (database, args) => {
+      const result = await container.exec([
+        "pg_dump",
+        "-U",
+        container.getUsername(),
+        "-d",
+        database,
+        ...args,
+      ]);
+      if (result.exitCode !== 0) {
+        throw new Error(`pg_dump failed (${String(result.exitCode)}): ${result.stderr}`);
+      }
+      return result.stdout;
+    },
     stop: async () => {
       await container.stop();
     },
