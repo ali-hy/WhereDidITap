@@ -186,9 +186,18 @@ describe("TP-14.1: generateReleaseMigration (F-180)", () => {
       exit(2);
     });
 
-    await expect(
-      generateReleaseMigration({ version: "v1.2.0", serverDir }, { spawnPty: spawn }),
-    ).rejects.toThrow("drizzle-kit generate failed");
+    const err: unknown = await generateReleaseMigration(
+      { version: "v1.2.0", serverDir },
+      { spawnPty: spawn },
+    ).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe("drizzle-kit generate failed");
+    // Review N-5: the error carries the exit code.
+    expect((err as { exitCode?: unknown }).exitCode).toBe(2);
   });
 
   it("TP-14.11x: two prompts in one run get two answers and two ambiguities", async () => {
@@ -245,5 +254,21 @@ describe("TP-14.1 (A-377): scriptPty", () => {
     expect(code).toBe(0);
     expect(output).toContain("TTY");
     expect(output).toContain("got:abc");
+  }, 15_000);
+
+  it("TP-14.1 (review N-5): the pty is 80×24 (stty size inside it is 24 80)", async () => {
+    const { scriptPty } = await loadReleaseMigration();
+    const pty = scriptPty("stty size", { cwd: serverDir, cols: 80, rows: 24 });
+    let output = "";
+    pty.onData((chunk) => {
+      output += chunk;
+    });
+
+    const code = await new Promise<number>((resolve) => {
+      pty.onExit(resolve);
+    });
+
+    expect(code).toBe(0);
+    expect(output).toMatch(/^24 80\r?$/m);
   }, 15_000);
 });

@@ -35,7 +35,7 @@ test("TP-11.15 (A-333): on load focus stays on body and #live-polite is empty; n
   await expect(page.getByText("Nothing here yet.")).toBeVisible();
 });
 
-// A-402: only a pathname change moves focus and announces.
+// A-402 (a): only a pathname change moves focus and announces.
 test("TP-11.15 (A-402): a search-only change on / leaves focus and #live-polite alone", async ({
   page,
 }) => {
@@ -57,10 +57,28 @@ test("TP-11.15 (A-402): a search-only change on / leaves focus and #live-polite 
   await expect(page.locator("#live-polite")).toHaveText("");
 });
 
-// A-402's second half needs the router: nothing outside the app can call router.invalidate() on /
-// (question raised: a test seam, such as a fixture control that calls it).
-test.fixme("TP-11.15 (A-402): router.invalidate() on / leaves focus and #live-polite alone", () => {
-  // Awaiting a way to call router.invalidate() from the page.
+// A-402 (b), through A-416's fixture: router.invalidate() re-runs the loader without moving focus
+// or announcing.
+test("TP-11.15 (A-402, A-416): router.invalidate() re-runs the loader; focus stays on the button and #live-polite stays empty", async ({
+  page,
+}) => {
+  await page.goto("/__fixtures/invalidate");
+  const runs = page.getByTestId("loader-runs");
+  await expect(runs).toHaveText("Loader runs: 1");
+  const button = page.getByRole("button", { name: "Invalidate" });
+  for (let i = 0; i < 10 && !(await button.evaluate((b) => b === document.activeElement)); i += 1) {
+    await page.keyboard.press("Tab");
+  }
+  await expect(button).toBeFocused();
+  await expect(page.locator("#live-polite")).toHaveText("");
+
+  await page.keyboard.press("Enter");
+
+  await expect(runs).toHaveText("Loader runs: 2");
+  // A negative check: give a focus move or announcement time to happen.
+  await page.waitForTimeout(1_000);
+  await expect(button).toBeFocused();
+  await expect(page.locator("#live-polite")).toHaveText("");
 });
 
 test.describe("TP-11.16: 360 px layout", () => {

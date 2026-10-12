@@ -54,24 +54,33 @@ const startShared = () =>
 const HOTFIX_OK = 'ALTER TABLE "idempotency_records" ADD COLUMN "hotfix_probe" text;';
 const HOTFIX_BAD = 'ALTER TABLE "no_such_table" ADD COLUMN "x" text;';
 
-/** Baseline v0.1.0 generated from the schema, plus hotfix migration 0001 with `sql`. */
-function withHotfix(sql: string): { fixture: ServerFixture; file: string } {
+/** Baseline v0.1.0 generated from the schema, plus hotfix migrations 0001, 0002, … with `sqls`. */
+function withHotfixes(...sqls: string[]): { fixture: ServerFixture; files: string[] } {
   const f = serverFixture();
   fixtures.push(f);
   generateBaseline(f.dir, "v0.1.0");
-  const name = "0001_v0.1.0-hotfix.1";
-  const file = path.join(f.drizzle, `${name}.sql`);
-  writeFileSync(file, sql);
   const journalPath = path.join(f.drizzle, "meta/_journal.json");
   const journal = JSON.parse(readFileSync(journalPath, "utf8")) as {
     entries: { idx: number; version: string; when: number; tag: string; breakpoints: boolean }[];
   };
   const first = journal.entries[0];
   if (first === undefined) throw new Error("no baseline journal entry");
-  journal.entries.push({ ...first, idx: 1, when: first.when + 1000, tag: name });
+  const files = sqls.map((sql, i) => {
+    const name = `000${String(i + 1)}_v0.1.0-hotfix.${String(i + 1)}`;
+    writeFileSync(path.join(f.drizzle, `${name}.sql`), sql);
+    journal.entries.push({ ...first, idx: i + 1, when: first.when + 1000 * (i + 1), tag: name });
+    return `apps/server/drizzle/${name}.sql`;
+  });
   writeFileSync(journalPath, JSON.stringify(journal, null, 2));
-  return { fixture: f, file: `apps/server/drizzle/${name}.sql` };
+  return { fixture: f, files };
 }
+
+function withHotfix(sql: string): { fixture: ServerFixture; file: string } {
+  const { fixture, files } = withHotfixes(sql);
+  return { fixture, file: files[0] ?? "" };
+}
+
+const noPending = () => Promise.resolve({ sql: "", ambiguities: [] });
 
 describe("TP-14.9: the hotfix merge-back check (F-6b)", () => {
   it("TP-14.9 (a): a hotfix migration that applies and is absent from the pending report is ok", async () => {
@@ -120,7 +129,9 @@ describe("TP-14.9: the hotfix merge-back check (F-6b)", () => {
     );
 
     expect(result.ok).toBe(false);
-    expect(result.problems.some((p) => p.startsWith("migrations don't apply: "))).toBe(true);
+    // Review B-4: the problem names the added file.
+    const problem = result.problems.find((p) => p.startsWith("migrations don't apply: "));
+    expect(problem).toContain("apps/server/drizzle/0001_v0.1.0-hotfix.1.sql");
   }, 300_000);
 
   it('TP-14.9 (d) (A-364): an infra merge-back adding a migration is the problem "infra merge-back adds migrations: <files>"', async () => {
@@ -151,4 +162,64 @@ describe("TP-14.9: the hotfix merge-back check (F-6b)", () => {
 
     expect(result.status, `${result.stdout}${result.stderr}`).toBe(64);
   }, 90_000);
+
+  // Review B-4 / A-364: an infra merge-back adds nothing, but steps 1 and 2 still run.
+  it("TP-14.9 (d2): infra with no added files, whose committed migrations fail on an empty database: migrations don't apply", async () => {
+    const { checkMergeBack } = await load();
+    const f = serverFixture();
+    fixtures.push(f);
+    const baseline = generateBaseline(f.dir, "v0.1.0");
+    writeFileSync(
+      baseline,
+      `${readFileSync(baseline, "utf8")}--> statement-breakpoint\n${HOTFIX_BAD}\n`,
+    );
+
+    const result = await checkMergeBack(
+      { serverDir: f.dir, kind: "infra", hotfixMigrationFiles: [] },
+      { startPostgres: startShared, pendingReport: noPending },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.problems.some((p) => p.startsWith("migrations don't apply: "))).toBe(true);
+    expect(result.problems.some((p) => p.startsWith("infra merge-back adds migrations"))).toBe(
+      false,
+    );
+  }, 300_000);
+
+  // A-409: comment lines are dropped before matching, so a reviewed statement is still found.
+  it("TP-14.9 (f): a -- reviewed: DROP COLUMN still in the pending report is the problem hotfix change still pending", async () => {
+    const { checkMergeBack } = await load();
+    const statement = 'ALTER TABLE "idempotency_records" DROP COLUMN "response_status";';
+    const { fixture, file } = withHotfix(`-- reviewed: column unused since v1.1.0\n${statement}\n`);
+
+    const result = await checkMergeBack(
+      { serverDir: fixture.dir, kind: "hotfix", hotfixMigrationFiles: [file] },
+      {
+        startPostgres: startShared,
+        pendingReport: () => Promise.resolve({ sql: statement, ambiguities: [] }),
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.problems).toHaveLength(1);
+    // The statement without its comment line, cut to 60 characters as in (b).
+    expect(result.problems[0]).toBe(`hotfix change still pending: ${statement.slice(0, 60)}`);
+  }, 300_000);
+
+  // A-410: Drizzle applies the folder as one batch, so every added file is listed.
+  it("TP-14.9 (g): two added migrations, the second failing: migrations don't apply lists both files, with the SQLSTATE", async () => {
+    const { checkMergeBack } = await load();
+    const { fixture, files } = withHotfixes(HOTFIX_OK, HOTFIX_BAD);
+
+    const result = await checkMergeBack(
+      { serverDir: fixture.dir, kind: "hotfix", hotfixMigrationFiles: files },
+      { startPostgres: startShared, pendingReport: noPending },
+    );
+
+    expect(result.ok).toBe(false);
+    const problem = result.problems.find((p) => p.startsWith("migrations don't apply: ")) ?? "";
+    expect(problem).toContain(`${files[0] ?? ""}, ${files[1] ?? ""}`);
+    // no_such_table: undefined_table.
+    expect(problem).toContain("42P01");
+  }, 300_000);
 });

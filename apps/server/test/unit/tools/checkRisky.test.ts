@@ -88,6 +88,50 @@ describe("TP-14.5: checkRiskyStatements (F-184)", () => {
     expect(checkRiskyStatements(sql).map((f) => f.line)).toEqual([7]);
   });
 
+  // Review B-5: the reason needs at least 10 characters.
+  it.each([
+    ["a 9-character reason is still flagged", "123456789", [2]],
+    ["an exactly-10-character reason isn't flagged", "1234567890", []],
+  ] as const)("TP-14.5: %s", async (_label, reason, lines) => {
+    const { checkRiskyStatements } = await loadCheckRisky();
+    const sql = [`-- reviewed: ${reason}`, 'DROP TABLE "a";'].join("\n");
+
+    expect(checkRiskyStatements(sql).map((f) => f.line)).toEqual(lines);
+  });
+
+  // A-412: a table created earlier in the same file is empty, so its constraints aren't risky.
+  it("TP-14.5 (A-412): an FK constraint and a unique index on a table created in the same migration aren't flagged", async () => {
+    const { checkRiskyStatements } = await loadCheckRisky();
+    const sql = migration([
+      'CREATE TABLE "a" ("id" uuid PRIMARY KEY NOT NULL, "owner" uuid NOT NULL, "name" text);',
+      'ALTER TABLE "a" ADD CONSTRAINT "a_owner_fk" FOREIGN KEY ("owner") REFERENCES "users"("id");',
+      'CREATE UNIQUE INDEX "a_name_key" ON "a" ("name");',
+    ]);
+
+    expect(checkRiskyStatements(sql)).toEqual([]);
+  });
+
+  it("TP-14.5 (A-412): the same two statements on an existing table b are both flagged", async () => {
+    const { checkRiskyStatements } = await loadCheckRisky();
+    const sql = migration([
+      'CREATE TABLE "a" ("id" uuid PRIMARY KEY NOT NULL);',
+      'ALTER TABLE "b" ADD CONSTRAINT "b_owner_fk" FOREIGN KEY ("owner") REFERENCES "users"("id");',
+      'CREATE UNIQUE INDEX "b_name_key" ON "b" ("name");',
+    ]);
+
+    expect(checkRiskyStatements(sql).map((f) => f.line)).toEqual([2, 3]);
+  });
+
+  it("TP-14.12x (A-412): a constraint added before the table's CREATE TABLE in the file is still flagged", async () => {
+    const { checkRiskyStatements } = await loadCheckRisky();
+    const sql = migration([
+      'ALTER TABLE "a" ADD CONSTRAINT "a_check" CHECK ("n" > 0);',
+      'CREATE TABLE "a" ("n" int);',
+    ]);
+
+    expect(checkRiskyStatements(sql).map((f) => f.line)).toEqual([1]);
+  });
+
   it("TP-14.11x: the review comment covers only the statement right under it", async () => {
     const { checkRiskyStatements } = await loadCheckRisky();
     const sql = [

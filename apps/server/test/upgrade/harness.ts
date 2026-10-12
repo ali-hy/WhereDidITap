@@ -4,11 +4,12 @@
 // test/upgrade/<vN>/*.test.ts against the result.
 //   - The previous tag is `git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD`.
 //   - No tag (every PR until the first release): "skipped: baseline", exit 0.
-//   - A tag but no test/upgrade/<vN>/ folder (or no version given): the previous schema is migrated
-//     to HEAD with no fixtures and no tests, and the harness passes when that succeeds.
+//   - A tag but no test/upgrade/<vN>/ folder: the previous schema is migrated to HEAD with no
+//     fixtures and no tests, and the harness passes when that succeeds.
 //
-// CLI (package script `test:upgrade`): tsx test/upgrade/harness.ts [--repo <dir>] [--version <vN>]
-// Exit 0 when skipped or passed, 1 otherwise.
+// CLI (package script `test:upgrade`): tsx test/upgrade/harness.ts --version <vN> [--repo <dir>]
+// A-411: --version is required and must be a release or hotfix version (CI passes the head branch's
+// suffix); otherwise exit 64 with the usage. Exit 0 when skipped or passed, 1 otherwise.
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -73,20 +74,21 @@ function migrationsAt(repoDir: string, tag: string): string {
   return out;
 }
 
+/** A-411: the versions --version accepts (the head branch's suffix for release and hotfix). */
+export const VERSION = /^v[0-9]+\.[0-9]+\.[0-9]+(-hotfix\.[0-9]+)?$/;
+
 export async function runUpgradeHarness(opts: {
   repoDir: string;
+  version: string;
   ref?: string;
-  version?: string | undefined;
   startPostgres?: () => Promise<FreshPostgres>;
 }): Promise<UpgradeResult> {
+  if (!VERSION.test(opts.version)) throw new RangeError(`invalid version: ${opts.version}`);
   const previousTag = previousReleaseTag(opts.repoDir, opts.ref);
   if (previousTag === null) return { status: "skipped: baseline" };
 
-  const caseDir =
-    opts.version === undefined
-      ? null
-      : path.join(opts.repoDir, "apps/server/test/upgrade", opts.version);
-  const hasCase = caseDir !== null && existsSync(caseDir);
+  const caseDir = path.join(opts.repoDir, "apps/server/test/upgrade", opts.version);
+  const hasCase = existsSync(caseDir);
   const previous = migrationsAt(opts.repoDir, previousTag);
   const pg = await (opts.startPostgres ?? startFreshPostgres)();
   try {
@@ -140,7 +142,7 @@ export async function runUpgradeHarness(opts: {
             env: { ...process.env, UPGRADE_DATABASE_URL: pg.superuserUrl("budmon") },
           },
         );
-        if (run.status !== 0) throw new Error(`upgrade tests for ${opts.version ?? "?"} failed`);
+        if (run.status !== 0) throw new Error(`upgrade tests for ${opts.version} failed`);
       }
     }
     return { status: "ran", previousTag, fixtures: hasCase, tests };
@@ -155,16 +157,19 @@ if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.a
     const i = process.argv.indexOf(name);
     return i >= 0 ? process.argv[i + 1] : undefined;
   };
-  try {
-    const result = await runUpgradeHarness({
-      repoDir: arg("--repo") ?? REPO_ROOT,
-      ...(arg("--version") === undefined ? {} : { version: arg("--version") }),
-    });
-    process.stdout.write(
-      result.status === "ran" ? `ran from ${result.previousTag}\n` : `${result.status}\n`,
-    );
-  } catch (error) {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    process.exitCode = 1;
+  const version = arg("--version");
+  if (version === undefined || !VERSION.test(version)) {
+    process.stderr.write("usage: test:upgrade --version <vX.Y.Z[-hotfix.N]> [--repo <dir>]\n");
+    process.exitCode = 64;
+  } else {
+    try {
+      const result = await runUpgradeHarness({ repoDir: arg("--repo") ?? REPO_ROOT, version });
+      process.stdout.write(
+        result.status === "ran" ? `ran from ${result.previousTag}\n` : `${result.status}\n`,
+      );
+    } catch (error) {
+      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      process.exitCode = 1;
+    }
   }
 }

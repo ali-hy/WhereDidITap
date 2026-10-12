@@ -1,5 +1,6 @@
 // TP-2.26: ci.yml's check job runs the integration tests after the unit tests (A-31), plus the extra
-// case TP-2.60x: the main-only dev-smoke job runs TP-2.18's script (§10.1 CI jobs, A-55). TP-0.26:
+// case TP-2.60x: the dev-smoke job runs TP-2.18's script on pushes to the default branch only
+// (§10.1 CI jobs, A-55, A-408). TP-0.26:
 // Testcontainers pulls Docker Hub images through mirror.gcr.io in CI (A-284). TP-0.29: the catalog
 // check runs in CI through pnpm lint (A-316). TP-0.31: the e2e job (A-334), which also covers
 // AC-11.2 (the axe report uploaded as an artifact).
@@ -32,8 +33,9 @@ describe("TP-2.26: ci.yml check job", () => {
 });
 
 describe("TP-2.60x: ci.yml dev-smoke job", () => {
-  it("TP-2.60x: a dev-smoke job runs tools/ci/test/dev-smoke.sh, only on main", () => {
+  it("TP-2.60x (A-408): a dev-smoke job runs tools/ci/test/dev-smoke.sh, only on pushes to the default branch", () => {
     const workflow = parse(readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8")) as {
+      on?: { push?: { branches?: unknown } };
       jobs?: Record<string, { if?: unknown; steps?: { run?: unknown }[] }>;
     };
     const job = workflow.jobs?.["dev-smoke"];
@@ -42,7 +44,14 @@ describe("TP-2.60x: ci.yml dev-smoke job", () => {
       .filter((run) => typeof run === "string");
 
     expect(runs.some((run) => run.includes("tools/ci/test/dev-smoke.sh"))).toBe(true);
-    expect(String(job?.if)).toContain("main");
+    const cond = typeof job?.if === "string" ? job.if : "";
+    expect(cond).toContain("github.event_name == 'push'");
+    expect(cond).toContain("github.event.repository.default_branch");
+    expect(cond).not.toMatch(/'(main|master)'/);
+    // Trigger filters can't read the default branch, so push lists both names (A-408).
+    expect([workflow.on?.push?.branches].flat()).toEqual(
+      expect.arrayContaining(["main", "master"]),
+    );
   });
 });
 

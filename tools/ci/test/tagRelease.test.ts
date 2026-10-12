@@ -1,10 +1,14 @@
-// tools/ci/tagRelease.sh (stage-0 tagging, §4.17, D-12). TP-14.10 (script part): against a fixture
-// repository with an origin, tags v1.2.0 and v1.2.0-hotfix.1, and stub gh and pnpm on PATH.
-//
-// A-365: the modes are `release` and `hotfix` (any other exits 64 with usage); the script reads the
-// pull request with gh fields state, headRefName, baseRefName, headRefOid and mergeCommit (merge
-// commit `mergeCommit.oid`), which the stub serves for any `gh pr view … --json` (through jq when
-// `--jq` is given); checks are green when `gh pr checks <pr> --required` exits 0.
+// tools/ci/tagRelease.sh (stage-0 tagging, §4.17, D-12), verify only (A-407). TP-14.10 (script
+// part): against a fixture repository whose default branch is `master` (A-408), with an origin,
+// tags v1.2.0 and v1.2.0-hotfix.1, and stubs on PATH:
+//   - gh: `pr view … --json state,headRefName,baseRefName,headRefOid,mergeCommit` (A-365) serves
+//     $PR_JSON (through jq when --jq is given); `pr checks <pr> --json name,bucket` (A-414) serves
+//     $CHECKS_JSON (default: one passing check);
+//   - pnpm: logs `pnpm <args> @ <HEAD>` (so check (i)'s commit is visible, review B-2) and exits
+//     $CHECK_I_EXIT for db:check-migrations, 0 otherwise;
+//   - git: a recording wrapper around the real git, so "no git push and no git tag" is checked.
+// The script writes tag=… and commit=… to $GITHUB_OUTPUT and never pushes; run locally (no
+// GITHUB_OUTPUT) it prints them and the commands to create the tag by hand.
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,41 +31,50 @@ let stubs: string;
 
 const GH_STUB = `#!/usr/bin/env bash
 echo "gh $*" >> "$STUB_LOG"
+jqexpr=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--jq" ] || [ "$prev" = "-q" ]; then jqexpr="$a"; fi
+  prev="$a"
+done
+serve() {
+  if [ -n "$jqexpr" ]; then jq -r "$jqexpr" "$1"; else cat "$1"; fi
+}
 if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
-  jqexpr=""
-  prev=""
-  for a in "$@"; do
-    if [ "$prev" = "--jq" ] || [ "$prev" = "-q" ]; then jqexpr="$a"; fi
-    prev="$a"
-  done
-  if [ -n "$jqexpr" ]; then jq -r "$jqexpr" "$PR_JSON"; else cat "$PR_JSON"; fi
+  serve "$PR_JSON"
   exit 0
 fi
-if [ "$1" = "pr" ] && [ "$2" = "checks" ] && [ "$3" = "7" ]; then
-  for a in "$@"; do
-    if [ "$a" = "--required" ]; then
-      echo "checks: exit $GH_CHECKS_EXIT"
-      exit "$GH_CHECKS_EXIT"
-    fi
-  done
+if [ "$1" = "pr" ] && [ "$2" = "checks" ]; then
+  serve "$CHECKS_FILE"
+  exit 0
 fi
 echo "stub gh: unsupported: $*" >&2
 exit 2
 `;
 
 const PNPM_STUB = `#!/usr/bin/env bash
-echo "pnpm $* @ $(git rev-parse HEAD 2>/dev/null)" >> "$STUB_LOG"
-exit "$CHECK_I_EXIT"
+echo "pnpm $* @ $(command git rev-parse HEAD 2>/dev/null)" >> "$STUB_LOG"
+case " $* " in
+  *" db:check-migrations "*) exit "$CHECK_I_EXIT" ;;
+esac
+exit 0
+`;
+
+/** Logs every git invocation, then runs the real git. */
+const gitStub = (realGit: string) => `#!/usr/bin/env bash
+echo "git $*" >> "$STUB_LOG"
+exec "${realGit}" "$@"
 `;
 
 beforeAll(() => {
   base = mkdtempSync(path.join(tmpdir(), "budmon-tag-"));
   stubs = path.join(base, "bin");
   mkdirSync(stubs);
+  const realGit = execFileSync("bash", ["-c", "command -v git"], { encoding: "utf8" }).trim();
   writeFileSync(path.join(stubs, "gh"), GH_STUB);
   writeFileSync(path.join(stubs, "pnpm"), PNPM_STUB);
-  chmodSync(path.join(stubs, "gh"), 0o755);
-  chmodSync(path.join(stubs, "pnpm"), 0o755);
+  writeFileSync(path.join(stubs, "git"), gitStub(realGit));
+  for (const s of ["gh", "pnpm", "git"]) chmodSync(path.join(stubs, s), 0o755);
 });
 afterAll(() => {
   rmSync(base, { recursive: true, force: true });
@@ -74,12 +87,15 @@ interface Fixture {
   commits: { release: string; merge: string; hotfix1: string; head2: string; headOnBase: string };
 }
 
-/** A repository with origin; main, release/v1.3.0 merged, v1.2.0, v1.2.0-hotfix.1 and two hotfix heads. */
+/**
+ * A repository with origin; default branch master, release/v1.3.0 merged into it, v1.2.0,
+ * v1.2.0-hotfix.1 and two hotfix heads.
+ */
 function fixture(): Fixture {
   const dir = mkdtempSync(path.join(base, "case-"));
   const origin = path.join(dir, "origin.git");
   const work = path.join(dir, "work");
-  execFileSync("git", ["init", "-q", "--bare", "-b", "main", origin]);
+  execFileSync("git", ["init", "-q", "--bare", "-b", "master", origin]);
   execFileSync("git", ["clone", "-q", origin, work], { stdio: "ignore" });
   const git = (...args: string[]) =>
     execFileSync("git", args, {
@@ -93,7 +109,7 @@ function fixture(): Fixture {
     git("commit", "-q", "-m", msg);
     return git("rev-parse", "HEAD");
   };
-  git("checkout", "-q", "-b", "main");
+  git("checkout", "-q", "-b", "master");
   commit("init");
   git("tag", "v1.2.0");
   // hotfix.1 from v1.2.0, tagged.
@@ -106,12 +122,12 @@ function fixture(): Fixture {
   // A hotfix.2 head built on v1.2.0 only.
   git("checkout", "-q", "-b", "hotfix-on-base", "v1.2.0");
   const headOnBase = commit("hotfix 2 on base");
-  // release/v1.3.0 merged into main with a merge commit.
-  git("checkout", "-q", "main");
-  commit("main work");
+  // release/v1.3.0 merged into master with a merge commit.
+  git("checkout", "-q", "master");
+  commit("master work");
   git("checkout", "-q", "-b", "release/v1.3.0");
   const release = commit("release");
-  git("checkout", "-q", "main");
+  git("checkout", "-q", "master");
   git("merge", "-q", "--no-ff", "-m", "Merge release/v1.3.0", "release/v1.3.0");
   const merge = git("rev-parse", "HEAD");
   git("push", "-q", "origin", "--all");
@@ -119,22 +135,33 @@ function fixture(): Fixture {
   return { work, origin, git, commits: { release, merge, hotfix1, head2, headOnBase } };
 }
 
-/** The environment without CI or tokens, so each case sets exactly what it tests (A-382). */
+/** The environment without CI or tokens, so each case sets exactly what it tests. */
 function baseEnv(): Record<string, string | undefined> {
-  const drop = new Set(["CI", "GITHUB_ACTIONS", "GH_TOKEN", "GITHUB_TOKEN"]);
+  const drop = new Set(["CI", "GITHUB_ACTIONS", "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_OUTPUT"]);
   return Object.fromEntries(Object.entries(process.env).filter(([key]) => !drop.has(key)));
 }
 
-function run(
-  f: Fixture,
-  mode: string,
-  pr: Record<string, unknown>,
-  opts: { checksExit?: number; checkIExit?: number; env?: Record<string, string> } = {},
-) {
+const PASSING = [{ name: "check", bucket: "pass" }];
+
+interface RunOptions {
+  checks?: readonly { name: string; bucket: string }[];
+  checkIExit?: number;
+  /** false: run locally (no GITHUB_OUTPUT). */
+  githubOutput?: boolean;
+  /** undefined: DEFAULT_BRANCH unset. */
+  defaultBranch?: string | undefined;
+}
+
+function run(f: Fixture, mode: string, pr: Record<string, unknown>, opts: RunOptions = {}) {
   const prJson = path.join(f.work, "..", "pr.json");
+  const checksFile = path.join(f.work, "..", "checks.json");
   const log = path.join(f.work, "..", "stub.log");
+  const output = path.join(f.work, "..", "github-output");
   writeFileSync(prJson, JSON.stringify({ number: 7, ...pr }));
+  writeFileSync(checksFile, JSON.stringify(opts.checks ?? PASSING));
   writeFileSync(log, "");
+  writeFileSync(output, "");
+  const defaultBranch = "defaultBranch" in opts ? opts.defaultBranch : "master";
   const result = spawnSync("bash", [SCRIPT, mode, "7"], {
     cwd: f.work,
     encoding: "utf8",
@@ -143,28 +170,43 @@ function run(
       ...GIT_ENV,
       PATH: `${stubs}:${process.env["PATH"] ?? ""}`,
       PR_JSON: prJson,
+      CHECKS_FILE: checksFile,
       STUB_LOG: log,
-      GH_CHECKS_EXIT: String(opts.checksExit ?? 0),
       CHECK_I_EXIT: String(opts.checkIExit ?? 0),
-      ...opts.env,
+      GH_TOKEN: "ghs_readonly_test_token",
+      ...(opts.githubOutput === false ? {} : { GITHUB_OUTPUT: output }),
+      ...(defaultBranch === undefined ? {} : { DEFAULT_BRANCH: defaultBranch }),
     },
   });
-  const remoteTags = execFileSync("git", ["ls-remote", "--tags", f.origin], { encoding: "utf8" });
+  const outputs = Object.fromEntries(
+    readFileSync(output, "utf8")
+      .split("\n")
+      .filter((l) => l.includes("="))
+      .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
+  );
+  const stubLog = readFileSync(log, "utf8");
   return {
     status: result.status,
+    stdout: result.stdout,
     output: `${result.stdout}${result.stderr}`,
-    log: readFileSync(log, "utf8"),
-    remoteTag: (tag: string) =>
-      new RegExp(`^([0-9a-f]{40})\\trefs/tags/${tag.replace(/\./g, "\\.")}$`, "m").exec(
-        remoteTags,
-      )?.[1] ?? null,
+    outputs,
+    log: stubLog,
+    /** git calls that would create or push a tag. */
+    tagWrites: stubLog
+      .split("\n")
+      .filter((l) => /^git (.* )?(push|tag)( |$)/.test(l) && !/^git (.* )?tag -l\b/.test(l)),
+    remoteTags: execFileSync("git", ["ls-remote", "--tags", f.origin], { encoding: "utf8" }),
   };
 }
+
+/** The log line for check (i) on `commit` (review B-2). */
+const checkIOn = (commit: string) =>
+  new RegExp(`^pnpm (.* )?db:check-migrations( .*)? @ ${commit}$`, "m");
 
 const releasePr = (f: Fixture, over: Record<string, unknown> = {}) => ({
   state: "MERGED",
   headRefName: "release/v1.3.0",
-  baseRefName: "main",
+  baseRefName: "master",
   headRefOid: f.commits.release,
   mergeCommit: { oid: f.commits.merge },
   ...over,
@@ -173,39 +215,42 @@ const releasePr = (f: Fixture, over: Record<string, unknown> = {}) => ({
 const hotfixPr = (f: Fixture, over: Record<string, unknown> = {}) => ({
   state: "OPEN",
   headRefName: "hotfix/v1.2.0-hotfix.2",
-  baseRefName: "main",
+  baseRefName: "master",
   headRefOid: f.commits.head2,
   mergeCommit: null,
   ...over,
 });
 
 describe("TP-14.10: tagRelease.sh, release mode", () => {
-  it("TP-14.10 (a): a merged release/v1.3.0 PR whose check (i) passes gets v1.3.0 on the merge commit, pushed", () => {
+  it("TP-14.10 (a): a merged release/v1.3.0 PR whose check (i) passes outputs tag=v1.3.0 and the merge commit; no git push or git tag", () => {
     const f = fixture();
 
     const r = run(f, "release", releasePr(f));
 
     expect(r.status, r.output).toBe(0);
-    expect(r.remoteTag("v1.3.0")).toBe(f.commits.merge);
-    expect(r.log).toMatch(/pnpm db:check-migrations/);
+    expect(r.outputs).toEqual({ tag: "v1.3.0", commit: f.commits.merge });
+    expect(r.tagWrites).toEqual([]);
+    expect(r.remoteTags).not.toContain("refs/tags/v1.3.0");
+    // Review B-2: check (i) ran on the commit being tagged.
+    expect(r.log).toMatch(checkIOn(f.commits.merge));
   }, 60_000);
 
-  it("TP-14.10 (b): when check (i) fails: exit 1, no tag", () => {
+  it("TP-14.10 (b): when check (i) fails: exit 1, no outputs", () => {
     const f = fixture();
 
     const r = run(f, "release", releasePr(f), { checkIExit: 1 });
 
     expect(r.status).toBe(1);
-    expect(r.remoteTag("v1.3.0")).toBeNull();
+    expect(r.outputs).toEqual({});
   }, 60_000);
 
-  it("TP-14.10 (c): a PR closed without merge: exit 0, no tag", () => {
+  it("TP-14.10 (c): a PR closed without merge: exit 0, no outputs", () => {
     const f = fixture();
 
     const r = run(f, "release", releasePr(f, { state: "CLOSED", mergeCommit: null }));
 
     expect(r.status, r.output).toBe(0);
-    expect(r.remoteTag("v1.3.0")).toBeNull();
+    expect(r.outputs).toEqual({});
   }, 60_000);
 
   it("TP-14.10 (d): branch release/x: exit 1, branch name invalid", () => {
@@ -215,9 +260,10 @@ describe("TP-14.10: tagRelease.sh, release mode", () => {
 
     expect(r.status).toBe(1);
     expect(r.output).toContain("branch name invalid");
+    expect(r.outputs).toEqual({});
   }, 60_000);
 
-  it("TP-14.10 (k): the tag already exists: exit 1, tag exists, tag unchanged", () => {
+  it("TP-14.10 (k): the tag already exists: exit 1, tag exists, no outputs", () => {
     const f = fixture();
     f.git("tag", "v1.3.0", f.commits.release);
     f.git("push", "-q", "origin", "v1.3.0");
@@ -226,27 +272,56 @@ describe("TP-14.10: tagRelease.sh, release mode", () => {
 
     expect(r.status).toBe(1);
     expect(r.output).toContain("tag exists");
-    expect(r.remoteTag("v1.3.0")).toBe(f.commits.release);
+    expect(r.outputs).toEqual({});
+  }, 60_000);
+
+  it("TP-14.10 (n): run locally (no GITHUB_OUTPUT): prints tag and commit and the manual commands, and pushes nothing", () => {
+    const f = fixture();
+
+    const r = run(f, "release", releasePr(f), { githubOutput: false });
+
+    expect(r.status, r.output).toBe(0);
+    expect(r.stdout).toMatch(/^tag=v1\.3\.0$/m);
+    expect(r.stdout).toMatch(new RegExp(`^commit=${f.commits.merge}$`, "m"));
+    // The two commands to create the tag by hand name the tag and the commit.
+    const commandLines = r.stdout
+      .split("\n")
+      .filter((l) => l.includes("v1.3.0") && !l.startsWith("tag="));
+    expect(commandLines.length).toBeGreaterThanOrEqual(2);
+    expect(commandLines.join("\n")).toContain(f.commits.merge);
+    expect(r.tagWrites).toEqual([]);
+    expect(r.remoteTags).not.toContain("refs/tags/v1.3.0");
   }, 60_000);
 });
 
 describe("TP-14.10: tagRelease.sh, hotfix mode", () => {
-  it("TP-14.10 (e): an open hotfix/v1.2.0-hotfix.2 PR into main, checks green, built on v1.2.0-hotfix.1: v1.2.0-hotfix.2 on the head, pushed", () => {
+  it("TP-14.10 (e): an open hotfix/v1.2.0-hotfix.2 PR into master, checks pass, built on v1.2.0-hotfix.1: outputs tag=v1.2.0-hotfix.2 and the head", () => {
     const f = fixture();
 
     const r = run(f, "hotfix", hotfixPr(f));
 
     expect(r.status, r.output).toBe(0);
-    expect(r.remoteTag("v1.2.0-hotfix.2")).toBe(f.commits.head2);
+    expect(r.outputs).toEqual({ tag: "v1.2.0-hotfix.2", commit: f.commits.head2 });
+    expect(r.tagWrites).toEqual([]);
+    // Review B-2: check (i) ran on the head.
+    expect(r.log).toMatch(checkIOn(f.commits.head2));
+    // A-414: the checks come from gh pr checks 7 --json name,bucket, not --required.
+    expect(r.log).toMatch(/^gh pr checks 7 .*--json name,bucket/m);
+    expect(r.log).not.toMatch(/--required/);
   }, 60_000);
 
-  it("TP-14.10 (e) (A-365): the checks come from gh pr checks 7 --required", () => {
+  it("TP-14.10 (e) (A-414): a skipping check counts as green", () => {
     const f = fixture();
 
-    const r = run(f, "hotfix", hotfixPr(f));
+    const r = run(f, "hotfix", hotfixPr(f), {
+      checks: [
+        { name: "check", bucket: "pass" },
+        { name: "android", bucket: "skipping" },
+      ],
+    });
 
     expect(r.status, r.output).toBe(0);
-    expect(r.log).toMatch(/^gh pr checks 7 .*--required/m);
+    expect(r.outputs).toEqual({ tag: "v1.2.0-hotfix.2", commit: f.commits.head2 });
   }, 60_000);
 
   it("TP-14.10 (f): the head built on v1.2.0 only: exit 1, not built on v1.2.0-hotfix.1", () => {
@@ -256,26 +331,41 @@ describe("TP-14.10: tagRelease.sh, hotfix mode", () => {
 
     expect(r.status).toBe(1);
     expect(r.output).toContain("not built on v1.2.0-hotfix.1");
-    expect(r.remoteTag("v1.2.0-hotfix.2")).toBeNull();
+    expect(r.outputs).toEqual({});
   }, 60_000);
 
-  it("TP-14.10 (g): base release/v1.3.0: exit 1, base must be main", () => {
+  it("TP-14.10 (g): base release/v1.3.0: exit 1, base must be the default branch", () => {
     const f = fixture();
 
     const r = run(f, "hotfix", hotfixPr(f, { baseRefName: "release/v1.3.0" }));
 
     expect(r.status).toBe(1);
-    expect(r.output).toContain("base must be main");
+    expect(r.output).toContain("base must be the default branch");
   }, 60_000);
 
   it("TP-14.10 (h): a failing check: exit 1, checks not green", () => {
     const f = fixture();
 
-    const r = run(f, "hotfix", hotfixPr(f), { checksExit: 1 });
+    const r = run(f, "hotfix", hotfixPr(f), {
+      checks: [
+        { name: "check", bucket: "pass" },
+        { name: "migrations", bucket: "fail" },
+      ],
+    });
 
     expect(r.status).toBe(1);
     expect(r.output).toContain("checks not green");
-    expect(r.remoteTag("v1.2.0-hotfix.2")).toBeNull();
+    expect(r.outputs).toEqual({});
+  }, 60_000);
+
+  it("TP-14.10 (h2) (A-414): no checks at all: exit 1, checks not green", () => {
+    const f = fixture();
+
+    const r = run(f, "hotfix", hotfixPr(f), { checks: [] });
+
+    expect(r.status).toBe(1);
+    expect(r.output).toContain("checks not green");
+    expect(r.outputs).toEqual({});
   }, 60_000);
 
   it("TP-14.10 (i): a closed PR: exit 1, pull request not open", () => {
@@ -297,44 +387,24 @@ describe("TP-14.10: tagRelease.sh, hotfix mode", () => {
   }, 60_000);
 });
 
-describe("TP-14.10 (A-365): tagRelease.sh modes", () => {
-  it("TP-14.10: tagRelease.sh deploy 12 exits 64 with the usage text, and pushes nothing", () => {
-    const f = fixture();
-    const before = execFileSync("git", ["ls-remote", "--tags", f.origin], { encoding: "utf8" });
-
-    const r = spawnSync("bash", [SCRIPT, "deploy", "12"], {
-      cwd: f.work,
-      encoding: "utf8",
-      env: { ...baseEnv(), ...GIT_ENV, PATH: `${stubs}:${process.env["PATH"] ?? ""}` },
-    });
-
-    expect(r.status, `${r.stdout}${r.stderr}`).toBe(64);
-    expect(`${r.stdout}${r.stderr}`.toLowerCase()).toContain("usage");
-    expect(execFileSync("git", ["ls-remote", "--tags", f.origin], { encoding: "utf8" })).toBe(
-      before,
-    );
-  }, 60_000);
-});
-
-// A-382: an empty GH_TOKEN is allowed only outside CI.
-describe("TP-14.10 (A-382): GH_TOKEN and CI", () => {
-  it("TP-14.10: with CI set and an empty GH_TOKEN: exit 1, GH_TOKEN missing, before any check", () => {
+describe("TP-14.10: tagRelease.sh usage (A-365, A-408)", () => {
+  it("TP-14.10 (l): mode deploy exits 64 with the usage text and no outputs", () => {
     const f = fixture();
 
-    const r = run(f, "release", releasePr(f), { env: { CI: "true", GH_TOKEN: "" } });
+    const r = run(f, "deploy", releasePr(f));
 
-    expect(r.status, r.output).toBe(1);
-    expect(r.output).toContain("GH_TOKEN missing");
-    expect(r.log).toBe("");
-    expect(r.remoteTag("v1.3.0")).toBeNull();
+    expect(r.status, r.output).toBe(64);
+    expect(r.output.toLowerCase()).toContain("usage");
+    expect(r.outputs).toEqual({});
   }, 60_000);
 
-  it("TP-14.10: without CI and with no GH_TOKEN: a plain push (no extraheader) of the tag", () => {
+  it("TP-14.10 (m): DEFAULT_BRANCH unset exits 64 before any check", () => {
     const f = fixture();
 
-    const r = run(f, "release", releasePr(f));
+    const r = run(f, "release", releasePr(f), { defaultBranch: undefined });
 
-    expect(r.status, r.output).toBe(0);
-    expect(r.remoteTag("v1.3.0")).toBe(f.commits.merge);
+    expect(r.status, r.output).toBe(64);
+    expect(r.log).not.toMatch(/^(gh|pnpm) /m);
+    expect(r.outputs).toEqual({});
   }, 60_000);
 });

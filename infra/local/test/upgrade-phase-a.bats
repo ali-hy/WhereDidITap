@@ -20,9 +20,12 @@ stub_git() {
   case "\${args[0]:-}" in
     fetch) return 0 ;;
     rev-parse|rev-list) echo "${COMMIT}"; return 0 ;;
+    remote) return 0 ;;
+    symbolic-ref) echo "origin/master"; return 0 ;;
     merge-base)
+      # A-408: the default branch is origin's HEAD (master here), by either name.
       local ref="\${args[-1]}"
-      for ok in \${ANCESTOR_OF:-origin/main}; do [ "\${ref}" = "\${ok}" ] && return 0; done
+      for ok in \${ANCESTOR_OF:-origin/HEAD origin/master}; do [ "\${ref}" = "\${ok}" ] && return 0; done
       return 1 ;;
     worktree)
       if [ "\${args[1]}" = "add" ]; then
@@ -99,6 +102,15 @@ CONF
   assert_line "commit=${COMMIT}"
   run tail -n 1 "${CALLS}"
   assert_output --regexp "^budmon-local	.*	_upgrade-continue v1.2.0	REEXEC=1	path=${rel}/budmon-local$"
+}
+
+@test "TP-15.20 (A-408): the ancestry check refreshes origin's HEAD and never names a branch" {
+  run "${SCRIPT}" upgrade v1.2.0
+  assert_success
+  run bash -c "awk -F'\t' '\$1==\"git\" { print \$3 }' '${CALLS}'"
+  assert_output --partial "remote set-head origin --auto"
+  refute_output --partial "origin/main"
+  assert_output --regexp "merge-base --is-ancestor v1\.2\.0 origin/(HEAD|master)"
 }
 
 @test "TP-15.20: upgrade --no-dump is passed on to phase B" {

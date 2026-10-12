@@ -9,7 +9,8 @@
 // Plus A-366/A-367's exact conditions, permissions, the job-summary report and actionlint 1.7.12
 // through tools/ci/setup-actionlint.sh.
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -233,5 +234,90 @@ describe("TP-14.8 (A-366, A-367): the migrations job's exact wiring", () => {
     expect(
       stepsRun(pullRequestContext({ headRef: "infra/x", labels: ["infra-merge-back"] })),
     ).toContain("merge-back");
+  });
+});
+
+// A-408, A-411 and review N-5 on the migrations job.
+describe("TP-14.8 (A-408, A-411): default branch, check (iv)'s version and F-6b's kinds", () => {
+  const steps = () => jobs()["migrations"]?.steps ?? [];
+  const stepOf = (kind: keyof typeof KINDS) =>
+    steps().find((s) => typeof s.run === "string" && KINDS[kind].test(s.run));
+
+  it("TP-14.8 (A-408): no run in ci.yml names origin/main; the F-6 and F-6b diffs use origin/${BASE_REF}", () => {
+    const all = Object.values(jobs()).flatMap((j) =>
+      (j.steps ?? []).map((s) => (typeof s.run === "string" ? s.run : "")),
+    );
+
+    for (const r of all) expect(r).not.toContain("origin/main");
+    const diffs = steps()
+      .map((s) => (typeof s.run === "string" ? s.run : ""))
+      .filter((r) => /git .*diff/.test(r));
+    expect(diffs.length).toBeGreaterThanOrEqual(2);
+    for (const d of diffs) expect(d).toContain('"origin/${BASE_REF}...HEAD"');
+  });
+
+  it('TP-14.8 (A-411): check (iv) gets HEAD_REF from github.head_ref and passes --version "${HEAD_REF#*/}"', () => {
+    const step = stepOf("check (iv)");
+
+    expect(String(step?.env?.["HEAD_REF"]).replace(/\s+/g, "")).toBe("${{github.head_ref}}");
+    expect(String(step?.run)).toContain('--version "${HEAD_REF#*/}"');
+  });
+
+  /** Runs F-6b's step script with stubbed git and tsx; returns the CLI's argv. */
+  function mergeBackArgs(labels: { hotfix: boolean; infra: boolean }): string[] {
+    const script = String(stepOf("merge-back")?.run);
+    const dir = mkdtempSync(path.join(tmpdir(), "budmon-f6b-step-"));
+    try {
+      const bin = path.join(dir, "bin");
+      mkdirSync(bin);
+      mkdirSync(path.join(dir, "node_modules/.bin"), { recursive: true });
+      writeFileSync(
+        path.join(bin, "git"),
+        '#!/usr/bin/env bash\necho "apps/server/drizzle/0001_v1.2.0-hotfix.1.sql"\n',
+      );
+      writeFileSync(
+        path.join(dir, "node_modules/.bin/tsx"),
+        `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > "${path.join(dir, "argv")}"\n`,
+      );
+      chmodSync(path.join(bin, "git"), 0o755);
+      chmodSync(path.join(dir, "node_modules/.bin/tsx"), 0o755);
+      const r = spawnSync("bash", ["-e", "-c", script], {
+        cwd: dir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          PATH: `${bin}:${process.env["PATH"] ?? ""}`,
+          BASE_REF: "master",
+          GITHUB_WORKSPACE: dir,
+          HOTFIX_LABEL: String(labels.hotfix),
+          INFRA_LABEL: String(labels.infra),
+        },
+      });
+      expect(r.status, r.stderr).toBe(0);
+      return readFileSync(path.join(dir, "argv"), "utf8").trim().split("\n");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("TP-14.8 (N-5): F-6b's step env reads each label separately", () => {
+    const env = stepOf("merge-back")?.env ?? {};
+
+    expect(String(env["HOTFIX_LABEL"])).toContain("'hotfix-merge-back'");
+    expect(String(env["HOTFIX_LABEL"])).not.toContain("'infra-merge-back'");
+    expect(String(env["INFRA_LABEL"])).toContain("'infra-merge-back'");
+    expect(String(env["INFRA_LABEL"])).not.toContain("'hotfix-merge-back'");
+  });
+
+  it.each([
+    [{ hotfix: true, infra: false }, ["--kind", "hotfix"]],
+    [{ hotfix: false, infra: true }, ["--kind", "infra"]],
+    [{ hotfix: true, infra: true }, ["--kind", "hotfix", "--kind", "infra"]],
+  ] as const)("TP-14.8 (N-5): labels %j give %j, then the added files", (labels, kinds) => {
+    expect(mergeBackArgs(labels)).toEqual([
+      "checkMergeBack.ts",
+      ...kinds,
+      "apps/server/drizzle/0001_v1.2.0-hotfix.1.sql",
+    ]);
   });
 });

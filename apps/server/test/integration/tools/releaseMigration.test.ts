@@ -84,7 +84,7 @@ describe("TP-14.3: pendingSchemaReport doesn't touch the repository (F-181)", ()
     git("add", "-A");
     git("commit", "-q", "-m", "fixture");
 
-    // A-361: deps are { spawnPty } (the real node-pty here), and input takes timeoutMs.
+    // A-361, A-377: deps are { spawnPty } (the real scriptPty here), and input takes timeoutMs.
     const report = await pendingSchemaReport(
       { serverDir: dir, timeoutMs: 150_000 },
       { spawnPty: await loadScriptPty() },
