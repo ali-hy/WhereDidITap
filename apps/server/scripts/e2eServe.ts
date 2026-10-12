@@ -236,7 +236,11 @@ async function main(): Promise<void> {
     // 3. The web app with fixtures and pseudo-locales, then vite preview (proxying the API).
     const outDir = path.join(dir, "web");
     // A-395: vite.config.ts's preview proxy targets E2E_API_PORT.
+    // F-222: e2e has no Sentry DSN. Vite gives the process environment precedence over
+    // apps/web/.env* (including .env.local, which every mode loads), so an empty value here
+    // keeps a developer's VITE_SENTRY_DSN out of the bundle.
     const buildEnv = {
+      VITE_SENTRY_DSN: "",
       VITE_FIXTURES: "1",
       VITE_PSEUDO_LOCALES: "1",
       E2E_API_PORT: String(API_PORT),
