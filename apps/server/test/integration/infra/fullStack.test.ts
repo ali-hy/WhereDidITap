@@ -418,9 +418,9 @@ describe.skipIf(!INFRA_INT)("TP-15.28 (I): secret set with real sudo (F-178)", (
   }, 300_000);
 });
 
-/** The PEM of a fresh RSA public key (CAPTURE_PUBLIC_KEY's shape). */
+/** The PEM of a fresh RSA-3072 public key: CAPTURE_PUBLIC_KEY must be at least 3072 bits (F-10). */
 function rsaPublicPem(): string {
-  return generateKeyPairSync("rsa", { modulusLength: 2048 })
+  return generateKeyPairSync("rsa", { modulusLength: 3072 })
     .publicKey.export({ type: "spki", format: "pem" })
     .toString();
 }
