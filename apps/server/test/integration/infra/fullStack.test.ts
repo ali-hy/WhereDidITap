@@ -492,6 +492,49 @@ describe.skipIf(!INFRA_INT)("TP-15.22 (I): install and restore on a real runner 
     adminSql(`DROP DATABASE ${scratch}`, "postgres");
   };
 
+  const tail = (text: string, n: number) => text.trimEnd().split("\n").slice(-n);
+  /** What a failed start leaves to read: each container's state, health and log tail, and the three readiness probes budmon-local runs (F-178). */
+  const stackDiagnostics = () => {
+    const out: string[] = ["---- stack diagnostics ----"];
+    for (const project of ["budmon-main", "budmon-capture"]) {
+      const ids = sh("docker", [
+        "ps",
+        "-aq",
+        "--filter",
+        `label=com.docker.compose.project=${project}`,
+      ])
+        .stdout.split("\n")
+        .filter((id) => id !== "");
+      for (const id of ids) {
+        out.push(
+          sh("docker", [
+            "inspect",
+            "-f",
+            "== {{.Name}} {{.State.Status}} restarts={{.RestartCount}} exit={{.State.ExitCode}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}",
+            id,
+          ]).stdout.trim(),
+        );
+        const logs = sh("docker", ["logs", "--tail", "40", id]);
+        out.push(...tail(`${logs.stdout}${logs.stderr}`, 40).map((l) => `   ${l}`));
+      }
+    }
+    for (const [project, service, args] of [
+      ["main", "api", ["--ready"]],
+      ["main", "worker-general", ["--heartbeat"]],
+      ["capture", "worker-capture", ["--heartbeat"]],
+    ] as const) {
+      const id = container(project, service);
+      const probe =
+        id === ""
+          ? { status: null, stdout: "", stderr: "no container" }
+          : sh("docker", ["exec", id, "node", "dist/main/healthcheck.js", ...args]);
+      out.push(
+        `probe ${service} ${args.join(" ")}: exit ${String(probe.status)} ${`${probe.stdout}${probe.stderr}`.trim()}`,
+      );
+    }
+    return out.join("\n");
+  };
+
   beforeAll(async () => {
     work = mkdtempSync(path.join(tmpdir(), "budmon-tp15-22-"));
     home = path.join(work, "home");
@@ -560,7 +603,14 @@ describe.skipIf(!INFRA_INT)("TP-15.22 (I): install and restore on a real runner 
     // Second install: builds the three images from the tag and starts both projects.
     const second = budmonLocal(["install", TAG]);
     if (second.status !== 0) {
-      throw new Error(`install 2: ${String(second.status)}\n${second.stdout}${second.stderr}`);
+      const report = [
+        `install 2 exited ${String(second.status)}; its last lines:`,
+        ...tail(`${second.stdout}${second.stderr}`, 30),
+        stackDiagnostics(),
+      ].join("\n");
+      // Printed as well as thrown: the runner's annotation truncates long messages.
+      process.stderr.write(`${report}\n`);
+      throw new Error(report);
     }
     for (let i = 0; i < 120 && (await ready().catch(() => 0)) !== 200; i += 1) {
       await new Promise((r) => setTimeout(r, 1_000));
