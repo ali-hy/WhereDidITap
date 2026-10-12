@@ -46,6 +46,8 @@ STUB
     chmod +x "${STUB_DIR}/${cmd}"
   done
   export PATH="${STUB_DIR}:${PATH}"
+  # Stubs run as their own processes; let a stub_<cmd> call the fake F-191 helpers.
+  export -f fake_init_local fill_placeholders
   unset BUDMON_REEXEC BUDMON_FIRST_SETUP BUDMON_PG_READY_TIMEOUT BUDMON_READY_TIMEOUT BUDMON_RENAME_RETRY_DELAY
 }
 

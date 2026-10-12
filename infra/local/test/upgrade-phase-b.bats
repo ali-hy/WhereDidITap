@@ -62,7 +62,8 @@ run_phase_b() {
 }
 
 compose_calls() {
-  calls_of docker | grep -F ' compose '
+  # `compose` is usually the first argument, so it follows the tab, not a space.
+  calls_of docker | awk -F'\t' '$3 ~ /(^| )compose /'
 }
 
 @test "TP-15.21 (a): builds, removes the worktree, dumps, migrates, starts both projects, checks readiness, then records state" {
