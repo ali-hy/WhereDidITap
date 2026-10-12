@@ -23,10 +23,16 @@ setup() {
   common_setup
   cat >"${STUB_CONFIG}" <<'CONF'
 stub_git() {
-  local args=("$@")
-  while [ "${args[0]:-}" = "-C" ]; do args=("${args[@]:2}"); done
+  local args=("$@") where=""
+  while [ "${args[0]:-}" = "-C" ]; do where="${args[1]}"; args=("${args[@]:2}"); done
   case "${args[0]:-}" in
-    rev-parse) echo "c0ffee0000000000000000000000000000000001" ;;
+    rev-parse)
+      # TP-15.39 (f): an existing build worktree at another commit.
+      if [ "${STALE_WORKTREE:-0}" = 1 ] && [[ "${where}" == */build/v1.0.0 ]]; then
+        echo "badbad0000000000000000000000000000000002"
+      else
+        echo "c0ffee0000000000000000000000000000000001"
+      fi ;;
     rev-list) echo 42 ;;
     merge-base|fetch) return 0 ;;
     worktree)
@@ -56,8 +62,23 @@ stub_pnpm() {
 }
 stub_sudo() {
   case "$1" in
+    --)
+      # A-429: `sudo -- sh -c '<grep>; printf "status=%s\n" "$?"' …`, run for real, with an
+      # optional grep stub ahead on PATH (GREP_EXIT), or sudo itself failing (SUDO_SH_FAIL).
+      shift
+      [ "${SUDO_SH_FAIL:-0}" = 1 ] && return 1
+      if [ -n "${GREP_EXIT:-}" ]; then
+        local d; d="$(mktemp -d)"
+        printf '#!/bin/sh\nexit %s\n' "${GREP_EXIT}" >"${d}/grep"
+        chmod +x "${d}/grep"
+        PATH="${d}:${PATH}" "$@"
+        return $?
+      fi
+      "$@"
+      return $? ;;
     install)
       local args=("$@") out="${args[-1]}" i dir=0
+      if [ -n "${INSTALL_FAIL_MATCH:-}" ] && [[ "${out}" == *"${INSTALL_FAIL_MATCH}" ]]; then return 1; fi
       for i in "${args[@]}"; do [ "${i}" = "-d" ] && dir=1; done
       if [ "${dir}" = 1 ]; then mkdir -p "${out}"; elif [[ " $* " == *" /dev/stdin "* ]]; then mkdir -p "$(dirname "${out}")"; cat >"${out}"; fi
       return 0 ;;
@@ -67,7 +88,10 @@ stub_sudo() {
   esac
 }
 stub_openssl() {
-  local prev="" a
+  local prev="" a n
+  n=$(( $(cat "${CALLS}.openssl" 2>/dev/null || echo 0) + 1 ))
+  echo "${n}" >"${CALLS}.openssl"
+  [ -n "${OPENSSL_FAIL_AT:-}" ] && [ "${n}" -eq "${OPENSSL_FAIL_AT}" ] && return 1
   for a in "$@"; do
     case "${prev}" in -out|-keyout) mkdir -p "$(dirname "${a}")"; echo "pem" >"${a}" ;; esac
     prev="${a}"
@@ -78,6 +102,10 @@ stub_openssl() {
 stub_docker() {
   local all="$*"
   if [[ "${all}" == run\ * && -n "${PROBE_FAIL_DIR:-}" && "${all}" == *"${PROBE_FAIL_DIR}:"* ]]; then return 1; fi
+  if [[ "${all}" == *"pg_isready"* ]]; then
+    [ -n "${PG_PROBE_SLEEP:-}" ] && /bin/sleep "${PG_PROBE_SLEEP}"
+    return "${PG_READY_EXIT:-0}"
+  fi
   return 0
 }
 CONF
@@ -103,12 +131,14 @@ placeholder_ready_home() {
   assert_output --partial "secrets init-local --home ${BUDMON_HOME}"
   assert_output --partial "${BUDMON_HOME}/build/v1.0.0"
 
-  # A-421: per service directory, chmod 0400 on its files, then chmod 0500 on it, then chown -R.
+  # A-421, A-428: per service directory, chmod 0400 on its files (sudo find), then chmod 0500 on
+  # it, then chown -R.
   local uid dir path files_at dir_at chown_at
   for pair in "10001 secrets/main/api" "10002 secrets/main/worker-general" "10003 secrets/capture/worker-capture" "10004 secrets/main/migrate" "999 secrets/main/postgres"; do
     read -r uid dir <<<"${pair}"
     path="${BUDMON_HOME}/${dir}"
-    files_at="$(awk -F'\t' -v p="chmod 0400 ${path}/" '$1=="sudo" && index($3, p)==1 { print NR; exit }' "${CALLS}")"
+    # A-428: the files' chmod goes through `sudo find`, which works once another UID owns the dir.
+    files_at="$(awk -F'\t' -v a="find ${path} -maxdepth 1 -type f -exec chmod 0400 {} +" '$1=="sudo" && $3==a { print NR; exit }' "${CALLS}")"
     dir_at="$(awk -F'\t' -v a="chmod 0500 ${path}" '$1=="sudo" && $3==a { print NR; exit }' "${CALLS}")"
     chown_at="$(awk -F'\t' -v a="chown -R ${uid}:${uid} ${path}" '$1=="sudo" && $3==a { print NR; exit }' "${CALLS}")"
     [ -n "${files_at}" ] && [ -n "${dir_at}" ] && [ -n "${chown_at}" ] &&
@@ -286,3 +316,167 @@ CONF
   assert_success
   refute [ -e "${BUDMON_HOME}/maintenance/on" ]
 }
+
+# ---- TP-15.39 (A-428): install is resumable step by step ----
+
+# A recording mv that does the move (mv isn't one of the shared stubs).
+recording_mv() {
+  cat >"${STUB_DIR}/mv" <<'MV'
+#!/usr/bin/env bash
+printf 'mv\t%s\t%s\n' "${PWD}" "$*" >>"${CALLS}"
+exec /bin/mv "$@"
+MV
+  chmod +x "${STUB_DIR}/mv"
+}
+
+@test "TP-15.39 (a), (b): openssl failing on its third call leaves no ca/ files and no .ca-tmp.*; a re-run completes, moving ca.crt then ca.key last" {
+  recording_mv
+  export OPENSSL_FAIL_AT=3
+  run bash -c "printf '%s' \"\${ANSWERS}\" | '${SCRIPT}' install v1.0.0"
+  assert_failure 1
+  [ -z "$(find "${BUDMON_HOME}/ca" -type f 2>/dev/null)" ] || { find "${BUDMON_HOME}/ca"; return 1; }
+  [ -z "$(find "${BUDMON_HOME}" -maxdepth 1 -name '.ca-tmp.*')" ]
+
+  unset OPENSSL_FAIL_AT
+  rm -f "${CALLS}.openssl"
+  : >"${CALLS}"
+  run bash -c "printf '%s' \"\${ANSWERS}\" | '${SCRIPT}' install v1.0.0"
+  assert_failure 20
+  local key
+  for key in main/postgres/TLS_KEY main/postgres/TLS_CERT capture/worker-capture/DB_CA_CERT; do
+    run bash -c "awk -F'\t' '\$1==\"sudo\" && \$3 ~ /^install .*\/dev\/stdin .*secrets\/${key//\//\\/}$/' '${CALLS}'"
+    [ -n "${output}" ] || { echo "no write of ${key}"; return 1; }
+  done
+  run bash -c "awk -F'\t' '\$1==\"mv\" && \$3 ~ /\/ca\.(crt|key) /' '${CALLS}'"
+  [ "${#lines[@]}" -eq 2 ] || { echo "${output}"; return 1; }
+  [[ "${lines[0]}" == *"/ca.crt "*"/ca/ca.crt" ]] && [[ "${lines[1]}" == *"/ca.key "*"/ca/ca.key" ]] || { echo "${output}"; return 1; }
+  [ "$(stat -c '%a' "${BUDMON_HOME}/ca/ca.key")" = "400" ]
+  [ "$(stat -c '%a' "${BUDMON_HOME}/ca/ca.crt")" = "444" ]
+  [ "$(stat -c '%a' "${BUDMON_HOME}/ca")" = "700" ]
+}
+
+@test "TP-15.39 (c): a write_secret failing for TLS_CERT leaves no ca/ca.key; the re-run regenerates and writes all three" {
+  export INSTALL_FAIL_MATCH="/TLS_CERT"
+  run bash -c "printf '%s' \"\${ANSWERS}\" | '${SCRIPT}' install v1.0.0"
+  assert_failure
+  [ ! -e "${BUDMON_HOME}/ca/ca.key" ]
+
+  unset INSTALL_FAIL_MATCH
+  : >"${CALLS}"
+  run bash -c "printf '%s' \"\${ANSWERS}\" | '${SCRIPT}' install v1.0.0"
+  assert_failure 20
+  [ -e "${BUDMON_HOME}/ca/ca.key" ]
+  run bash -c "awk -F'\t' '\$1==\"openssl\"' '${CALLS}' | wc -l"
+  [ "${output}" -ge 3 ]
+  for key in TLS_KEY TLS_CERT DB_CA_CERT; do
+    awk -F'\t' -v k="/${key}" '$1=="sudo" && $3 ~ /^install .*\/dev\/stdin / && substr($3, length($3) - length(k) + 1) == k { found = 1 } END { exit !found }' "${CALLS}" ||
+      { echo "no write of ${key}"; return 1; }
+  done
+}
+
+@test "TP-15.39 (d): stale .ca-tmp.x and .site.env.y in BUDMON_HOME are removed" {
+  mkdir -p "${BUDMON_HOME}/.ca-tmp.x"
+  : >"${BUDMON_HOME}/.site.env.y"
+  run bash -c "printf '%s' \"\${ANSWERS}\" | '${SCRIPT}' install v1.0.0"
+  assert_failure 20
+  [ ! -e "${BUDMON_HOME}/.ca-tmp.x" ]
+  [ ! -e "${BUDMON_HOME}/.site.env.y" ]
+}
+
+@test "TP-15.39 (e): a second install with secrets/.initialised and ca/ca.key: no openssl, no F-191, ownership applied again for every service directory" {
+  placeholder_ready_home
+  [ -e "${BUDMON_HOME}/secrets/.initialised" ] && [ -e "${BUDMON_HOME}/ca/ca.key" ]
+  run "${SCRIPT}" install v1.0.0
+  run calls_of openssl
+  assert_output ""
+  run bash -c "awk -F'\t' '\$1==\"pnpm\" && \$3 ~ /secrets init-local/' '${CALLS}'"
+  assert_output ""
+  local uid dir path
+  for pair in "10001 secrets/main/api" "10002 secrets/main/worker-general" "10003 secrets/capture/worker-capture" "10004 secrets/main/migrate" "999 secrets/main/postgres"; do
+    read -r uid dir <<<"${pair}"
+    path="${BUDMON_HOME}/${dir}"
+    grep -qF "find ${path} -maxdepth 1 -type f -exec chmod 0400 {} +" "${CALLS}" || { echo "no find for ${dir}"; return 1; }
+    grep -qF "chmod 0500 ${path}" "${CALLS}" || { echo "no chmod for ${dir}"; return 1; }
+    grep -qF "chown -R ${uid}:${uid} ${path}" "${CALLS}" || { echo "no chown for ${dir}"; return 1; }
+  done
+}
+
+@test "TP-15.39 (f): build/v1.0.0 at another commit is removed (worktree remove --force) and added again" {
+  mkdir -p "${BUDMON_HOME}/build/v1.0.0"
+  export STALE_WORKTREE=1
+  run bash -c "printf '%s' \"\${ANSWERS}\" | '${SCRIPT}' install v1.0.0"
+  local removed added
+  removed="$(awk -F'\t' '$1=="git" && $3 ~ /worktree remove --force .*build\/v1\.0\.0/ { print NR; exit }' "${CALLS}")"
+  added="$(awk -F'\t' '$1=="git" && $3 ~ /worktree add .*build\/v1\.0\.0/ { print NR; exit }' "${CALLS}")"
+  [ -n "${removed}" ] && [ -n "${added}" ] && [ "${removed}" -lt "${added}" ] || { calls_of git; return 1; }
+}
+
+# ---- TP-15.40 (A-429, A-430): the placeholder check fails closed ----
+
+@test "TP-15.40 (a), (b): grep exiting 2, or sudo failing: exit 28 naming the cause; no permission probe and no network" {
+  local mode
+  for mode in grep sudo; do
+    placeholder_ready_home
+    if [ "${mode}" = grep ]; then export GREP_EXIT=2; unset SUDO_SH_FAIL; else unset GREP_EXIT; export SUDO_SH_FAIL=1; fi
+    run "${SCRIPT}" install v1.0.0
+    [ "${status}" -eq 28 ] || { echo "${mode}: exit ${status}: ${output}"; return 1; }
+    if [ "${mode}" = grep ]; then
+      assert_output --partial "placeholder check failed: can't search secrets/ (grep status 2)"
+    else
+      assert_output --partial "placeholder check failed: can't search secrets/ (sudo failed)"
+    fi
+    run bash -c "awk -F'\t' '\$1==\"docker\" && (\$3 ~ /^run / || \$3 ~ /network create/)' '${CALLS}'"
+    assert_output ""
+  done
+}
+
+@test "TP-15.40 (c): grep exiting 1 (no match): install proceeds past step 7" {
+  placeholder_ready_home
+  export GREP_EXIT=1
+  run "${SCRIPT}" install v1.0.0
+  [ "${status}" -ne 28 ] && [ "${status}" -ne 20 ] || { echo "exit ${status}: ${output}"; return 1; }
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ /network create/' '${CALLS}'"
+  [ -n "${output}" ]
+}
+
+@test "TP-15.40 (d): an unreadable site.env: exit 28 (can't read site.env)" {
+  [ "$(id -u)" -ne 0 ] || skip "A-369: root reads a 0000 file; runs on CI's non-root runner"
+  placeholder_ready_home
+  chmod 0000 "${BUDMON_HOME}/site.env"
+  run "${SCRIPT}" install v1.0.0
+  assert_failure 28
+  assert_output --partial "placeholder check failed: can't read site.env"
+}
+
+@test "TP-15.40 (e): GOOGLE_SIGNIN_APP_ORIGINS containing __FILL_ME__ is listed (exit 20)" {
+  placeholder_ready_home
+  sed -i 's|^GOOGLE_SIGNIN_APP_ORIGINS=.*|GOOGLE_SIGNIN_APP_ORIGINS=__FILL_ME__,http://localhost:8080|' "${BUDMON_HOME}/site.env"
+  run "${SCRIPT}" install v1.0.0
+  assert_failure 20
+  assert_output --partial "site.env GOOGLE_SIGNIN_APP_ORIGINS"
+}
+
+@test "TP-15.40 (f): a blank PUBLIC_ORIGIN leaves GOOGLE_SIGNIN_APP_ORIGINS without a default; blank writes __FILL_ME__, listed (exit 20)" {
+  run --separate-stderr bash -c "printf '\n' | '${SCRIPT}' install v1.0.0"
+  assert_failure 20
+  [[ "${stderr}" == *"GOOGLE_SIGNIN_APP_ORIGINS []: "* ]] || { echo "${stderr}"; return 1; }
+  run cat "${BUDMON_HOME}/site.env"
+  assert_line "GOOGLE_SIGNIN_APP_ORIGINS=__FILL_ME__"
+  run bash -c "printf '\n' | '${SCRIPT}' install v1.0.0 2>&1"
+  assert_output --partial "GOOGLE_SIGNIN_APP_ORIGINS"
+}
+
+# ---- TP-15.43 (A-433): install step 11's Postgres wait is bounded ----
+
+@test "TP-15.43: install step 11 with a pg_isready taking 3 s and failing, BUDMON_PG_READY_TIMEOUT=2: at most 2 probes, within 6 s" {
+  placeholder_ready_home
+  export PG_PROBE_SLEEP=3 PG_READY_EXIT=1 BUDMON_PG_READY_TIMEOUT=2
+  local started=${SECONDS}
+  run "${SCRIPT}" install v1.0.0
+  assert_failure
+  local probes
+  probes="$(awk -F'\t' '$1=="docker" && $3 ~ /pg_isready/' "${CALLS}" | wc -l)"
+  [ "${probes}" -ge 1 ] && [ "${probes}" -le 2 ] || { echo "${probes} probes"; return 1; }
+  [ $((SECONDS - started)) -le 7 ] || { echo "took $((SECONDS - started)) s"; return 1; }
+}
+

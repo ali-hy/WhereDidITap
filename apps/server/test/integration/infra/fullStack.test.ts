@@ -249,6 +249,21 @@ describe.skipIf(!INFRA_INT)("TP-15.3: pg_hba.conf on the laptop (F-175)", () => 
     expect(r.stdout.trim()).toBe(`${PG_DATA_IP},${PG_CAPTURE_IP}`);
   });
 
+  // A-432: the image runs as postgres (999) with every capability dropped.
+  it("TP-15.42 (I): postgres is healthy after first setup and runs with CapEff 0000000000000000", () => {
+    const id = compose(PROJECT, home, ["ps", "-q", "postgres"]).stdout.trim();
+    const health = sh("docker", [
+      "inspect",
+      "-f",
+      "{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}",
+      id,
+    ]);
+    expect(health.stdout.trim()).toBe("healthy");
+    const status = sh("docker", ["exec", id, "cat", "/proc/1/status"]);
+
+    expect(status.stdout).toMatch(/^CapEff:\s+0000000000000000$/m);
+  });
+
   it("TP-15.3: budmon_app to budmon_restore: rejected", () => {
     const r = probe({
       network: DATA(),
@@ -720,7 +735,19 @@ describe.skipIf(!INFRA_INT)("TP-15.22 (I): install and restore on a real runner 
     // Changed after the dump, so the restore has something to undo.
     adminSql("DELETE FROM rate_limit_counters WHERE bucket_key LIKE 'tp15-22-%'");
 
-    const r = budmonLocal(["restore", firstDump]);
+    // A recording docker ahead of the real one, for A-438's check of the verify call.
+    const shim = path.join(work, "shim");
+    mkdirSync(shim, { recursive: true });
+    const realDocker = sh("bash", ["-c", "command -v docker"]).stdout.trim();
+    writeFileSync(
+      path.join(shim, "docker"),
+      `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> '${path.join(work, "docker-calls")}'\nexec '${realDocker}' "$@"\n`,
+      { mode: 0o755 },
+    );
+    const r = sh(path.join(LOCAL, "budmon-local"), ["restore", firstDump], {
+      env: { ...env(), PATH: `${shim}:${process.env["PATH"] ?? ""}` },
+      timeoutMs: 1_500_000,
+    });
 
     expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
     expect(counts()).toBe(seeded);
@@ -732,12 +759,30 @@ describe.skipIf(!INFRA_INT)("TP-15.22 (I): install and restore on a real runner 
         "SELECT string_agg(rolname, ',') FROM pg_roles WHERE rolcanlogin AND NOT has_database_privilege(rolname, 'budmon', 'CONNECT')",
       ).stdout.trim(),
     ).toBe("");
-    // restore:verify's report, from the migrate service, whose user is budmon_migrator.
+    // A-438: restore:verify ran as budmon_migrator, in four checks.
+    // 1. It printed an ok report.
     expect(`${r.stdout}${r.stderr}`).toMatch(/"ok":\s*true/);
-    const migrateUser = bash(
-      `BUDMON_HOME='${home}' BUDMON_TAG=${TAG} docker compose --project-directory '${home}/releases/${TAG}' -f '${home}/releases/${TAG}/compose.main.yaml' --env-file '${home}/releases/${TAG}/local.env' --profile tools config --format json | jq -r '.services.migrate.environment.DB_USER'`,
+    // 2. The recorded call runs it in the migrate service against budmon_restore.
+    expect(readFileSync(path.join(work, "docker-calls"), "utf8")).toMatch(
+      /compose .*--profile tools run --rm -e DB_NAME=budmon_restore migrate node dist\/main\/cli\.js restore:verify/,
     );
-    expect(migrateUser.stdout.trim()).toBe("budmon_migrator");
+    // 3. Compose resolves that service's DB_USER to budmon_migrator.
+    const compose = (args: string) =>
+      bash(
+        `BUDMON_HOME='${home}' BUDMON_TAG=${TAG} docker compose -p budmon-main --project-directory '${home}/releases/${TAG}' -f '${home}/releases/${TAG}/compose.main.yaml' --env-file '${home}/releases/${TAG}/local.env' ${args}`,
+      );
+    expect(
+      compose(
+        "--profile tools config --format json | jq -r '.services.migrate.environment.DB_USER'",
+      ).stdout.trim(),
+    ).toBe("budmon_migrator");
+    // 4. The same command in api (DB_USER budmon_app) fails: pg_hba admits only budmon_migrator to
+    // budmon_restore.
+    const asApp = compose(
+      "run --rm --no-deps -e DB_NAME=budmon_restore api node dist/main/cli.js restore:verify",
+    );
+    expect(asApp.status).not.toBe(0);
+    expect(`${asApp.stdout}${asApp.stderr}`).not.toMatch(/"ok":\s*true/);
   }, 900_000);
 
   it("TP-15.22 (I2): a truncated copy of a valid dump fails with 14; budmon keeps the seeded rows, /health/ready is 200, the safety dump restores", async () => {

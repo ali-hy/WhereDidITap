@@ -10,6 +10,8 @@
 #   READY_EXIT   exit code of every readiness or health check (default 0)
 #   OLD_UP_EXIT  exit code of `up -d` with releases/v1.1.0 files (default 0)
 
+bats_require_minimum_version 1.5.0
+
 load helpers
 
 CANARY="CANARY-secret-tp-15-21-7f3a"
@@ -56,6 +58,19 @@ stub_docker() {
   fi
   if [[ "${all}" == *" up -d"* && "${all}" == *"/releases/v1.1.0/"* ]]; then
     return "${OLD_UP_EXIT:-0}"
+  fi
+  # admin_sql: SQL on stdin, recorded as a `sql` line (A-426's leftover databases).
+  if [[ "${all}" == *" psql "* ]]; then
+    local sql="${all}"
+    if [ ! -t 0 ]; then sql="${sql} $(cat)"; fi
+    printf 'sql\t%s\n' "${sql//$'\n'/ }" >>"${CALLS}"
+    if [[ "${sql}" == *"count(*) FROM pg_database"* ]]; then
+      [ "${COUNT_FAIL:-0}" = 1 ] && return 1
+      echo "${COUNT_OUTPUT:-1}"
+    elif [[ "${sql}" == *"FROM pg_database"* ]]; then
+      printf '%s\n' budmon_old_20261001T120000Z budmon_restore_failed_20261001T120000Z
+    fi
+    return 0
   fi
   return 0
 }
@@ -255,3 +270,80 @@ compose_calls() {
     [[ "${line}" == *"REEXEC=1"* ]] || { echo "${line}"; return 1; }
   done < <(compose_calls)
 }
+
+# ---- TP-15.37 (A-426): leftover databases, and the refusal over an unfinished restore ----
+
+drops() {
+  awk -F'\t' '$1=="sql" && $2 ~ /DROP DATABASE/' "${CALLS}"
+}
+
+write_marker() {
+  printf 'tag=v1.1.0\nfrom=v1.2.0\nold=budmon_old_20261001T120000Z\nfailed=budmon_restore_failed_20261001T120000Z\n' \
+    >"${BUDMON_HOME}/restore.inprogress"
+  chmod 0600 "${BUDMON_HOME}/restore.inprogress"
+}
+
+@test "TP-15.37 (a): no marker and count(*) 1: both leftover databases are dropped, exit 0" {
+  run_phase_b
+  assert_success
+  run drops
+  assert_line --partial "DROP DATABASE IF EXISTS budmon_old_20261001T120000Z"
+  assert_line --partial "DROP DATABASE IF EXISTS budmon_restore_failed_20261001T120000Z"
+}
+
+@test "TP-15.37 (b): restore.inprogress present: nothing dropped, exit 0, leftover databases kept (a restore didn't finish)" {
+  write_marker
+  BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.2.0/budmon-local" _upgrade-continue v1.2.0
+  assert_success
+  [[ "${stderr}" == *"leftover databases kept: a restore didn't finish (restore.inprogress)"* ]] || { echo "${stderr}"; return 1; }
+  run drops
+  assert_output ""
+}
+
+@test "TP-15.37 (c), (d): count(*) printing 0, or failing: nothing dropped, exit 0, can't confirm budmon exists" {
+  local mode
+  for mode in zero fail; do
+    : >"${CALLS}"
+    if [ "${mode}" = zero ]; then export COUNT_OUTPUT=0; unset COUNT_FAIL; else unset COUNT_OUTPUT; export COUNT_FAIL=1; fi
+    BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.2.0/budmon-local" _upgrade-continue v1.2.0
+    [ "${status}" -eq 0 ] || { echo "${mode}: exit ${status}: ${stderr}"; return 1; }
+    [[ "${stderr}" == *"leftover databases kept: can't confirm budmon exists"* ]] || { echo "${mode}: ${stderr}"; return 1; }
+    run drops
+    assert_output ""
+  done
+}
+
+@test "TP-15.37: with the marker, upgrade and restore exit 27 with no git, docker or pg_dump call; status shows it" {
+  write_marker
+  mkdir -p "${BUDMON_HOME}/dumps"
+  : >"${BUDMON_HOME}/dumps/20261001T120000Z_v1.1.0.dump"
+  local cmd
+  for cmd in "upgrade v1.2.0" "restore ${BUDMON_HOME}/dumps/20261001T120000Z_v1.1.0.dump"; do
+    : >"${CALLS}"
+    # shellcheck disable=SC2086 # the command and its argument, split on purpose
+    run "${SCRIPT}" ${cmd}
+    [ "${status}" -eq 27 ] || { echo "${cmd}: exit ${status}: ${output}"; return 1; }
+    assert_output --partial "a restore didn't finish (restore.inprogress)"
+    run grep -cE "^(git|docker|pg_dump)"$'\t' "${CALLS}"
+    assert_output "0"
+  done
+
+  run "${SCRIPT}" status
+  assert_success
+  assert_output --partial "restore unfinished"
+  assert_output --partial "old=budmon_old_20261001T120000Z"
+  assert_output --partial "failed=budmon_restore_failed_20261001T120000Z"
+}
+
+# ---- TP-15.44 (A-435): migrate's output reaches stderr before the exit-15 line ----
+
+@test "TP-15.44: phase B with migrate failing exits 15; stderr has migrate's line before the reason" {
+  export MIGRATE_EXIT=1 MIGRATE_OUTPUT='{"msg":"migration_failed","code":"42P01"}'
+  BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.2.0/budmon-local" _upgrade-continue v1.2.0
+  assert_failure 15
+  local line reason
+  line="$(grep -n '{"msg":"migration_failed","code":"42P01"}' <<<"${stderr}" | head -n 1 | cut -d: -f1)"
+  reason="$(grep -n 'migrate.*failed' <<<"${stderr}" | grep -v migration_failed | head -n 1 | cut -d: -f1)"
+  [ -n "${line}" ] && [ -n "${reason}" ] && [ "${line}" -lt "${reason}" ] || { echo "${stderr}"; return 1; }
+}
+

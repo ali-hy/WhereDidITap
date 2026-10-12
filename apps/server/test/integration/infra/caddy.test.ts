@@ -188,6 +188,33 @@ describe.skipIf(!INFRA_INT)("TP-15.13: Caddy on the laptop (F-175)", () => {
     expect(res.status).toBe(200);
   });
 
+  // A-431: /assets/* is file_server only.
+  it("TP-15.41: an existing asset is immutable; a missing one is a 404 with no-store and not index.html; /assets/ is 404; an SPA route has no immutable header", async () => {
+    const html = await (await fetch(`${BASE}/`)).text();
+    const asset = /\/assets\/[^"']+\.js/.exec(html)?.[0];
+    expect(asset).toBeDefined();
+
+    const hit = await fetch(`${BASE}${asset ?? "/assets/a.js"}`);
+    expect(hit.status).toBe(200);
+    expect(hit.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+
+    const missing = await fetch(`${BASE}/assets/missing.js`);
+    const body = await missing.text();
+    expect(missing.status).toBe(404);
+    expect(body).toBe("");
+    expect(missing.headers.get("cache-control")).toBe("no-store");
+    expect(missing.headers.get("cache-control") ?? "").not.toContain("immutable");
+    expect(body).not.toMatch(/<div id="root"/);
+
+    const dir = await fetch(`${BASE}/assets/`);
+    expect(dir.status).toBe(404);
+
+    const route = await fetch(`${BASE}/some/route`);
+    expect(route.status).toBe(200);
+    expect(await route.text()).toMatch(/<div id="root"/);
+    expect(route.headers.get("cache-control") ?? "").not.toContain("immutable");
+  });
+
   it("TP-15.13: a TLS request to https://127.0.0.1:8080/ fails (plain HTTP only)", () => {
     const r = sh("curl", ["-k", "-sS", "--max-time", "10", "https://127.0.0.1:8080/"]);
 

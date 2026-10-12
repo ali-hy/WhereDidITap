@@ -11,12 +11,19 @@
 #   RENAME_FAILS             how many RENAME statements fail before one succeeds (default 0)
 #   DB_SIZE                  pg_database_size('budmon') in bytes (default 1000)
 #   SIZE_EXIT / SIZE_OUTPUT  the size query's exit code / raw output (A-420)
+#   SQL_FAIL_PATTERN         SQL matching this ERE fails, after SQL_FAIL_SKIP matches have passed
+#   UP_FAIL_MATCH            an `up -d` whose arguments contain this fails
+#   PG_FAIL_AFTER_READY      pg_isready fails once a readiness probe has failed (A-426 (b))
+#   PROBE_SLEEP / PG_PROBE_SLEEP  seconds each readiness / pg_isready probe takes (A-433)
+#   MIGRATE_FAIL             budmon_restore's migrate prints a log line and exits 1 (A-435)
 #   DF_AVAIL_BYTES           free space reported by df (default 10^12)
 #
 # A-388: free space is `df -Pk -- <dir>` field 4 × 1024 (pg/, and dumps/ on another filesystem),
 # the dump's size `stat -c %s` (real files here), the database size `pg_database_size('budmon')`
 # through `psql -Atc` in the Postgres container; messages round MB up. A-387: BUDMON_PG_READY_TIMEOUT,
 # BUDMON_READY_TIMEOUT and BUDMON_RENAME_RETRY_DELAY are positive integer seconds, else exit 64.
+
+bats_require_minimum_version 1.5.0
 
 load helpers
 
@@ -58,6 +65,11 @@ stub_docker() {
       [ "${SIZE_EXIT:-0}" != 0 ] && return "${SIZE_EXIT}"
       echo "${SIZE_OUTPUT:-${DB_SIZE:-1000}}"
     fi
+    if [ -n "${SQL_FAIL_PATTERN:-}" ] && [[ "${sql}" =~ ${SQL_FAIL_PATTERN} ]]; then
+      local seen; seen="$(wc -c <"${BUDMON_HOME}/sql-fail-count" 2>/dev/null || echo 0)"
+      printf 'x' >>"${BUDMON_HOME}/sql-fail-count"
+      if [ "${seen}" -ge "${SQL_FAIL_SKIP:-0}" ]; then echo "ERROR:  stub failure" >&2; return 1; fi
+    fi
     if [[ "${sql}" == *"RENAME TO"* ]]; then
       local n; n="$(wc -c <"${BUDMON_HOME}/rename-count")"
       if [ "${n}" -lt "${RENAME_FAILS:-0}" ]; then
@@ -68,6 +80,13 @@ stub_docker() {
     fi
     return 0
   fi
+  if [[ "${all}" == *" up -d"* && -n "${UP_FAIL_MATCH:-}" && "${all}" == *"${UP_FAIL_MATCH}"* ]]; then
+    return 1
+  fi
+  if [[ "${MIGRATE_FAIL:-0}" = 1 && "${all}" == *" migrate"* && "${all}" == *"DB_NAME=budmon_restore"* && "${all}" != *"restore:verify"* ]]; then
+    echo '{"msg":"migration_failed","code":"42P01"}'
+    return 1
+  fi
   if [[ "${all}" == *"pg_restore"*"--list"* ]]; then
     cat >/dev/null
     if [ -n "${LIST_OUTPUT+x}" ]; then printf '%s\n' "${LIST_OUTPUT}"; else
@@ -77,8 +96,14 @@ stub_docker() {
   fi
   if [[ "${all}" == *"pg_dump"* ]]; then printf 'PGDMP-safety'; return "${SAFETY_EXIT:-0}"; fi
   if [[ "${all}" == *"restore:verify"* ]]; then echo '{"ok":true}'; return "${VERIFY_EXIT:-0}"; fi
-  if [[ "${all}" == *"healthcheck"* || "${all}" == *"pg_isready"* ]]; then
-    [[ "${all}" == *"pg_isready"* ]] && return 0
+  if [[ "${all}" == *"pg_isready"* ]]; then
+    [ -n "${PG_PROBE_SLEEP:-}" ] && /bin/sleep "${PG_PROBE_SLEEP}"
+    if [ "${PG_FAIL_AFTER_READY:-0}" = 1 ] && [ -e "${BUDMON_HOME}/.stub-ready-failed" ]; then return 1; fi
+    return 0
+  fi
+  if [[ "${all}" == *"healthcheck"* ]]; then
+    [ -n "${PROBE_SLEEP:-}" ] && /bin/sleep "${PROBE_SLEEP}"
+    [ "${READY_EXIT:-0}" != 0 ] && : >"${BUDMON_HOME}/.stub-ready-failed"
     return "${READY_EXIT:-0}"
   fi
   return 0
@@ -166,6 +191,9 @@ events() {
   assert [ -e "${BUDMON_HOME}/maintenance/on" ]
   run cat "${BUDMON_HOME}/state"
   assert_line "current=v1.2.0"
+  # A-426: the rollback never stops postgres.
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ / stop( |$)/ { print \$3 }' '${CALLS}'"
+  refute_output --regexp "stop.*(postgres|caddy|mailpit)"
 }
 
 @test "TP-15.22 (h): restore foo.dump exits 12" {
@@ -275,8 +303,148 @@ events() {
   assert_failure 24
   run grep -c "budmon_restore RENAME TO budmon" "${CALLS}"
   assert_output "0"
+  # A-426: exit 24 means the names are restored, so no marker stays.
+  [ ! -e "${BUDMON_HOME}/restore.inprogress" ]
   run bash -c "awk -F'\t' '\$1==\"sql\" { print \$2 }' '${CALLS}' | tail -n 3 | tr '\n' ' '"
   [[ "${output}" == *"ALTER DATABASE budmon WITH ALLOW_CONNECTIONS true"* ]] || { echo "${output}"; return 1; }
   run cat "${BUDMON_HOME}/state"
   assert_line "current=v1.2.0"
 }
+
+# ---- TP-15.36 (A-426): the rollback stops only the app and checks every step ----
+
+# The rollback's part of $CALLS: everything after the last readiness probe.
+rollback_events() {
+  awk -F'\t' '
+    $1=="docker" && $3 ~ /healthcheck/ { n = NR }
+    { line[NR] = $0 }
+    END {
+      for (i = n + 1; i <= NR; i++) {
+        split(line[i], f, "\t")
+        if (f[1]=="docker" && f[3] ~ / stop api worker-general$/ && f[3] ~ /releases\/v1\.1\.0\//) print "stop-main"
+        else if (f[1]=="docker" && f[3] ~ / stop worker-capture$/ && f[3] ~ /releases\/v1\.1\.0\//) print "stop-capture"
+        else if (f[1]=="docker" && f[3] ~ /pg_isready/) print "pg_isready"
+        else if (f[1]=="sql" && f[2] ~ /ALLOW_CONNECTIONS false/) print "allow-false"
+        else if (f[1]=="sql" && f[2] ~ /budmon RENAME TO budmon_restore_failed_/) print "rename-failed"
+        else if (f[1]=="sql" && f[2] ~ /budmon_old_[0-9TZ]+ RENAME TO budmon( |;|$)/) print "rename-back"
+        else if (f[1]=="sql" && f[2] ~ /ALLOW_CONNECTIONS true/) print "allow-true"
+        else if (f[1]=="docker" && f[3] ~ / up -d/ && f[3] ~ /releases\/v1\.2\.0\//) print "up-v1.2.0"
+      }
+    }' "${CALLS}" | uniq
+}
+
+# The marker's four keys, maintenance on, the safety dump printed, state unchanged (A-426).
+assert_unfinished() {
+  [ -e "${BUDMON_HOME}/restore.inprogress" ] || { echo "no marker"; return 1; }
+  local key
+  for key in tag from old failed; do
+    grep -q "^${key}=" "${BUDMON_HOME}/restore.inprogress" || { echo "marker lacks ${key}"; return 1; }
+  done
+  [ -e "${BUDMON_HOME}/maintenance/on" ] || { echo "maintenance off"; return 1; }
+  [[ "${output}" == *"_v1.2.0_pre-restore.dump"* ]] || { echo "safety dump not printed"; return 1; }
+  grep -qx "current=v1.2.0" "${BUDMON_HOME}/state" || { echo "state changed"; return 1; }
+}
+
+@test "TP-15.36 (a): the rollback stops only api, worker-general and worker-capture, waits for Postgres, then renames back, re-opens budmon and starts v1.2.0: exit 16" {
+  export READY_EXIT=1 BUDMON_READY_TIMEOUT=1
+  run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+  assert_failure 16
+
+  run rollback_events
+  [ "$(tr '\n' ' ' <<<"${output}")" = "stop-main stop-capture pg_isready allow-false rename-failed rename-back allow-true up-v1.2.0 " ] || {
+    echo "rollback: $(tr '\n' ' ' <<<"${output}")"
+    return 1
+  }
+  # No call stops postgres, caddy or mailpit, or stops/downs without naming services.
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ / (stop|down)( |$)/ { print \$3 }' '${CALLS}'"
+  refute_output --regexp "(stop|down) .*(postgres|caddy|mailpit)"
+  refute_output --regexp " (stop|down)$"
+  [ ! -e "${BUDMON_HOME}/restore.inprogress" ]
+  [ -e "${BUDMON_HOME}/maintenance/on" ]
+}
+
+@test "TP-15.36 (b): Postgres not coming back in the rollback: exit 26, no rename and no up -d after the readiness timeout" {
+  export READY_EXIT=1 BUDMON_READY_TIMEOUT=1 BUDMON_PG_READY_TIMEOUT=1 PG_FAIL_AFTER_READY=1
+  run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+  assert_failure 26
+  assert_output --regexp "restore rollback incomplete: budmon holds the restored copy and the data from before the restore is in budmon_old_[0-9]{8}T[0-9]{6}Z"
+  assert_unfinished
+  run rollback_events
+  refute_output --regexp "rename-|up-v1"
+}
+
+@test "TP-15.36 (c): the rename budmon -> budmon_restore_failed_<ts> failing 3 times: exit 26, the same message" {
+  export READY_EXIT=1 BUDMON_READY_TIMEOUT=1 SQL_FAIL_PATTERN="RENAME TO budmon_restore_failed_"
+  run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+  assert_failure 26
+  assert_output --regexp "restore rollback incomplete: budmon holds the restored copy and the data from before the restore is in budmon_old_"
+  assert_unfinished
+}
+
+@test "TP-15.36 (d): the rename budmon_old_<ts> -> budmon failing 3 times: exit 26, budmon is missing" {
+  export READY_EXIT=1 BUDMON_READY_TIMEOUT=1 SQL_FAIL_PATTERN="budmon_old_[0-9TZ]+ RENAME TO budmon( |;|$)"
+  run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+  assert_failure 26
+  assert_output --regexp "restore rollback incomplete: budmon is missing; the data from before the restore is in budmon_old_[0-9TZ]+ and the restored copy in budmon_restore_failed_[0-9TZ]+"
+  assert_unfinished
+}
+
+@test "TP-15.36 (e): ALLOW_CONNECTIONS true failing after the reverse renames: exit 26, refuses connections" {
+  # The switch's own ALLOW_CONNECTIONS true passes; the rollback's fails.
+  export READY_EXIT=1 BUDMON_READY_TIMEOUT=1 SQL_FAIL_PATTERN="ALLOW_CONNECTIONS true" SQL_FAIL_SKIP=1
+  run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+  assert_failure 26
+  assert_output --partial "budmon holds the data from before the restore but refuses connections"
+  assert_unfinished
+}
+
+@test "TP-15.36 (f): the final up -d with releases/v1.2.0/ failing: exit 17, run budmon-local start, no marker" {
+  export READY_EXIT=1 BUDMON_READY_TIMEOUT=1 UP_FAIL_MATCH="releases/v1.2.0/"
+  run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+  assert_failure 17
+  assert_output --partial "starting v1.2.0 failed: run budmon-local start"
+  [ ! -e "${BUDMON_HOME}/restore.inprogress" ]
+}
+
+@test "TP-15.36 (g): step 7's second rename failing 3 times and the reverse rename failing too: exit 26 naming budmon_old_<ts> and budmon_restore" {
+  export SQL_FAIL_PATTERN="budmon_restore RENAME TO budmon( |;|$)|budmon_old_[0-9TZ]+ RENAME TO budmon( |;|$)"
+  run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+  assert_failure 26
+  assert_output --regexp "budmon_old_[0-9]{8}T[0-9]{6}Z"
+  assert_output --partial "budmon_restore"
+  assert_unfinished
+}
+
+# ---- TP-15.43 (A-433): waits are bounded by a deadline, with at least one probe ----
+
+@test "TP-15.43: restore (g2) with probes taking 3 s and BUDMON_READY_TIMEOUT=2: at most 2 probes, back within 6 s" {
+  export READY_EXIT=1 BUDMON_READY_TIMEOUT=2 PROBE_SLEEP=3
+  local started=${SECONDS}
+  run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+  assert_failure 16
+  local probes
+  probes="$(awk -F'\t' '$1=="docker" && $3 ~ /exec -T api .*healthcheck/' "${CALLS}" | wc -l)"
+  [ "${probes}" -le 2 ] || { echo "${probes} probes"; return 1; }
+  [ $((SECONDS - started)) -le 7 ] || { echo "took $((SECONDS - started)) s"; return 1; }
+}
+
+@test "TP-15.43: a probe failing at once with BUDMON_READY_TIMEOUT=1 is made at least once" {
+  export READY_EXIT=1 BUDMON_READY_TIMEOUT=1
+  run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+  local probes
+  probes="$(awk -F'\t' '$1=="docker" && $3 ~ /exec -T api .*healthcheck/' "${CALLS}" | wc -l)"
+  [ "${probes}" -ge 1 ]
+}
+
+# ---- TP-15.44 (A-435): migrate's output reaches stderr before the exit-15 line ----
+
+@test "TP-15.44: restore with the dump's migrate failing exits 15; stderr has migrate's line before the reason" {
+  export MIGRATE_FAIL=1
+  BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.2.0/budmon-local" restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+  assert_failure 15
+  local line reason
+  line="$(grep -n '{"msg":"migration_failed","code":"42P01"}' <<<"${stderr}" | head -n 1 | cut -d: -f1)"
+  reason="$(grep -n 'migrate.*failed' <<<"${stderr}" | grep -v migration_failed | head -n 1 | cut -d: -f1)"
+  [ -n "${line}" ] && [ -n "${reason}" ] && [ "${line}" -lt "${reason}" ] || { echo "${stderr}"; return 1; }
+}
+

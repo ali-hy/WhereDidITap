@@ -1,7 +1,9 @@
 // Stage-0 tagging (§4.17 "Stage-0 tagging", D-12): .github/workflows/tag.yml's structure. TP-14.10
 // (workflow part), with actionlint 1.7.12 through tools/ci/setup-actionlint.sh (A-367). A-407: two
 // jobs, `verify` (read-only, runs tagRelease.sh) and `tag` (contents: write, no repository code,
-// creates the ref through the API); A-408: no branch name is hard-coded.
+// creates the ref through the API); A-408: no branch name is hard-coded; A-437 (TP-14.11): three
+// jobs, `resolve` (no repository code from the commit; alone has outputs), `verify` (the gate:
+// install and check (i) on the resolved commit, no outputs) and `tag`.
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
@@ -45,7 +47,7 @@ const job = (name: string): Job => workflow().jobs?.[name] ?? {};
 const runs = (j: Job) => (j.steps ?? []).map((s) => (typeof s.run === "string" ? s.run : ""));
 const uses = (j: Job) => (j.steps ?? []).map((s) => (typeof s.uses === "string" ? s.uses : ""));
 
-describe("TP-14.10: tag.yml (stage 0, A-407, A-408)", () => {
+describe("TP-14.10/TP-14.11: tag.yml (stage 0, A-407, A-408, A-437)", () => {
   it("TP-14.10: the file exists", () => {
     expect(existsSync(FILE)).toBe(true);
   });
@@ -59,24 +61,33 @@ describe("TP-14.10: tag.yml (stage 0, A-407, A-408)", () => {
     expect(Object.keys(on.workflow_dispatch?.inputs ?? {})).toEqual(["pr"]);
   });
 
-  it("TP-14.10: two jobs, verify and tag; no environment and no signing or deploy", () => {
+  it("TP-14.11 (A-437): exactly three jobs, resolve, verify and tag; no environment and no signing or deploy", () => {
     const wf = workflow();
 
-    expect(Object.keys(wf.jobs ?? {}).sort()).toEqual(["tag", "verify"]);
+    expect(Object.keys(wf.jobs ?? {}).sort()).toEqual(["resolve", "tag", "verify"]);
     for (const j of Object.values(wf.jobs ?? {})) expect(j.environment).toBeUndefined();
     expect(readFileSync(FILE, "utf8")).not.toMatch(/cosign|sigstore|gpg|deploy|id-token/i);
   });
 
-  it("TP-14.10: verify has exactly contents: read, pull-requests: read, checks: read", () => {
-    expect(job("verify").permissions).toEqual({
-      contents: "read",
-      "pull-requests": "read",
-      checks: "read",
-    });
+  it("TP-14.11: resolve has exactly contents/pull-requests/checks read, checks out the default branch without credentials, runs no pnpm/node/tsx, and outputs tag and commit", () => {
+    const r = job("resolve");
+    const checkout = (r.steps ?? []).find(
+      (st) => typeof st.uses === "string" && st.uses.startsWith("actions/checkout@"),
+    );
+
+    expect(r.permissions).toEqual({ contents: "read", "pull-requests": "read", checks: "read" });
+    expect(String(checkout?.with?.["ref"]).replace(/\s+/g, "")).toBe(
+      "${{github.event.repository.default_branch}}",
+    );
+    expect(checkout?.with?.["persist-credentials"]).toBe(false);
+    expect(uses(r).filter((u) => /pnpm\/action-setup|actions\/setup-node/.test(u))).toEqual([]);
+    for (const run of runs(r)) expect(run).not.toMatch(/\b(pnpm|node|npx|tsx)\b/);
+    expect(runs(r).some((run) => run.includes("tools/ci/tagRelease.sh"))).toBe(true);
+    expect(Object.keys(r.outputs ?? {}).sort()).toEqual(["commit", "tag"]);
   });
 
-  it("TP-14.10 (A-408): verify's if uses github.event.repository.default_branch; no branch name appears", () => {
-    const cond = job("verify").if;
+  it("TP-14.11 (A-408): resolve's if uses github.event.repository.default_branch; no branch name appears", () => {
+    const cond = job("resolve").if;
 
     expect(typeof cond === "string" ? cond : "").toContain(
       "github.event.repository.default_branch",
@@ -89,22 +100,9 @@ describe("TP-14.10: tag.yml (stage 0, A-407, A-408)", () => {
     expect(code).not.toMatch(/(['"])(main|master)\1|[[,]\s*(main|master)\s*[,\]]/);
   });
 
-  it("TP-14.10: verify checks out with persist-credentials false and fetch-depth 0, has no install step, runs tagRelease.sh and outputs tag and commit", () => {
-    const v = job("verify");
-    const checkout = (v.steps ?? []).find(
-      (s) => typeof s.uses === "string" && s.uses.startsWith("actions/checkout@"),
-    );
-
-    expect(checkout?.with?.["persist-credentials"]).toBe(false);
-    expect(checkout?.with?.["fetch-depth"]).toBe(0);
-    expect(runs(v).filter((r) => /\bpnpm\s+(install|i)\b/.test(r))).toEqual([]);
-    expect(runs(v).some((r) => r.includes("tools/ci/tagRelease.sh"))).toBe(true);
-    expect(Object.keys(v.outputs ?? {}).sort()).toEqual(["commit", "tag"]);
-  });
-
-  it("TP-14.10: tagRelease.sh's step gets GH_TOKEN and DEFAULT_BRANCH through env:", () => {
-    const step = (job("verify").steps ?? []).find(
-      (s) => typeof s.run === "string" && s.run.includes("tools/ci/tagRelease.sh"),
+  it("TP-14.11: resolve's tagRelease.sh step gets GH_TOKEN and DEFAULT_BRANCH through env:", () => {
+    const step = (job("resolve").steps ?? []).find(
+      (st) => typeof st.run === "string" && st.run.includes("tools/ci/tagRelease.sh"),
     );
 
     expect(step?.env?.["GH_TOKEN"]).toEqual(expect.any(String));
@@ -113,29 +111,52 @@ describe("TP-14.10: tag.yml (stage 0, A-407, A-408)", () => {
     );
   });
 
-  it("TP-14.10: tag needs verify and has exactly permissions contents: write", () => {
-    const t = job("tag");
+  it("TP-14.11: verify needs resolve, has exactly contents: read and no outputs, checks out the resolved commit without credentials and compares HEAD with it; no token in any env", () => {
+    const v = job("verify");
+    const checkout = (v.steps ?? []).find(
+      (st) => typeof st.uses === "string" && st.uses.startsWith("actions/checkout@"),
+    );
 
-    expect([t.needs].flat()).toEqual(["verify"]);
+    expect([v.needs].flat()).toEqual(["resolve"]);
+    expect(v.permissions).toEqual({ contents: "read" });
+    expect(v.outputs).toBeUndefined();
+    expect(String(checkout?.with?.["ref"]).replace(/\s+/g, "")).toBe(
+      "${{needs.resolve.outputs.commit}}",
+    );
+    expect(checkout?.with?.["persist-credentials"]).toBe(false);
+    expect(runs(v).join("\n")).toMatch(/git rev-parse HEAD/);
+    expect(runs(v).join("\n")).toContain("COMMIT");
+    const envKeys = [
+      ...Object.keys(v.env ?? {}),
+      ...(v.steps ?? []).flatMap((st) => Object.keys(st.env ?? {})),
+    ];
+    expect(envKeys.filter((k) => k === "GH_TOKEN" || k === "GITHUB_TOKEN")).toEqual([]);
+    expect(runs(v).join("\n")).toMatch(/pnpm install --frozen-lockfile/);
+    expect(runs(v).join("\n")).toMatch(/pnpm db:check-migrations/);
+  });
+
+  it("TP-14.11: tag needs resolve and verify, has exactly contents: write, reads only needs.resolve.outputs; needs.verify.outputs appears nowhere", () => {
+    const t = job("tag");
+    const env = Object.fromEntries(
+      (t.steps ?? []).flatMap((st) => Object.entries(st.env ?? {})),
+    ) as Record<string, unknown>;
+
+    expect([t.needs].flat().sort()).toEqual(["resolve", "verify"]);
     expect(t.permissions).toEqual({ contents: "write" });
+    expect(String(env["TAG"]).replace(/\s+/g, "")).toBe("${{needs.resolve.outputs.tag}}");
+    expect(String(env["COMMIT"]).replace(/\s+/g, "")).toBe("${{needs.resolve.outputs.commit}}");
+    expect(readFileSync(FILE, "utf8")).not.toContain("needs.verify.outputs");
   });
 
-  it("TP-14.10: tag has no checkout and runs no pnpm, node or tsx", () => {
-    const t = job("tag");
-
-    expect(uses(t).filter((u) => u !== "")).toEqual([]);
-    for (const r of runs(t)) expect(r).not.toMatch(/\b(pnpm|node|npx|tsx)\b/);
-  });
-
-  it("TP-14.10: tag makes one gh api --method POST to git/refs, every value through env:", () => {
+  it("TP-14.11: tag has no checkout and runs no pnpm, node or tsx; one gh api --method POST to git/refs, every value through env:", () => {
     const t = job("tag");
     const text = runs(t).join("\n");
 
+    expect(uses(t).filter((u) => u !== "")).toEqual([]);
+    expect(text).not.toMatch(/\b(pnpm|node|npx|tsx)\b/);
     expect(text.match(/gh api --method POST/g) ?? []).toHaveLength(1);
     expect(text).toMatch(/gh api --method POST "?repos\/\$REPO\/git\/refs"?/);
     expect(text).not.toContain("${{");
-    const env = (t.steps ?? []).flatMap((s) => Object.keys(s.env ?? {}));
-    for (const k of ["GH_TOKEN", "TAG", "COMMIT", "REPO"]) expect(env).toContain(k);
   });
 
   it("TP-14.10: every uses: is pinned to a 40-hex SHA", () => {

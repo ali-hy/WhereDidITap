@@ -508,19 +508,17 @@ describe("TP-15.16: the files exist", () => {
 });
 
 describe("TP-15.16: shellcheck and the infra-lint job", () => {
-  it("TP-15.16: shellcheck passes on budmon-local, gcp-bootstrap.sh, infra/local/lib/*.sh and images/postgres/*.sh", () => {
-    const files = [
-      "infra/local/budmon-local",
-      "infra/local/gcp-bootstrap.sh",
-      "infra/local/lib/common.sh",
-      "infra/local/lib/secrets.sh",
-      "infra/local/lib/release.sh",
-      "infra/local/lib/stack.sh",
-      "images/postgres/budmon-entrypoint.sh",
-      "infra/local/test/setup-bats.sh",
-      "infra/local/test/run-integration.sh",
-    ].map((f) => path.join(ROOT, f));
-    const result = spawnSync("shellcheck", ["-x", ...files], { encoding: "utf8" });
+  // A-436: every tracked shell script, as the infra-lint step lists them.
+  it("TP-15.16: shellcheck -x passes on every tracked *.sh and infra/local/budmon-local", () => {
+    const listed = spawnSync("git", ["ls-files", "-z", "--", "*.sh", "infra/local/budmon-local"], {
+      cwd: ROOT,
+      encoding: "utf8",
+    });
+    const files = listed.stdout.split("\0").filter((f) => f !== "");
+    expect(files).toContain("infra/local/budmon-local");
+    expect(files).toContain("infra/local/test/run-integration.sh");
+
+    const result = spawnSync("shellcheck", ["-x", ...files], { cwd: ROOT, encoding: "utf8" });
 
     expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
   });
@@ -720,5 +718,37 @@ describe("TP-15.35: ci.yml's changes and infra-int jobs", () => {
     ]) {
       expect(lines).toContain(p);
     }
+  });
+});
+
+// A-436: the infra-lint shellcheck step lists files through git, so none is missed.
+describe("TP-15.45: infra-lint's shellcheck step", () => {
+  it("TP-15.45: git ls-files -z -- '*.sh' infra/local/budmon-local piped to xargs -0 shellcheck -x; no .sh file named", () => {
+    const wf = parse(read(".github/workflows/ci.yml")) as {
+      jobs?: Record<string, { steps?: { run?: unknown }[] }>;
+    };
+    const runs = (wf.jobs?.["infra-lint"]?.steps ?? [])
+      .map((st) => (typeof st.run === "string" ? st.run : ""))
+      .filter((r) => r.includes("shellcheck"));
+
+    expect(runs).toHaveLength(1);
+    const run = runs[0] ?? "";
+    expect(run).toContain("git ls-files -z -- '*.sh'");
+    expect(run).toContain("infra/local/budmon-local");
+    expect(run).toMatch(/\|\s*xargs -0 shellcheck -x/);
+    expect(run.match(/[\w./-]+\.sh\b/g) ?? []).toEqual([]);
+  });
+});
+
+// A-432: Postgres needs no capability.
+describe("TP-15.42: postgres runs with no capabilities (A-432)", () => {
+  it("TP-15.42: compose.main.yaml's postgres has cap_drop [ALL] and no-new-privileges:true", () => {
+    const raw = parse(read("infra/local/compose.main.yaml")) as {
+      services?: Record<string, { cap_drop?: unknown; security_opt?: unknown }>;
+    };
+    const pg = raw.services?.["postgres"];
+
+    expect(pg?.cap_drop).toEqual(["ALL"]);
+    expect(pg?.security_opt).toEqual(expect.arrayContaining(["no-new-privileges:true"]));
   });
 });
