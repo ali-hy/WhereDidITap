@@ -8,9 +8,8 @@ FROM postgres:18@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3
 
 # pgbackrest from PGDG, pinned. Unused on the laptop, installed so the image is the same in
 # stages 0 and 1 (D-29 rule 1).
-ARG PGBACKREST_VERSION
-# A-406 (temporary): the PGDG versions on offer, read from the CI log to pin the default.
-RUN apt-get update && (apt-cache madison pgbackrest || true)
+# A-406: the newest trixie-pgdg build on 2026-10-12 (from `apt-cache madison` in CI).
+ARG PGBACKREST_VERSION=2.59.3-1.pgdg13+1
 RUN test -n "${PGBACKREST_VERSION}" || { echo "PGBACKREST_VERSION is not pinned" >&2; exit 1; } \
  && apt-get update \
  && apt-get install -y --no-install-recommends "pgbackrest=${PGBACKREST_VERSION}" \
