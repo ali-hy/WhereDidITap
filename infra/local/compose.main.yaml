@@ -1,0 +1,202 @@
+# F-175: the laptop's main project (budmon-main). Run only by budmon-local from a release copy:
+#   docker compose --project-directory <copy> -p budmon-main -f <copy>/compose.main.yaml \
+#     --env-file <copy>/local.env …   with BUDMON_TAG and BUDMON_HOME exported.
+# Secrets are files under ${BUDMON_HOME}/secrets/<project>/<service>, mounted at /run/secrets.
+name: budmon-main
+
+x-app: &app
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+  env_file:
+    - local.env
+    - ${BUDMON_HOME:?BUDMON_HOME is not set}/site.env
+
+x-release: &release
+  BUDMON_RELEASE: ${BUDMON_TAG:?BUDMON_TAG is not set}
+
+services:
+  caddy:
+    <<: *app
+    image: budmon/web:${BUDMON_TAG:?BUDMON_TAG is not set}
+    user: "10005:10005"
+    env_file: []
+    mem_limit: 128m
+    networks:
+      edge:
+        ipv4_address: ${CADDY_EDGE_IP}
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - type: bind
+        source: ${BUDMON_HOME}/maintenance
+        target: /srv/maintenance
+        read_only: true
+      - type: bind
+        source: ./Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+
+  api:
+    <<: *app
+    image: budmon/server:${BUDMON_TAG:?BUDMON_TAG is not set}
+    user: "10001:10001"
+    command: ["node", "--import", "./dist/main/instrument.js", "dist/main/api.js"]
+    stop_grace_period: 15s
+    mem_limit: 512m
+    networks: [edge, data, egress]
+    environment:
+      <<: *release
+      DB_HOST: postgres
+      DB_USER: budmon_app
+      HOST: 0.0.0.0
+      PORT: "3000"
+      DB_PASSWORD_FILE: /run/secrets/DB_PASSWORD
+      CURSOR_KEY_FILE: /run/secrets/CURSOR_KEY
+      RATE_LIMIT_HMAC_KEY_FILE: /run/secrets/RATE_LIMIT_HMAC_KEY
+      API_SECRETS_KEYS_FILE: /run/secrets/API_SECRETS_KEYS
+      RECOVERY_CODE_HMAC_KEYS_FILE: /run/secrets/RECOVERY_CODE_HMAC_KEYS
+      S3_ACCESS_KEY_ID_FILE: /run/secrets/S3_ACCESS_KEY_ID
+      S3_SECRET_ACCESS_KEY_FILE: /run/secrets/S3_SECRET_ACCESS_KEY
+      CAPTURE_PUBLIC_KEY_FILE: /run/secrets/CAPTURE_PUBLIC_KEY
+      GOOGLE_SIGNIN_CLIENT_SECRET_FILE: /run/secrets/GOOGLE_SIGNIN_CLIENT_SECRET
+    volumes:
+      - type: bind
+        source: ${BUDMON_HOME}/secrets/main/api
+        target: /run/secrets
+        read_only: true
+    healthcheck:
+      test: ["CMD", "node", "dist/main/healthcheck.js", "--ready"]
+      interval: 15s
+      retries: 4
+    depends_on: [postgres]
+
+  worker-general:
+    <<: *app
+    image: budmon/server:${BUDMON_TAG:?BUDMON_TAG is not set}
+    user: "10002:10002"
+    command: ["node", "--import", "./dist/main/instrument.js", "dist/main/worker.js"]
+    stop_grace_period: 45s
+    mem_limit: 384m
+    networks: [data, egress]
+    environment:
+      <<: *release
+      DB_HOST: postgres
+      DB_USER: budmon_app
+      QUEUE_DB_USER: budmon_queue
+      WORKER_ROLES: general
+      DB_PASSWORD_FILE: /run/secrets/DB_PASSWORD
+      QUEUE_DB_PASSWORD_FILE: /run/secrets/QUEUE_DB_PASSWORD
+      SMTP_PASSWORD_FILE: /run/secrets/SMTP_PASSWORD
+      S3_ACCESS_KEY_ID_FILE: /run/secrets/S3_ACCESS_KEY_ID
+      S3_SECRET_ACCESS_KEY_FILE: /run/secrets/S3_SECRET_ACCESS_KEY
+      FX_PRIMARY_APP_ID_FILE: /run/secrets/FX_PRIMARY_APP_ID
+      CAPTURE_PUBLIC_KEY_FILE: /run/secrets/CAPTURE_PUBLIC_KEY
+    volumes:
+      - type: bind
+        source: ${BUDMON_HOME}/secrets/main/worker-general
+        target: /run/secrets
+        read_only: true
+    healthcheck:
+      test: ["CMD", "node", "dist/main/healthcheck.js", "--heartbeat"]
+      interval: 15s
+      retries: 4
+    depends_on: [postgres]
+
+  migrate:
+    <<: *app
+    image: budmon/server:${BUDMON_TAG:?BUDMON_TAG is not set}
+    user: "10004:10004"
+    command: ["node", "dist/main/migrate.js"]
+    restart: "no"
+    profiles: [tools]
+    mem_limit: 256m
+    networks: [data]
+    environment:
+      <<: *release
+      DB_HOST: postgres
+      DB_USER: budmon_migrator
+      DB_PASSWORD_FILE: /run/secrets/DB_PASSWORD
+      ROLE_SECRETS_FILE: /run/secrets/ROLE_SECRETS
+    volumes:
+      - type: bind
+        source: ${BUDMON_HOME}/secrets/main/migrate
+        target: /run/secrets
+        read_only: true
+
+  postgres:
+    image: budmon/postgres:${BUDMON_TAG:?BUDMON_TAG is not set}
+    restart: unless-stopped
+    mem_limit: 1g
+    shm_size: 256m
+    networks:
+      data:
+        ipv4_address: ${PG_DATA_IP}
+      capture-db:
+        ipv4_address: ${PG_CAPTURE_IP}
+    environment:
+      BUDMON_LISTEN_ADDRESSES: ${PG_DATA_IP},${PG_CAPTURE_IP}
+      # A-386: only install step 11 sets it, for the first start.
+      BUDMON_FIRST_SETUP: ${BUDMON_FIRST_SETUP:-0}
+    volumes:
+      - type: bind
+        source: ${BUDMON_HOME}/pg
+        target: /var/lib/postgresql/data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BUDMON_HOME}/secrets/main/postgres
+        target: /run/secrets
+        read_only: true
+      - type: bind
+        source: ./postgres/postgresql.conf
+        target: /etc/budmon/postgresql.conf
+        read_only: true
+      - type: bind
+        source: ./postgres/pg_hba.conf
+        target: /etc/budmon/pg_hba.conf
+        read_only: true
+      - type: bind
+        source: ./postgres/pg_ident.conf
+        target: /etc/budmon/pg_ident.conf
+        read_only: true
+    stop_grace_period: 60s
+
+  mailpit:
+    # A-2, A-70: the development stack's exact reference.
+    image: axllent/mailpit:v1.27@sha256:e22dce5b36f93c77082e204a3942fb6b283b7896e057458400a4c88344c3df68
+    command: ["--quiet"]
+    user: "10006:10006"
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    logging:
+      driver: none
+    networks: [data, mail-ui]
+    ports:
+      - "127.0.0.1:8025:8025"
+
+networks:
+  edge:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${EDGE_SUBNET}
+  data:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: ${DATA_SUBNET}
+  egress:
+    driver: bridge
+  mail-ui:
+    driver: bridge
+  capture-db:
+    external: true
+    name: budmon_capture_db
