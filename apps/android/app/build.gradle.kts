@@ -78,7 +78,13 @@ android {
     }
 
     sourceSets {
-        getByName("main").java.srcDir(layout.buildDirectory.dir("generated/openapi/src/main/kotlin"))
+        // AGP 9 takes no Provider here; the generator's output directory, resolved once.
+        getByName("main").java.srcDir(
+            layout.buildDirectory
+                .dir("generated/openapi/src/main/kotlin")
+                .get()
+                .asFile,
+        )
         // TP-13.9: the shared money vectors (F-313).
         getByName("test").resources.srcDir("$rootDir/../../packages/shared/test-vectors")
     }
