@@ -10,6 +10,7 @@ import {
   checkPresign,
   isDownloadName,
   isObjectKey,
+  ObjectStoreError,
   settle,
   type BucketName,
   type ObjectStore,
@@ -79,6 +80,22 @@ function isMissing(error: unknown): boolean {
   return (error as { code?: unknown } | null)?.code === "ENOENT";
 }
 
+/** A-439: a permission error is ObjectStoreError("denied"); every other error is unchanged. */
+function mapDenied(error: unknown): unknown {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === "EACCES" || code === "EPERM"
+    ? new ObjectStoreError("denied", { cause: error })
+    : error;
+}
+
+async function denying<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    throw mapDenied(error);
+  }
+}
+
 async function walk(dir: string, rel: string): Promise<string[]> {
   let entries;
   try {
@@ -126,29 +143,33 @@ export function createFsObjectStore(cfg: {
     async put(bucket, key, body) {
       assertObjectKey(bucket, key);
       const file = objectPath(cfg.root, bucket, key);
-      await mkdir(path.dirname(file), { recursive: true });
-      await writeFile(file, body);
+      await denying(async () => {
+        await mkdir(path.dirname(file), { recursive: true });
+        await writeFile(file, body);
+      });
     },
     async delete(bucket, key) {
       assertObjectKey(bucket, key);
-      await rm(objectPath(cfg.root, bucket, key), { force: true });
+      await denying(() => rm(objectPath(cfg.root, bucket, key), { force: true }));
     },
     async deletePrefix(bucket, prefix) {
       assertObjectPrefix(bucket, prefix);
-      // Every file under the prefix, strays included (A-306 filters `list` only).
-      const keys = await allUnder(bucket, prefix);
-      for (const key of keys) await rm(objectPath(cfg.root, bucket, key), { force: true });
-      return keys.length;
+      return denying(async () => {
+        // Every file under the prefix, strays included (A-306 filters `list` only).
+        const keys = await allUnder(bucket, prefix);
+        for (const key of keys) await rm(objectPath(cfg.root, bucket, key), { force: true });
+        return keys.length;
+      });
     },
     async *list(bucket, prefix) {
       assertObjectPrefix(bucket, prefix);
-      for (const key of await keysUnder(bucket, prefix)) {
+      for (const key of await denying(() => keysUnder(bucket, prefix))) {
         let mtimeNs: bigint;
         try {
           mtimeNs = (await stat(objectPath(cfg.root, bucket, key), { bigint: true })).mtimeNs;
         } catch (error) {
           if (isMissing(error)) continue;
-          throw error;
+          throw mapDenied(error);
         }
         // A-292: the exact mtime, not rounded.
         yield { key, lastModified: Temporal.Instant.fromEpochNanoseconds(mtimeNs) };

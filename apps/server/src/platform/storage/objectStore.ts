@@ -7,8 +7,9 @@ export type ObjectStoreErrorReason = "not_found" | "denied" | "unavailable";
 export class ObjectStoreError extends Error {
   readonly reason: ObjectStoreErrorReason;
 
-  constructor(reason: ObjectStoreErrorReason) {
-    super(`object store: ${reason}`);
+  /** A-439: `cause` keeps the underlying error (for example an fs EACCES). */
+  constructor(reason: ObjectStoreErrorReason, options?: { cause?: unknown }) {
+    super(`object store: ${reason}`, options);
     this.name = "ObjectStoreError";
     this.reason = reason;
   }
