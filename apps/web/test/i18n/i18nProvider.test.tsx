@@ -3,6 +3,7 @@ import { Money, Temporal, asCurrencyCode } from "@budmon/shared";
 import { render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../src/i18n/I18nProvider.js";
+import { messages } from "../../src/i18n/messages.js";
 import { useI18n, type I18n } from "../../src/i18n/useI18n.js";
 
 const NOW = Temporal.Instant.from("2026-10-07T12:00:00Z");
@@ -235,6 +236,19 @@ describe("TP-11.6 (A-321): future instants", () => {
     expect(provider().formatRelative(ahead({ minutes: 3 }), NOW, "UTC")).toBe("now");
   });
 
+  // N-7: the 5-minute boundary itself.
+  it("TP-11.6 (A-321): now + 5 min exactly is now", () => {
+    expect(provider().formatRelative(ahead({ minutes: 5 }), NOW, "UTC")).toBe("now");
+  });
+
+  it("TP-11.6 (A-321): now + 5 min + 1 ms is the date 2026-10-07", () => {
+    const i18n = provider();
+
+    expect(i18n.formatRelative(ahead({ minutes: 5, milliseconds: 1 }), NOW, "UTC")).toBe(
+      i18n.formatDate(Temporal.PlainDate.from("2026-10-07")),
+    );
+  });
+
   it("TP-11.6 (A-321): now + 2 h is the date 2026-10-07", () => {
     const i18n = provider();
 
@@ -249,5 +263,23 @@ describe("TP-11.6 (A-321): future instants", () => {
     expect(i18n.formatRelative(ahead({ hours: 30 * 24 }), NOW, "UTC")).toBe(
       i18n.formatDate(Temporal.PlainDate.from("2026-11-06")),
     );
+  });
+});
+
+// A-401: t adds appName to every call, so the brand is isolated like any simple argument.
+describe("TP-11.6 (A-401): the brand in catalog texts", () => {
+  it("TP-11.6 (A-401): t(update.web.available) with no values gives the text with Budmon isolated", () => {
+    const i18n = provider();
+
+    expect(i18n.t(messages.updateWebAvailable)).toBe(
+      "\u2068Budmon\u2069 has been updated. Reload to get the latest version.",
+    );
+  });
+
+  it("TP-11.6 (A-401): under en-XA the brand stays unaccented (an argument, not catalog text)", async () => {
+    const i18n = provider();
+    await i18n.setLocale("en-XA");
+
+    expect(i18n.t(messages.updateWebAvailable)).toContain("\u2068Budmon\u2069");
   });
 });

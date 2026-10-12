@@ -18,6 +18,10 @@ ruleTester.run("TP-11.18: budmon/no-physical-tailwind (F-2)", budmonRule("no-phy
     },
     { name: "TP-11.31x: ltr: variant", code: 'const a = <div class="ltr:mr-4" />;' },
     {
+      name: "TP-11.31x: -space-x with rtl:space-x-reverse",
+      code: 'const a = <div class="-space-x-2 rtl:space-x-reverse" />;',
+    },
+    {
       name: "TP-11.31x: divide-x with rtl:divide-x-reverse",
       code: 'const a = <div class="divide-x-2 rtl:divide-x-reverse" />;',
     },
@@ -37,6 +41,17 @@ ruleTester.run("TP-11.18: budmon/no-physical-tailwind (F-2)", budmonRule("no-phy
       name: 'TP-11.18: class="space-x-2"',
       code: 'const a = <div class="space-x-2" />;',
       errors: [physical("space-x-2")],
+    },
+    // N-5 (review N-7): the negative forms match too (^-?space-x-, ^-?divide-x-).
+    {
+      name: 'TP-11.31x: class="-space-x-2" (negative, no rtl reverse)',
+      code: 'const a = <div class="-space-x-2" />;',
+      errors: [physical("-space-x-2")],
+    },
+    {
+      name: 'TP-11.31x: class="-divide-x-2" (negative, no rtl reverse)',
+      code: 'const a = <div class="-divide-x-2" />;',
+      errors: [physical("-divide-x-2")],
     },
     {
       name: 'TP-11.18: class="text-left"',

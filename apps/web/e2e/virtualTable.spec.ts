@@ -121,6 +121,24 @@ test("TP-12.3: Tab lands on row 2; ArrowDown ×3 and End move focus in view; Ent
   await expectFocus(page, { row: loadedAtEnd + 1, col: 1 });
 });
 
+test("TP-12.3 (B-3): with the stop row scrolled out of view, Tab from the page heading lands on a row", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "chromium project only");
+  await open(page);
+
+  await page.locator("div[data-scroll]").evaluate((el) => {
+    el.scrollTop = 80 * 36; // the fixture's rowHeight
+  });
+  await page.locator('[role="row"][aria-rowindex="82"]').waitFor();
+  await page.locator("h1").first().focus();
+  await page.keyboard.press("Tab");
+
+  await expect
+    .poll(() => page.evaluate(() => document.activeElement?.getAttribute("role")))
+    .toBe("row");
+});
+
 test("TP-12.3: in ar-XB, Tab then ArrowLeft enters cell 1, ArrowLeft again goes to cell 2 (keys reversed)", async ({
   page,
 }, testInfo) => {

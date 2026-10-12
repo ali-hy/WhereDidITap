@@ -111,6 +111,32 @@ describe("TP-11.11: new web build toast (F-210)", () => {
     expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
   });
 
+  it("TP-11.11 (A-404): the new-build toast's only control is Reload (no close button), and it stays past the 6 s of a normal toast", async () => {
+    const m = await mount(() => Promise.resolve({ buildNumber: 8 }));
+
+    await m.focus();
+    /** The innermost elements holding the toast's text, outside F-218's live regions. */
+    const texts = () =>
+      [...document.querySelectorAll<HTMLElement>("body *")].filter(
+        (el) =>
+          plain(el.textContent) === AVAILABLE &&
+          el.closest("#live-polite, #live-assertive") === null &&
+          ![...el.children].some((c) => plain(c.textContent) === AVAILABLE),
+      );
+    await waitFor(() => {
+      expect(texts().length).toBeGreaterThan(0);
+    });
+    for (const text of texts()) {
+      const toast = text.closest("li") ?? text;
+      const controls = within(toast).queryAllByRole("button");
+      expect(controls.map((b) => plain(b.textContent))).toEqual(["Reload"]);
+    }
+    const shownBefore = texts();
+
+    await new Promise((r) => setTimeout(r, 6_500));
+    for (const text of shownBefore) expect(text.isConnected).toBe(true);
+  }, 15_000);
+
   it("TP-11.11: a check is scheduled every 30 minutes, and a scheduled check that finds 8 shows the toast", async () => {
     const m = await mount(() => Promise.resolve({ buildNumber: 8 }));
 

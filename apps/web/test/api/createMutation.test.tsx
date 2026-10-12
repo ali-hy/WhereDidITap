@@ -4,7 +4,7 @@
 import { render } from "@solidjs/testing-library";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   type CreateMutationResult,
   type QueryClient,
@@ -20,10 +20,14 @@ interface Input {
 
 const URL_ = "https://budmon.test/api/v1/things";
 const keys: string[] = [];
+/** Every request as (input name, key), in arrival order (B-1). */
+const sent: { name: string; key: string }[] = [];
 let failuresLeft = 0;
 const server = setupServer(
-  http.post(URL_, ({ request }) => {
-    keys.push(request.headers.get("idempotency-key") ?? "");
+  http.post(URL_, async ({ request }) => {
+    const key = request.headers.get("idempotency-key") ?? "";
+    keys.push(key);
+    sent.push({ name: ((await request.json()) as { name: string }).name, key });
     if (failuresLeft > 0) {
       failuresLeft -= 1;
       return HttpResponse.error();
@@ -40,6 +44,7 @@ beforeAll(() => {
 });
 afterEach(() => {
   keys.length = 0;
+  sent.length = 0;
   failuresLeft = 0;
 });
 afterAll(() => {
@@ -141,4 +146,29 @@ describe("TP-11.5: createCreateMutation (F-205)", () => {
 
     expect(new Set(keys).size).toBe(1);
   }, 30_000);
+
+  // B-1: a call's automatic retries keep that call's key, even after a newer mutate.
+  it("TP-11.32x (B-1): mutate(B) while A's automatic retry is pending: every request for A carries A's key", async () => {
+    failuresLeft = 1;
+    const { mutation } = await setup();
+
+    mutation.mutate({ name: "A", amount: 1 });
+    await vi.waitFor(() => {
+      expect(sent).toHaveLength(1);
+    });
+    mutation.mutate({ name: "B", amount: 2 });
+    await vi.waitFor(
+      () => {
+        expect(sent.filter((r) => r.name === "A")).toHaveLength(2);
+        expect(sent.filter((r) => r.name === "B")).toHaveLength(1);
+      },
+      { timeout: 8_000 },
+    );
+
+    const aKeys = new Set(sent.filter((r) => r.name === "A").map((r) => r.key));
+    const bKeys = new Set(sent.filter((r) => r.name === "B").map((r) => r.key));
+    expect(aKeys.size).toBe(1);
+    expect(bKeys.size).toBe(1);
+    expect([...aKeys][0]).not.toBe([...bKeys][0]);
+  }, 15_000);
 });

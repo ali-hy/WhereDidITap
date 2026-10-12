@@ -1,4 +1,5 @@
-// F-214 the rate-limit gate and notice (J-3, A-191). TP-11.10.
+// F-214 the rate-limit gate and notice (J-3, A-191). TP-11.10, with A-400 (the status element is
+// always rendered) and A-404 (a 429 without retryAfterSeconds blocks for 60 s).
 import { screen } from "@solidjs/testing-library";
 import { createRoot } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,7 +20,8 @@ function form(m: RateLimitModule) {
     const g = gate;
     return (
       <form>
-        {g.blockedFor() > 0 ? <m.RateLimitNotice secondsLeft={g.blockedFor()} /> : null}
+        {/* A-400: the notice is rendered whenever the form has a gate. */}
+        <m.RateLimitNotice secondsLeft={g.blockedFor()} />
         <button type="submit" disabled={g.blockedFor() > 0}>
           Save
         </button>
@@ -78,5 +80,34 @@ describe("TP-11.10: a rate-limited form (F-214)", () => {
 
       expect(seen).toEqual([3, 2, 1, 0, 0]);
     });
+  });
+
+  it("TP-11.10 (A-400): with a gate not blocked, an empty role=status element is present", async () => {
+    const m = await loadRateLimit();
+    form(m);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(plain(screen.getByRole("status").textContent)).toBe("");
+    expect(submit().disabled).toBe(false);
+  });
+
+  it("TP-11.10 (A-404): block(undefined) (a 429 without retryAfterSeconds) shows Try again in 1 minute for 60 s", async () => {
+    const m = await loadRateLimit();
+    const gate = form(m);
+
+    // F-214's signature takes a number; A-404 has block fall back to 60 s when the value is missing.
+    gate.block(undefined as unknown as number);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(gate.blockedFor()).toBe(60);
+    expect(plain(screen.getByRole("status").textContent)).toBe(
+      "Too many attempts. Try again in 1 minute.",
+    );
+    expect(submit().disabled).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(submit().disabled).toBe(true);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(gate.blockedFor()).toBe(0);
+    expect(submit().disabled).toBe(false);
   });
 });

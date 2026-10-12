@@ -1,7 +1,6 @@
 // S-11b loaders (test-architect). The S-11b modules (F-201 to F-205, F-209 to F-214, F-217, F-218)
-// and their dependencies (@orpc/client, @tanstack/solid-query, @kobalte/core, @sentry/solid) don't
-// exist yet, so they load through dynamic imports with the LLD's signatures declared here. Once the
-// code lands, these become static imports.
+// and their dependencies load through plain imports of the real modules (N-8); the LLD's shapes
+// declared here type the tests' own fakes and fixtures.
 import type { JSX } from "solid-js";
 
 // ---- F-202 ----
@@ -51,6 +50,8 @@ export interface SolidQuery {
 // ---- F-205 ----
 export interface CreateMutationResult<I> {
   mutateAsync: (input: I) => Promise<{ id: string; createdAt: string }>;
+  /** Fire-and-forget (B-1's overlapping calls). */
+  mutate: (input: I) => void;
 }
 
 // ---- F-213 ----
@@ -159,47 +160,23 @@ export interface OrpcClientModule {
   ) => Error;
 }
 
-// Specifiers live in variables so Vite doesn't try to resolve modules that aren't written yet.
-const SRC = "../../src";
-const SPECS = {
-  client: `${SRC}/api/client.ts`,
-  errors: `${SRC}/api/errors.ts`,
-  errorMessages: `${SRC}/api/errorMessages.ts`,
-  queryClient: `${SRC}/api/queryClient.ts`,
-  createMutation: `${SRC}/api/createMutation.ts`,
-  errorFallback: `${SRC}/ui/ErrorFallback.tsx`,
-  updateNotifier: `${SRC}/ui/UpdateNotifier.tsx`,
-  offlineBanner: `${SRC}/ui/OfflineBanner.tsx`,
-  toaster: `${SRC}/ui/Toaster.tsx`,
-  forms: `${SRC}/ui/forms.tsx`,
-  rateLimit: `${SRC}/ui/RateLimitNotice.tsx`,
-  sentry: `${SRC}/observability/sentry.ts`,
-  a11y: `${SRC}/ui/a11y.ts`,
-  clientUpdate: `${SRC}/api/clientUpdate.ts`,
-  solidQuery: "@tanstack/solid-query",
-  orpcClient: "@orpc/client",
-} as const;
-
-async function load<T>(spec: string): Promise<T> {
-  return (await import(/* @vite-ignore */ spec)) as T;
-}
-
-export const loadClient = () => load<ClientModule>(SPECS.client);
-export const loadErrors = () => load<ErrorsModule>(SPECS.errors);
-export const loadErrorMessages = () => load<ErrorMessagesModule>(SPECS.errorMessages);
-export const loadQueryClient = () => load<QueryClientModule>(SPECS.queryClient);
-export const loadCreateMutation = () => load<CreateMutationModule>(SPECS.createMutation);
-export const loadErrorFallback = () => load<ErrorFallbackModule>(SPECS.errorFallback);
-export const loadUpdateNotifier = () => load<UpdateNotifierModule>(SPECS.updateNotifier);
-export const loadOfflineBanner = () => load<OfflineBannerModule>(SPECS.offlineBanner);
-export const loadToaster = () => load<ToasterModule>(SPECS.toaster);
-export const loadForms = () => load<FormsModule>(SPECS.forms);
-export const loadRateLimit = () => load<RateLimitModule>(SPECS.rateLimit);
-export const loadSentry = () => load<SentryModule>(SPECS.sentry);
-export const loadA11y = () => load<A11yModule>(SPECS.a11y);
-export const loadClientUpdate = () => load<ClientUpdateModule>(SPECS.clientUpdate);
-export const loadSolidQuery = () => load<SolidQuery>(SPECS.solidQuery);
-export const loadOrpcClient = () => load<OrpcClientModule>(SPECS.orpcClient);
+// N-8: the modules exist now, so each loader is a plain import of the real module (typed by it).
+export const loadClient = () => import("../../src/api/client.js");
+export const loadErrors = () => import("../../src/api/errors.js");
+export const loadErrorMessages = () => import("../../src/api/errorMessages.js");
+export const loadQueryClient = () => import("../../src/api/queryClient.js");
+export const loadCreateMutation = () => import("../../src/api/createMutation.js");
+export const loadErrorFallback = () => import("../../src/ui/ErrorFallback.js");
+export const loadUpdateNotifier = () => import("../../src/ui/UpdateNotifier.js");
+export const loadOfflineBanner = () => import("../../src/ui/OfflineBanner.js");
+export const loadToaster = () => import("../../src/ui/Toaster.js");
+export const loadForms = () => import("../../src/ui/forms.js");
+export const loadRateLimit = () => import("../../src/ui/RateLimitNotice.js");
+export const loadSentry = () => import("../../src/observability/sentry.js");
+export const loadA11y = () => import("../../src/ui/a11y.js");
+export const loadClientUpdate = () => import("../../src/api/clientUpdate.js");
+export const loadSolidQuery = () => import("@tanstack/solid-query");
+export const loadOrpcClient = () => import("@orpc/client");
 
 /** An oRPC defined error as the client decodes the server's envelope (§6). */
 export async function definedError(code: string, status: number, data?: unknown): Promise<Error> {

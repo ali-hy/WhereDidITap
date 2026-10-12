@@ -9,6 +9,7 @@ test("TP-11.14: a page with an axe violation passes, and the attached axe report
   const report = await attachAxeReport(page, testInfo);
 
   expect(report).not.toBeNull();
-  expect(report?.violations.length ?? 0).toBeGreaterThan(0);
+  // T-3: the fixture's planted violation (A-332), not just any.
+  expect(report?.violations.some((v) => v.id === "color-contrast")).toBe(true);
   expect(testInfo.attachments.map((a) => a.name)).toContain("axe-report.json");
 });

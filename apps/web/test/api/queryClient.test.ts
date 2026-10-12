@@ -1,13 +1,8 @@
 // F-204 createQueryClient: retry rules for queries and mutations. TP-11.4, plus extra cases
 // TP-11.32x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  type QueryClient,
-  definedError,
-  loadOrpcClient,
-  loadQueryClient,
-  loadSolidQuery,
-} from "../support/s11b.js";
+import type { QueryClient } from "@tanstack/solid-query";
+import { definedError, loadOrpcClient, loadQueryClient, loadSolidQuery } from "../support/s11b.js";
 
 let client: QueryClient | undefined;
 
@@ -63,7 +58,7 @@ describe("TP-11.4: query retries (F-204)", () => {
     const qc = await newClient();
     const queryFn = failing([internal, internal, internal]);
 
-    const result = await drain(qc.fetchQuery({ queryKey: ["a"], queryFn }));
+    const result = await drain(qc.query({ queryKey: ["a"], queryFn }));
 
     expect(result).toEqual({ value: "ok" });
     expect(queryFn).toHaveBeenCalledTimes(4);
@@ -73,7 +68,7 @@ describe("TP-11.4: query retries (F-204)", () => {
     const qc = await newClient();
     const queryFn = failing([notFound]);
 
-    const result = await drain(qc.fetchQuery({ queryKey: ["b"], queryFn }));
+    const result = await drain(qc.query({ queryKey: ["b"], queryFn }));
 
     expect(result.error).toBeDefined();
     expect(queryFn).toHaveBeenCalledTimes(1);
@@ -83,7 +78,7 @@ describe("TP-11.4: query retries (F-204)", () => {
     const qc = await newClient();
     const queryFn = failing([network, network, network, network]);
 
-    const result = await drain(qc.fetchQuery({ queryKey: ["c"], queryFn }));
+    const result = await drain(qc.query({ queryKey: ["c"], queryFn }));
 
     expect(result.error).toBeInstanceOf(TypeError);
     expect(queryFn).toHaveBeenCalledTimes(4);

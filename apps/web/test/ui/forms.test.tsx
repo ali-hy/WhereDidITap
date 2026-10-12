@@ -3,7 +3,9 @@
 import { screen, waitFor } from "@solidjs/testing-library";
 import { createSignal, type JSX } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
-import { type FormField, type FormsModule, type Issue, loadForms, plain } from "../support/s11b.js";
+import { type FormField, type Issue, loadForms, plain } from "../support/s11b.js";
+
+type FormsModule = Awaited<ReturnType<typeof loadForms>>;
 import { renderWithI18n } from "../support/render.js";
 
 const ISSUES: readonly Issue[] = [
@@ -46,15 +48,16 @@ function harness(forms: FormsModule) {
 }
 
 describe("TP-11.9: server validation issues on a form (F-213)", () => {
-  it("TP-11.9: [amount too_small] sets amount's error to validation.too_small; [unknown.path invalid_value] goes to the summary as error.validation.unknownField with the path, after error.validation.form; the summary takes focus", async () => {
+  it("TP-11.9 (b): [amount too_small] sets amount's error to validation.too_small; [unknown.path invalid_value] goes to the summary as error.validation.unknownField with the path, after error.validation.form; the summary takes focus", async () => {
     const forms = await loadForms();
     const h = harness(forms);
     const { i18n, container } = renderWithI18n(() => <h.Form />);
     const noteSpy = vi.spyOn(h.fields.note as FormField, "setError");
 
-    const { summary } = forms.applyServerIssues(ISSUES, h.fields, i18n.t);
+    const { summary, focus } = forms.applyServerIssues(ISSUES, h.fields, i18n.t);
     h.setSummary(summary);
 
+    expect(focus).toBe("summary");
     expect(h.amountError()).toBe("This is too short or too small.");
     expect(noteSpy).not.toHaveBeenCalled();
     expect(summary.map((m) => ({ ...m, text: plain(m.text) }))).toEqual([
@@ -89,14 +92,43 @@ describe("TP-11.9: server validation issues on a form (F-213)", () => {
     expect(h.noteError()).toBe("Enter a valid value.");
   });
 
-  it("TP-11.32x: the summary holds only error.validation.form when every issue names a field", async () => {
+  // A-399: every issue maps to a field: no summary, focus on the first invalid field.
+  it("TP-11.9 (a): [amount too_small] alone: amount's error and aria-invalid, no summary rendered, focus on amount", async () => {
+    const forms = await loadForms();
+    const h = harness(forms);
+    const { i18n, container } = renderWithI18n(() => <h.Form />);
+
+    const { summary, focus } = forms.applyServerIssues([ISSUES[0] as Issue], h.fields, i18n.t);
+    h.setSummary(summary);
+
+    expect(summary).toEqual([]);
+    expect(focus).toEqual({ fieldId: "amount" });
+    expect(h.amountError()).toBe("This is too short or too small.");
+    expect(container.querySelector("#amount")?.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.queryByRole("alert")).toBeNull();
+    await waitFor(() => {
+      expect(document.activeElement?.id).toBe("amount");
+    });
+  });
+
+  it("TP-11.32x (A-399): with both fields invalid, focus goes to the first in DOM order (amount), whatever the issue order", async () => {
     const forms = await loadForms();
     const h = harness(forms);
     const { i18n } = renderWithI18n(() => <h.Form />);
 
-    const { summary } = forms.applyServerIssues([ISSUES[0] as Issue], h.fields, i18n.t);
+    const { focus } = forms.applyServerIssues(
+      [
+        { code: "too_big", path: ["note"], message: "x" },
+        { code: "too_small", path: ["amount"], message: "x" },
+      ],
+      h.fields,
+      i18n.t,
+    );
 
-    expect(summary.map((m) => plain(m.text))).toEqual(["Some details need fixing."]);
+    expect(focus).toEqual({ fieldId: "amount" });
+    await waitFor(() => {
+      expect(document.activeElement?.id).toBe("amount");
+    });
   });
 
   it("TP-11.32x: FieldError renders its message with the given id; without a message it renders no text", async () => {

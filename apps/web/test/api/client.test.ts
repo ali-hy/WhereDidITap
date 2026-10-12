@@ -89,23 +89,134 @@ describe("TP-11.1: createApiClient (F-201)", () => {
     expect(onClientUpdateRequired).not.toHaveBeenCalled();
   });
 
-  it("TP-11.1 (A-327): the fetch init carries an AbortSignal that isn't aborted", async () => {
+  // T-1: the 15 s timeout is combined with the caller's signal (A-327).
+  it("TP-11.1 (A-327): the fetch gets a new signal combining AbortSignal.timeout(15000) with the request's", async () => {
     const { createApiClient } = await loadClient();
-    const signals: (AbortSignal | null | undefined)[] = [];
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    const seenInit: { request: Request | undefined; signal: AbortSignal | null | undefined }[] = [];
     const client = createApiClient({
       buildNumber: 7,
       baseUrl: "https://budmon.test/api/v1",
       fetch: (input: RequestInfo | URL, init?: RequestInit) => {
-        signals.push(init?.signal ?? (input instanceof Request ? input.signal : undefined));
+        seenInit.push({
+          request: input instanceof Request ? input : undefined,
+          signal: init?.signal,
+        });
         return Promise.resolve(Response.json(CLIENT_CONFIG));
       },
     });
+    let timeoutCalls: unknown[][];
+    try {
+      await client.meta.clientConfig();
+    } finally {
+      // mockRestore clears the recorded calls, so they're read first.
+      timeoutCalls = [...timeout.mock.calls];
+      timeout.mockRestore();
+    }
 
-    await client.meta.clientConfig();
+    expect(timeoutCalls).toContainEqual([15_000]);
+    expect(seenInit).toHaveLength(1);
+    const [call] = seenInit;
+    expect(call?.signal).toBeInstanceOf(AbortSignal);
+    expect(call?.signal).not.toBe(call?.request?.signal);
+    expect(call?.signal?.aborted).toBe(false);
+  });
 
-    expect(signals).toHaveLength(1);
-    expect(signals[0]).toBeInstanceOf(AbortSignal);
-    expect(signals[0]?.aborted).toBe(false);
+  it("TP-11.1 (A-327): aborting the caller's signal aborts the fetch", async () => {
+    const { createApiClient } = await loadClient();
+    const caller = new AbortController();
+    let fetchSignal: AbortSignal | null | undefined;
+    const client = createApiClient({
+      buildNumber: 7,
+      baseUrl: "https://budmon.test/api/v1",
+      fetch: (_input: RequestInfo | URL, init?: RequestInit) => {
+        fetchSignal = init?.signal;
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(init.signal?.reason as Error);
+          });
+        });
+      },
+    });
+
+    const call = settle(client.meta.clientConfig(undefined, { signal: caller.signal }));
+    await vi.waitFor(() => {
+      expect(fetchSignal).toBeInstanceOf(AbortSignal);
+    });
+    caller.abort();
+    await call;
+
+    expect(fetchSignal?.aborted).toBe(true);
+  });
+
+  it("TP-11.1 (A-327): a fetch that never settles fails as timeout when the timeout signal fires", async () => {
+    const { createApiClient } = await loadClient();
+    const { toAppError } = await loadErrors();
+    const fire = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(fire.signal);
+    let fetching = false;
+    const client = createApiClient({
+      buildNumber: 7,
+      baseUrl: "https://budmon.test/api/v1",
+      fetch: (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          const fail = () => {
+            reject(signal?.reason as Error);
+          };
+          if (signal?.aborted === true) fail();
+          signal?.addEventListener("abort", fail);
+          fetching = true;
+        }),
+    });
+    try {
+      const call = settle(client.meta.clientConfig());
+      await vi.waitFor(() => {
+        expect(fetching).toBe(true);
+      });
+      fire.abort(new DOMException("The operation timed out.", "TimeoutError"));
+      const err = await call;
+
+      expect(toAppError(err)).toEqual({ kind: "timeout" });
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  // A-398: a failed response's X-Request-Id travels on the thrown error.
+  it("TP-11.1 (A-398): a 500 with X-Request-Id leaves requestId (non-enumerable) on the thrown error", async () => {
+    const { createApiClient } = await loadClient();
+    const id = "4bf92f3577b34da6a3ce929d0e0e4736";
+    const client = createApiClient({
+      buildNumber: 7,
+      baseUrl: "https://budmon.test/api/v1",
+      fetch: () =>
+        Promise.resolve(
+          Response.json(
+            { defined: false, code: "INTERNAL_SERVER_ERROR", status: 500, message: "Internal" },
+            { status: 500, headers: { "x-request-id": id } },
+          ),
+        ),
+    });
+
+    const err = await settle(client.meta.clientConfig());
+
+    expect((err as { requestId?: unknown }).requestId).toBe(id);
+    expect(Object.keys(err as object)).not.toContain("requestId");
+  });
+
+  it("TP-11.1 (A-398): a network error carries no requestId", async () => {
+    const { createApiClient } = await loadClient();
+    const client = createApiClient({
+      buildNumber: 7,
+      baseUrl: "https://budmon.test/api/v1",
+      fetch: () => Promise.reject(new TypeError("Failed to fetch")),
+    });
+
+    const err = await settle(client.meta.clientConfig());
+
+    expect(err).toBeDefined();
+    expect((err as { requestId?: unknown }).requestId).toBeUndefined();
   });
 
   it("TP-11.32x: the injected fetch is used, with credentials same-origin, at baseUrl", async () => {
@@ -242,11 +353,42 @@ describe("TP-11.2: toAppError (F-202)", () => {
         }),
       "timeout",
     ],
+    [
+      "a TimeoutError four causes deep (past the bound)",
+      () =>
+        new Error("1", {
+          cause: new Error("2", {
+            cause: new Error("3", {
+              cause: new Error("4", { cause: new DOMException("t", "TimeoutError") }),
+            }),
+          }),
+        }),
+      "unknown",
+    ],
     ["a DOMException AbortError", () => new DOMException("a", "AbortError"), "unknown"],
   ] as const)("TP-11.2 (A-327): %s is %s", async (_label, make, kind) => {
     const { toAppError } = await loadErrors();
 
     expect(toAppError(make())).toEqual({ kind });
+  });
+
+  it.each([
+    ["a valid 32-hex id is kept", "4bf92f3577b34da6a3ce929d0e0e4736", true],
+    ['"x" is dropped', "x", false],
+    ["upper-case hex is dropped", "4BF92F3577B34DA6A3CE929D0E0E4736", false],
+  ] as const)("TP-11.2 (A-398): requestId: %s", async (_label, id, kept) => {
+    const { toAppError } = await loadErrors();
+    const err = await thrownFor(() =>
+      Response.json(
+        { defined: true, code: "NOT_FOUND", status: 404, message: "Not found" },
+        { status: 404, headers: { "x-request-id": id } },
+      ),
+    );
+
+    const appError = toAppError(err);
+    expect(appError).toMatchObject({ kind: "defined", key: "NOT_FOUND" });
+    if (kept) expect(appError).toHaveProperty("requestId", id);
+    else expect(appError).not.toHaveProperty("requestId");
   });
 
   it("TP-11.2: anything else is unknown", async () => {

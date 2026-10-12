@@ -1,6 +1,5 @@
-// S-12 loaders (test-architect). F-219 VirtualTable and F-220 createInfiniteList don't exist yet,
-// so they load through dynamic imports with the LLD's signatures declared here. Once the code lands,
-// these become static imports.
+// S-12 loaders (test-architect): F-219 VirtualTable and F-220 createInfiniteList, with the LLD's
+// signatures declared here for the tests' own fakes.
 import type { JSX } from "solid-js";
 import type { AppError } from "./s11b.js";
 
@@ -47,15 +46,6 @@ export interface VirtualTableModule {
   }) => JSX.Element;
 }
 
-const SRC = "../../src/ui/table";
-const SPECS = {
-  infiniteList: `${SRC}/infiniteList.ts`,
-  virtualTable: `${SRC}/VirtualTable.tsx`,
-} as const;
-
-async function load<T>(spec: string): Promise<T> {
-  return (await import(/* @vite-ignore */ spec)) as T;
-}
-
-export const loadInfiniteList = () => load<InfiniteListModule>(SPECS.infiniteList);
-export const loadVirtualTable = () => load<VirtualTableModule>(SPECS.virtualTable);
+// N-8: plain imports of the real modules.
+export const loadInfiniteList = () => import("../../src/ui/table/infiniteList.js");
+export const loadVirtualTable = () => import("../../src/ui/table/VirtualTable.js");

@@ -127,7 +127,7 @@ describe("TP-11.3: messageForError (F-203)", () => {
 
     const missing = ROWS.map(([, error, operation]) => messageForError(error, operation))
       .map((m) => m.descriptor.id)
-      .filter((id) => !(id in EN));
+      .filter((id) => id === undefined || !(id in EN));
 
     expect(missing).toEqual([]);
   });

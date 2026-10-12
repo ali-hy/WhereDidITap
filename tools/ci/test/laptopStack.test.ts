@@ -80,7 +80,9 @@ function composeConfig(files: readonly string[], env: Record<string, string | un
     if (v === undefined) Reflect.deleteProperty(merged, k);
   const args = ["compose", "--project-directory", LOCAL];
   for (const f of files) args.push("-f", path.join(LOCAL, f));
-  args.push("--env-file", path.join(LOCAL, "local.env"), "config", "--format", "json");
+  // `migrate` is in profile tools; config omits profile-gated services otherwise.
+  args.push("--env-file", path.join(LOCAL, "local.env"), "--profile", "tools");
+  args.push("config", "--format", "json");
   const result = spawnSync("docker", args, { encoding: "utf8", env: merged });
   return {
     status: result.status,
@@ -353,7 +355,10 @@ describe("TP-15.33x: the capture project (F-175)", () => {
   it("TP-15.33x: worker-capture has no proxy variables and no OTLP endpoint", () => {
     const keys = Object.keys(svc(capture, "worker-capture").environment ?? {});
 
-    expect(keys.filter((k) => /proxy|OTEL_EXPORTER_OTLP/i.test(k))).toEqual([]);
+    // Egress proxy variables (TRUSTED_PROXY, from local.env, is Fastify's and not one of them).
+    expect(
+      keys.filter((k) => /^(https?_proxy|no_proxy|all_proxy)$|OTEL_EXPORTER_OTLP/i.test(k)),
+    ).toEqual([]);
   });
 });
 

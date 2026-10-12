@@ -35,6 +35,34 @@ test("TP-11.15 (A-333): on load focus stays on body and #live-polite is empty; n
   await expect(page.getByText("Nothing here yet.")).toBeVisible();
 });
 
+// A-402: only a pathname change moves focus and announces.
+test("TP-11.15 (A-402): a search-only change on / leaves focus and #live-polite alone", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.locator("main h1")).toHaveText(catalogText("Budmon"));
+  // A state where a wrongly fired focus move or announcement would show.
+  await page.evaluate(() => {
+    (document.activeElement as HTMLElement | null)?.blur();
+    const region = document.getElementById("live-polite");
+    if (region !== null) region.textContent = "";
+  });
+
+  await navigate(page, "/?q=tp-11-15");
+  await expect(page).toHaveURL(/\/\?q=tp-11-15$/);
+  // A negative check: give a focus move or announcement time to happen.
+  await page.waitForTimeout(1_000);
+
+  await expect(page.locator("body")).toBeFocused();
+  await expect(page.locator("#live-polite")).toHaveText("");
+});
+
+// A-402's second half needs the router: nothing outside the app can call router.invalidate() on /
+// (question raised: a test seam, such as a fixture control that calls it).
+test.fixme("TP-11.15 (A-402): router.invalidate() on / leaves focus and #live-polite alone", () => {
+  // Awaiting a way to call router.invalidate() from the page.
+});
+
 test.describe("TP-11.16: 360 px layout", () => {
   test.use({ viewport: { width: 360, height: 740 } });
 
