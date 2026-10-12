@@ -10,6 +10,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parse } from "yaml";
+import { outputAlternatives } from "./support/changesJob.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const LOCAL = path.join(ROOT, "infra/local");
@@ -464,12 +465,11 @@ describe("TP-15.33x: local.env (F-175)", () => {
 });
 
 describe("TP-15.33x: the Caddyfile (F-175)", () => {
-  it("TP-15.33x: auto_https off, site :8080, the maintenance matcher, the API proxy and the exact CSP", () => {
+  it("TP-15.33x: auto_https off, site :8080, the API proxy and the exact CSP", () => {
     const caddy = read("infra/local/Caddyfile");
 
     expect(caddy).toMatch(/auto_https\s+off/);
     expect(caddy).toMatch(/^:8080\s*\{/m);
-    expect(caddy).toMatch(/@maint\s+file\s+\/srv\/maintenance\/on/);
     expect(caddy).toMatch(/reverse_proxy\s+api:3000/);
     expect(caddy).toContain(
       "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://*.ingest.de.sentry.io https://*.ingest.sentry.io; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
@@ -534,8 +534,103 @@ describe("TP-15.16: shellcheck and the infra-lint job", () => {
   });
 });
 
-// A-391: the infra-int job runs the integration parts of TP-15.3, TP-15.13, TP-15.22 and TP-15.28.
-describe("TP-15.35x (A-391): ci.yml's infra-int job", () => {
+/** The text after the Dockerfile's last FROM matching `from`. */
+function lastStage(rel: string, from: RegExp): string {
+  const text = read(rel);
+  const starts = [...text.matchAll(/^FROM .*$/gm)].filter((m) => from.test(m[0]));
+  const last = starts.at(-1);
+  return last === undefined ? "" : text.slice(last.index);
+}
+
+/** The Caddyfile's top-level blocks: the global options block (no address) and site blocks. */
+function caddyBlocks(): { global: string; sites: string[] } {
+  const lines = read("infra/local/Caddyfile").split("\n");
+  let depth = 0;
+  let current: { head: string; body: string[] } | null = null;
+  const blocks: { head: string; body: string[] }[] = [];
+  for (const line of lines) {
+    const code = line.replace(/#.*$/, "");
+    if (depth === 0 && /\{\s*$/.test(code)) {
+      current = { head: code.replace(/\{\s*$/, "").trim(), body: [] };
+      blocks.push(current);
+    } else if (current !== null && depth > 0) {
+      current.body.push(line);
+    }
+    depth += (code.match(/\{/g) ?? []).length - (code.match(/\}/g) ?? []).length;
+  }
+  return {
+    global: blocks
+      .filter((b) => b.head === "")
+      .flatMap((b) => b.body)
+      .join("\n"),
+    sites: blocks.filter((b) => b.head !== "").map((b) => b.head),
+  };
+}
+
+// A-419: the web image and the Caddyfile.
+describe("TP-15.33: the web image and the Caddyfile (A-417, A-419)", () => {
+  it("TP-15.33: the last stage, from a digest-pinned caddy, removes the file capability, works from /, runs as 10005 and exposes 8080", () => {
+    const stage = lastStage("images/web/Dockerfile", /^FROM caddy:[^@\s]+@sha256:[0-9a-f]{64}/);
+
+    expect(stage).not.toBe("");
+    expect(stage).toMatch(/^RUN setcap -r \/usr\/bin\/caddy$/m);
+    expect(stage).toMatch(/^WORKDIR \/$/m);
+    expect(stage).toMatch(/^USER 10005:10005$/m);
+    expect(stage).toMatch(/^EXPOSE 8080$/m);
+  });
+
+  it.each([
+    ["images/web/Dockerfile"],
+    ["images/server/Dockerfile"],
+    ["images/postgres/Dockerfile"],
+  ])("TP-15.33/TP-15.34 (A-417): %s has no # syntax= line", (rel) => {
+    expect(read(rel)).not.toMatch(/^#\s*syntax\s*=/m);
+  });
+
+  it("TP-15.33: the Caddyfile has exactly one site block, :8080, and global auto_https off and admin off", () => {
+    const { global, sites } = caddyBlocks();
+
+    expect(sites).toEqual([":8080"]);
+    expect(global).toMatch(/^\s*auto_https\s+off\s*$/m);
+    expect(global).toMatch(/^\s*admin\s+off\s*$/m);
+  });
+
+  it("TP-15.33 (A-419): @maint file has root / and try_files /srv/maintenance/on, one directive per line", () => {
+    expect(read("infra/local/Caddyfile")).toMatch(
+      /@maint\s+file\s*\{\s*\n\s*root\s+\/\s*\n\s*try_files\s+\/srv\/maintenance\/on\s*\n\s*\}/,
+    );
+  });
+});
+
+// A-417, A-418: the Postgres image.
+describe("TP-15.34: the Postgres image (A-417, A-418)", () => {
+  it("TP-15.34: the Dockerfile copies cluster-bootstrap.sql from the sql context and sets PGDATABASE=postgres", () => {
+    const docker = read("images/postgres/Dockerfile");
+
+    expect(docker).toMatch(
+      /^COPY --from=sql cluster-bootstrap\.sql \/docker-entrypoint-initdb\.d\/10-budmon\.sql\.tpl$/m,
+    );
+    expect(docker).toMatch(/^ENV PGDATABASE=postgres$/m);
+  });
+
+  it("TP-15.34: the entrypoint passes -c listen_addresses=${BUDMON_LISTEN_ADDRESSES:-}", () => {
+    // Quoted or not.
+    expect(read("images/postgres/budmon-entrypoint.sh")).toMatch(
+      /-c\s+"?listen_addresses=\$\{BUDMON_LISTEN_ADDRESSES:-\}"?(\s|$)/,
+    );
+  });
+
+  it("TP-15.34: postgresql.conf has no uncommented listen_addresses line", () => {
+    const lines = read("infra/local/postgres/postgresql.conf")
+      .split("\n")
+      .map((l) => l.trim());
+
+    expect(lines.filter((l) => /^listen_addresses\b/.test(l))).toEqual([]);
+  });
+});
+
+// A-391, A-417, A-424: the changes and infra-int jobs.
+describe("TP-15.35: ci.yml's changes and infra-int jobs", () => {
   interface Step {
     run?: unknown;
   }
@@ -548,59 +643,60 @@ describe("TP-15.35x (A-391): ci.yml's infra-int job", () => {
   }
   const jobs = () =>
     (parse(read(".github/workflows/ci.yml")) as { jobs?: Record<string, Job> }).jobs ?? {};
+  const cond = (job: Job | undefined) => (typeof job?.if === "string" ? job.if : "");
   const runs = (job: Job | undefined) =>
     (job?.steps ?? []).map((s) => (typeof s.run === "string" ? s.run : "")).join("\n");
-  const cond = (job: Job | undefined) => (typeof job?.if === "string" ? job.if : "");
-  /** The changes output infra-int's `if` reads, e.g. `infra` in needs.changes.outputs.infra. */
-  const output = () =>
-    /needs\.changes\.outputs\.([A-Za-z0-9_-]+)\s*==\s*'true'/.exec(cond(jobs()["infra-int"]))?.[1];
 
-  it("TP-15.35x: infra-int needs changes and runs on its output or a release/hotfix head branch", () => {
+  it("TP-15.35: infra-int needs changes; its if reads the infra output or a release/hotfix head branch; timeout 30", () => {
     const job = jobs()["infra-int"];
     const text = cond(job);
 
-    expect(job).toBeDefined();
     expect([job?.needs].flat()).toContain("changes");
-    expect(output()).toBeDefined();
+    expect(text).toContain("needs.changes.outputs.infra == 'true'");
     expect(text).toContain("startsWith(github.head_ref, 'release/')");
     expect(text).toContain("startsWith(github.head_ref, 'hotfix/')");
-  });
-
-  it("TP-15.35x: the changes job sets that output for infra/, images/ and apps/server/", () => {
-    const changes = jobs()["changes"];
-    const name = output() ?? "<none>";
-
-    expect(Object.keys(changes?.outputs ?? {})).toContain(name);
-    const text = runs(changes);
-    for (const p of ["infra/", "images/", "apps/server/"]) expect(text).toContain(p);
-  });
-
-  it("TP-15.35x: timeout-minutes 30; builds the three images (A-393) before pnpm test:infra", () => {
-    const job = jobs()["infra-int"];
-    const text = runs(job);
-
     expect(job?.["timeout-minutes"]).toBe(30);
-    const builds = ["server", "web", "postgres"].map((n) => {
-      const m = new RegExp(`docker build[^\\n]*images/${n}(/Dockerfile)?`).exec(text);
-      return m?.index ?? -1;
-    });
-    for (const at of builds) expect(at).toBeGreaterThanOrEqual(0);
-    const test = text.indexOf("pnpm test:infra");
-    expect(test).toBeGreaterThan(Math.max(...builds));
   });
 
-  it("TP-15.35x: images/server and images/web build from the repository root; images/postgres from its directory (A-393)", () => {
-    const text = runs(jobs()["infra-int"]);
+  it("TP-15.35 (A-424): changes outputs infra, infra-lint and android", () => {
+    expect(Object.keys(jobs()["changes"]?.outputs ?? {})).toEqual(
+      expect.arrayContaining(["infra", "infra-lint", "android"]),
+    );
+  });
 
-    const buildLines = text.split("\n").filter((l) => /docker build/.test(l));
+  it.each([
+    ["infra", ["infra/", "images/", "apps/server/", ".dockerignore", ".github/workflows/ci.yml"]],
+    ["infra-lint", ["infra/", "images/", "tools/ci/", ".github/"]],
+  ] as const)("TP-15.35 (A-424): the %s line lists exactly %j", (name, paths) => {
+    expect(outputAlternatives(ROOT, name)?.sort()).toEqual([...paths].sort());
+  });
+
+  it("TP-15.35 (A-424): infra-lint's if reads needs.changes.outputs.infra-lint == 'true'", () => {
+    expect(cond(jobs()["infra-lint"])).toContain("needs.changes.outputs.infra-lint == 'true'");
+  });
+
+  it("TP-15.35 (A-393, A-417): infra-int builds server and web from the root, postgres with the sql context, before pnpm test:infra", () => {
+    const text = runs(jobs()["infra-int"]).replace(/\\\n\s*/g, " ");
+    const builds = text.split("\n").filter((l) => /docker build/.test(l));
+    const at = (pattern: RegExp) => {
+      const line = builds.find((l) => pattern.test(l));
+      return line === undefined ? -1 : text.indexOf(line);
+    };
+
     for (const n of ["server", "web"]) {
-      const line = buildLines.find((l) => l.includes(`-f images/${n}/Dockerfile`)) ?? "";
+      const line = builds.find((l) => l.includes(`-f images/${n}/Dockerfile`)) ?? "";
       expect(line.split(/\s+/), n).toContain(".");
     }
-    expect(text).toMatch(/docker build[^\n]*\simages\/postgres\/?(\s|$)/m);
+    const pg = builds.find((l) => /images\/postgres\/?(\s|$)/.test(l)) ?? "";
+    expect(pg).toContain("--build-context sql=apps/server/src/platform/db/sql");
+    expect(pg.trim().split(/\s+/).at(-1)).toMatch(/^images\/postgres\/?$/);
+    const test = text.indexOf("pnpm test:infra");
+    expect(test).toBeGreaterThan(
+      Math.max(at(/images\/server\//), at(/images\/web\//), at(/images\/postgres/)),
+    );
   });
 
-  it("TP-15.35x: a root .dockerignore excludes the A-393 paths", () => {
+  it("TP-15.35 (A-393): the root .dockerignore lists the eight entries", () => {
     const lines = read(".dockerignore")
       .split("\n")
       .map((l) => l.trim());

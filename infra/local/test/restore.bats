@@ -10,6 +10,7 @@
 #   READY_EXIT               readiness checks (default 0)
 #   RENAME_FAILS             how many RENAME statements fail before one succeeds (default 0)
 #   DB_SIZE                  pg_database_size('budmon') in bytes (default 1000)
+#   SIZE_EXIT / SIZE_OUTPUT  the size query's exit code / raw output (A-420)
 #   DF_AVAIL_BYTES           free space reported by df (default 10^12)
 #
 # A-388: free space is `df -Pk -- <dir>` field 4 × 1024 (pg/, and dumps/ on another filesystem),
@@ -53,7 +54,10 @@ stub_docker() {
     local sql="${all}"
     if [ ! -t 0 ]; then sql="${sql} $(cat)"; fi
     printf 'sql\t%s\n' "${sql//$'\n'/ }" >>"${CALLS}"
-    if [[ "${sql}" == *"pg_database_size"* ]]; then echo "${DB_SIZE:-1000}"; fi
+    if [[ "${sql}" == *"pg_database_size"* ]]; then
+      [ "${SIZE_EXIT:-0}" != 0 ] && return "${SIZE_EXIT}"
+      echo "${SIZE_OUTPUT:-${DB_SIZE:-1000}}"
+    fi
     if [[ "${sql}" == *"RENAME TO"* ]]; then
       local n; n="$(wc -c <"${BUDMON_HOME}/rename-count")"
       if [ "${n}" -lt "${RENAME_FAILS:-0}" ]; then
@@ -215,6 +219,29 @@ events() {
   assert_line "-Pk -- ${BUDMON_HOME}/pg"
   run bash -c "awk -F'\t' '\$1==\"sql\" && \$2 ~ /pg_database_size/' '${CALLS}'"
   assert_output --partial "psql"
+  assert_output --partial "-Atc"
+}
+
+@test "TP-15.22 (A-420): the size query failing, then printing abc: exit 23 (can't read the database size) both times, no budmon_restore" {
+  local mode
+  for mode in fail abc; do
+    : >"${CALLS}"
+    if [ "${mode}" = fail ]; then export SIZE_EXIT=2; unset SIZE_OUTPUT; else unset SIZE_EXIT; export SIZE_OUTPUT=abc; fi
+    run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+    [ "${status}" -eq 23 ] || { echo "${mode}: exit ${status}: ${output}"; return 1; }
+    assert_output --partial "disk space check failed: can't read the database size"
+    run grep -c "CREATE DATABASE" "${CALLS}"
+    assert_output "0"
+  done
+}
+
+@test "TP-15.22 (A-420): every psql call but the size query takes its SQL on stdin" {
+  run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+  assert_success
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ /psql/ && \$3 !~ /pg_database_size/ { print \$3 }' '${CALLS}'"
+  [ "${#lines[@]}" -gt 0 ] || { echo "no psql calls"; return 1; }
+  refute_output --regexp "(CREATE|ALTER|DROP|SELECT|GRANT|REVOKE) "
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ /pg_database_size/ { print \$3 }' '${CALLS}'"
   assert_output --partial "-Atc"
 }
 

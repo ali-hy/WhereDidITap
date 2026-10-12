@@ -14,12 +14,17 @@ load helpers
 
 CANARY="CANARY-secret-tp-15-21-7f3a"
 
+WEB_DSN="https://pub@o1.ingest.sentry.io/2"
+
 setup() {
   common_setup
   write_state v1.1.0 v1.0.0
   make_release v1.1.0
   make_release v1.2.0
   mkdir -p "${BUDMON_HOME}/build/v1.2.0/apps/server" "${BUDMON_HOME}/dumps" "${BUDMON_HOME}/maintenance"
+  # A-423: the web build's DSN comes from site.env.
+  printf 'PUBLIC_ORIGIN=https://laptop.tailnet.ts.net\nWEB_SENTRY_DSN=%s\n' "${WEB_DSN}" >"${BUDMON_HOME}/site.env"
+  chmod 0600 "${BUDMON_HOME}/site.env"
   mkdir -p "${BUDMON_HOME}/secrets/main/api"
   printf '%s' "${CANARY}" >"${BUDMON_HOME}/secrets/main/api/CURSOR_KEY"
   cat >"${STUB_CONFIG}" <<'CONF'
@@ -91,6 +96,12 @@ compose_calls() {
   run calls_of docker
   [ "$(printf '%s\n' "${output}" | awk -F'\t' '$3 ~ /^build/' | wc -l)" -eq 3 ]
   assert_output --regexp "build.*BUDMON_BUILD_NUMBER=42"
+  # A-423: the web build gets the DSN from site.env.
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ /^build/ && \$3 ~ /images\/web\/Dockerfile/ { print \$3 }' '${CALLS}'"
+  assert_output --partial "--build-arg VITE_SENTRY_DSN=${WEB_DSN}"
+  # A-417: the one postgres build form.
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ /^build/ && \$3 ~ /images\/postgres/ { print \$3 }' '${CALLS}'"
+  assert_output "build --build-context sql=${BUDMON_HOME}/build/v1.2.0/apps/server/src/platform/db/sql -t budmon/postgres:v1.2.0 ${BUDMON_HOME}/build/v1.2.0/images/postgres"
 
   # The dump: dumps/<UTC timestamp>_v1.1.0.dump, mode 0600.
   local dump
@@ -186,6 +197,24 @@ compose_calls() {
   run_phase_b
   assert_failure 13
   [ ! -s "${CALLS}.maint" ]
+}
+
+@test "TP-15.21 (k) (A-423): site.env without WEB_SENTRY_DSN exits 13 (site.env: WEB_SENTRY_DSN not set) with no docker build" {
+  sed -i '/^WEB_SENTRY_DSN=/d' "${BUDMON_HOME}/site.env"
+  run_phase_b
+  assert_failure 13
+  assert_output --partial "site.env: WEB_SENTRY_DSN not set"
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ /^build/' '${CALLS}'"
+  assert_output ""
+}
+
+@test "TP-15.21 (k2) (A-423): WEB_SENTRY_DSN=__FILL_ME__ exits 13 with no docker build" {
+  sed -i 's|^WEB_SENTRY_DSN=.*|WEB_SENTRY_DSN=__FILL_ME__|' "${BUDMON_HOME}/site.env"
+  run_phase_b
+  assert_failure 13
+  assert_output --partial "site.env: WEB_SENTRY_DSN not set"
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ /^build/' '${CALLS}'"
+  assert_output ""
 }
 
 @test "TP-15.21 (h): 5 existing dumps and 6 release copies: 5 dumps remain including the new one; copies pruned to 5, keeping v1.1.0 and v1.2.0" {

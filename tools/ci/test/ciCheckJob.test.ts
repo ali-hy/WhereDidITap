@@ -1,6 +1,6 @@
-// TP-2.26: ci.yml's check job runs the integration tests after the unit tests (A-31), plus the extra
-// case TP-2.60x: the dev-smoke job runs TP-2.18's script on pushes to the default branch only
-// (§10.1 CI jobs, A-55, A-408). TP-0.26:
+// TP-2.26: ci.yml's check job runs the integration tests after the unit tests (A-31). TP-2.60: the
+// dev-smoke job runs TP-2.18's script on pushes to the default branch only
+// (§10.1 CI jobs, A-55, A-408, A-425). TP-0.26:
 // Testcontainers pulls Docker Hub images through mirror.gcr.io in CI (A-284). TP-0.29: the catalog
 // check runs in CI through pnpm lint (A-316). TP-0.31: the e2e job (A-334), which also covers
 // AC-11.2 (the axe report uploaded as an artifact).
@@ -9,6 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
+import { changesRun, outputAlternatives } from "./support/changesJob.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -32,26 +33,21 @@ describe("TP-2.26: ci.yml check job", () => {
   });
 });
 
-describe("TP-2.60x: ci.yml dev-smoke job", () => {
-  it("TP-2.60x (A-408): a dev-smoke job runs tools/ci/test/dev-smoke.sh, only on pushes to the default branch", () => {
+describe("TP-2.60: ci.yml dev-smoke job (A-55, A-408, A-425)", () => {
+  it("TP-2.60: on.push.branches is exactly [main, master]; dev-smoke's if is the default-branch push expression; no needs; it runs tools/ci/test/dev-smoke.sh", () => {
     const workflow = parse(readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8")) as {
       on?: { push?: { branches?: unknown } };
-      jobs?: Record<string, { if?: unknown; steps?: { run?: unknown }[] }>;
+      jobs?: Record<string, { if?: unknown; needs?: unknown; steps?: { run?: unknown }[] }>;
     };
     const job = workflow.jobs?.["dev-smoke"];
-    const runs = (job?.steps ?? [])
-      .map((step) => step.run)
-      .filter((run) => typeof run === "string");
+    const runs = (job?.steps ?? []).map((step) => step.run).filter((r) => typeof r === "string");
 
-    expect(runs.some((run) => run.includes("tools/ci/test/dev-smoke.sh"))).toBe(true);
-    const cond = typeof job?.if === "string" ? job.if : "";
-    expect(cond).toContain("github.event_name == 'push'");
-    expect(cond).toContain("github.event.repository.default_branch");
-    expect(cond).not.toMatch(/'(main|master)'/);
-    // Trigger filters can't read the default branch, so push lists both names (A-408).
-    expect([workflow.on?.push?.branches].flat()).toEqual(
-      expect.arrayContaining(["main", "master"]),
+    expect(workflow.on?.push?.branches).toEqual(["main", "master"]);
+    expect(typeof job?.if === "string" ? job.if.replace(/\s+/g, " ").trim() : job?.if).toBe(
+      "github.event_name == 'push' && github.ref_name == github.event.repository.default_branch",
     );
+    expect(job?.needs).toBeUndefined();
+    expect(runs.some((r) => r.trim() === "tools/ci/test/dev-smoke.sh")).toBe(true);
   });
 });
 
@@ -234,26 +230,23 @@ describe("TP-0.32: ci.yml android job (A-351)", () => {
     expect(cond).toMatch(/hotfix\//);
   });
 
-  it("TP-0.32: the changes job's filter lists exactly the four paths", () => {
+  // A-424: only the android output's line is inspected.
+  it("TP-0.32 (A-424): the changes job diffs origin/${BASE_REF}...HEAD, has an android output, and the android line lists exactly the four paths", () => {
     const changes = jobsOf()["changes"];
-    const runText = (changes?.steps ?? []).map((s) => text(s.run)).join("\n");
-    const paths = [
-      "apps/android/",
-      "packages/shared/test-vectors/",
-      "packages/contract/openapi.json",
-      ".github/workflows/ci.yml",
-    ];
 
     expect(changes).toBeDefined();
-    expect(runText).toMatch(
-      /git (-c \S+ )?diff[^\n]*--name-only[^\n]*origin\/\$\{?BASE_REF\}?\.\.\.HEAD/,
+    expect(changesRun(ROOT)).toMatch(
+      /git (-c \S+ )*diff[^\n]*--name-only[^\n]*"origin\/\$\{BASE_REF\}\.\.\.HEAD"/,
     );
-    for (const p of paths) expect(runText).toContain(p);
-    const quoted = [...runText.matchAll(/(apps|packages|\.github)\/[A-Za-z0-9_./-]+/g)].map(
-      (m) => m[0],
-    );
-    expect([...new Set(quoted)].sort()).toEqual([...paths].sort());
     expect(Object.keys(changes?.outputs ?? {})).toContain("android");
+    expect(outputAlternatives(ROOT, "android")?.sort()).toEqual(
+      [
+        "apps/android/",
+        "packages/shared/test-vectors/",
+        "packages/contract/openapi.json",
+        ".github/workflows/ci.yml",
+      ].sort(),
+    );
   });
 
   it("TP-0.32: steps run in apps/android: ./gradlew testDebugUnitTest lint ktlintCheck; connectedDebugAndroidTest only on release candidates", () => {

@@ -173,6 +173,21 @@ describe.skipIf(!INFRA_INT)("TP-15.13: Caddy on the laptop (F-175)", () => {
     expectHeaders(res);
   });
 
+  // A-419: Caddy binds only :8080, so it runs without the file capability under the Compose
+  // settings (cap_drop ALL, no-new-privileges, user 10005, read-only root).
+  it("TP-15.33 (I): getcap /usr/bin/caddy prints nothing; the container is running (not restarting) and answers on 8080", async () => {
+    const getcap = compose(PROJECT, home, ["exec", "-T", "caddy", "getcap", "/usr/bin/caddy"]);
+    expect(getcap.status, getcap.stderr).toBe(0);
+    expect(getcap.stdout.trim()).toBe("");
+
+    const id = compose(PROJECT, home, ["ps", "-q", "caddy"]).stdout.trim();
+    const state = sh("docker", ["inspect", "-f", "{{.State.Status}} {{.State.Restarting}}", id]);
+    expect(state.stdout.trim()).toBe("running false");
+
+    const res = await fetch(`${BASE}/version.json`);
+    expect(res.status).toBe(200);
+  });
+
   it("TP-15.13: a TLS request to https://127.0.0.1:8080/ fails (plain HTTP only)", () => {
     const r = sh("curl", ["-k", "-sS", "--max-time", "10", "https://127.0.0.1:8080/"]);
 

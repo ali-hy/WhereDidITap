@@ -6,6 +6,7 @@
 //   - TP-15.28 (I): `budmon-local secret set` with real sudo after F-191; the ownership rows
 //     (F-178's layout table) are applied here with sudo, as apply_secret_ownership would, since its
 //     calling convention isn't specified.
+//   - TP-15.34 (I): listen_addresses in the stack, and in the image started alone (A-418).
 //   - TP-15.22 (I1, I2): still todo (see the S-15 report).
 import { mkdtempSync, readFileSync } from "node:fs";
 import { createHash, createHmac, pbkdf2Sync, randomBytes } from "node:crypto";
@@ -238,6 +239,14 @@ describe.skipIf(!INFRA_INT)("TP-15.3: pg_hba.conf on the laptop (F-175)", () => 
     expect(r.status, r.stderr).toBe(0);
   });
 
+  // A-418: the stack passes BUDMON_LISTEN_ADDRESSES = PG_DATA_IP,PG_CAPTURE_IP.
+  it("TP-15.34 (I): SHOW listen_addresses over the socket in the stack is 172.30.40.10,172.30.42.2", () => {
+    const r = psqlAdmin("SHOW listen_addresses");
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout.trim()).toBe(`${PG_DATA_IP},${PG_CAPTURE_IP}`);
+  });
+
   it("TP-15.3: budmon_app to budmon_restore: rejected", () => {
     const r = probe({
       network: DATA(),
@@ -250,6 +259,86 @@ describe.skipIf(!INFRA_INT)("TP-15.3: pg_hba.conf on the laptop (F-175)", () => 
 
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(HBA_REJECTED);
+  });
+});
+
+// A-418: unset BUDMON_LISTEN_ADDRESSES means listen_addresses '' (socket only), failing closed.
+describe.skipIf(!INFRA_INT)("TP-15.34 (I): the Postgres image started alone (F-170, A-418)", () => {
+  const NAME = `budmon-tp15-34-${String(process.pid)}`;
+  let home = "";
+
+  beforeAll(async () => {
+    buildImage("postgres");
+    const scratch = mkdtempSync(path.join(tmpdir(), "budmon-tp15-34-tls-"));
+    const { cert, key } = tlsPair(scratch);
+    home = laptopHome({
+      ADMIN_PASSWORD: "admin-pw-tp15-34",
+      MIGRATOR_VERIFIER: verifier("migrator-pw-tp15-34"),
+      TLS_CERT: readFileSync(cert, "utf8"),
+      TLS_KEY: readFileSync(key, "utf8"),
+    });
+    sh("rm", ["-rf", scratch]);
+    for (const p of [path.join(home, "pg"), path.join(home, "secrets/main/postgres")]) {
+      const r = sh("sudo", ["chown", "-R", "999:999", p]);
+      if (r.status !== 0) throw new Error(`chown 999 ${p}: ${r.stderr}`);
+    }
+    const conf = path.join(LOCAL, "postgres");
+    const run = sh("docker", [
+      "run",
+      "-d",
+      "--name",
+      NAME,
+      "-e",
+      "BUDMON_FIRST_SETUP=1",
+      "-v",
+      `${path.join(home, "pg")}:/var/lib/postgresql/data`,
+      "-v",
+      `${path.join(home, "secrets/main/postgres")}:/run/secrets:ro`,
+      "-v",
+      `${path.join(conf, "postgresql.conf")}:/etc/budmon/postgresql.conf:ro`,
+      "-v",
+      `${path.join(conf, "pg_hba.conf")}:/etc/budmon/pg_hba.conf:ro`,
+      "-v",
+      `${path.join(conf, "pg_ident.conf")}:/etc/budmon/pg_ident.conf:ro`,
+      `budmon/postgres:${TEST_TAG}`,
+    ]);
+    if (run.status !== 0) throw new Error(`docker run: ${run.stderr}`);
+    for (let i = 0; i < 90; i += 1) {
+      const ready = sh("docker", [
+        "exec",
+        "-u",
+        "postgres",
+        NAME,
+        "pg_isready",
+        "-U",
+        "budmon_admin",
+      ]);
+      if (ready.status === 0) return;
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+    throw new Error(`postgres never became ready: ${sh("docker", ["logs", NAME]).stderr}`);
+  }, 1_800_000);
+
+  afterAll(() => {
+    sh("docker", ["rm", "-f", NAME]);
+    if (home !== "") sh("sudo", ["rm", "-rf", home]);
+  });
+
+  it("TP-15.34 (I): without BUDMON_LISTEN_ADDRESSES, SHOW listen_addresses is the empty string", () => {
+    const r = sh("docker", [
+      "exec",
+      "-u",
+      "postgres",
+      NAME,
+      "psql",
+      "-U",
+      "budmon_admin",
+      "-tAc",
+      "SHOW listen_addresses",
+    ]);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout.trim()).toBe("");
   });
 });
 

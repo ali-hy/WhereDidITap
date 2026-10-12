@@ -15,7 +15,8 @@ load helpers
 # One answer per prompt: PUBLIC_ORIGIN (Tailscale name), GOOGLE_OAUTH_CLIENT_ID (blank), S3_ENDPOINT,
 # S3_REGION, S3_BUCKET_EXPORTS, S3_BUCKET_ERASURE_LOG (defaults), SENTRY_DSN, GOOGLE_SIGNIN_CLIENT_ID,
 # GOOGLE_SIGNIN_ANDROID_CLIENT_IDS (blank), GOOGLE_SIGNIN_CALLBACK_ORIGIN, GOOGLE_SIGNIN_APP_ORIGINS,
-# SMTP_URL, EMAIL_FROM (defaults).
+# SMTP_URL, EMAIL_FROM (defaults). WEB_SENTRY_DSN, asked last (A-423), is left unanswered: end of
+# input answers blank, so it's written __FILL_ME__.
 ANSWERS=$'laptop.tailnet.ts.net\n\n\n\n\n\nhttps://k@o1.ingest.sentry.io/1\n123-abc.apps.googleusercontent.com\n\n\n\n\n\n'
 
 setup() {
@@ -89,6 +90,7 @@ placeholder_ready_home() {
   fill_placeholders
   sed -i -e 's/^GOOGLE_OAUTH_CLIENT_ID=.*/GOOGLE_OAUTH_CLIENT_ID=123-oauth.apps.googleusercontent.com/' \
     -e 's|^CAPTURE_KEY_VERSION=.*|CAPTURE_KEY_VERSION=projects/p/locations/europe-west3/keyRings/budmon/cryptoKeys/capture-credentials/cryptoKeyVersions/1|' \
+    -e 's|^WEB_SENTRY_DSN=.*|WEB_SENTRY_DSN=https://pub@o1.ingest.sentry.io/2|' \
     "${BUDMON_HOME}/site.env"
   : >"${CALLS}"
 }
@@ -101,15 +103,20 @@ placeholder_ready_home() {
   assert_output --partial "secrets init-local --home ${BUDMON_HOME}"
   assert_output --partial "${BUDMON_HOME}/build/v1.0.0"
 
-  local uid dir
+  # A-421: per service directory, chmod 0400 on its files, then chmod 0500 on it, then chown -R.
+  local uid dir path files_at dir_at chown_at
   for pair in "10001 secrets/main/api" "10002 secrets/main/worker-general" "10003 secrets/capture/worker-capture" "10004 secrets/main/migrate" "999 secrets/main/postgres"; do
     read -r uid dir <<<"${pair}"
-    run bash -c "awk -F'\t' '\$1==\"sudo\" && \$3 ~ /^chown -R ${uid}:${uid} /' '${CALLS}'"
-    assert_output --partial "${BUDMON_HOME}/${dir}"
-    run bash -c "awk -F'\t' '\$1==\"sudo\" && \$3 ~ /^chmod 0?500 /' '${CALLS}'"
-    assert_output --partial "${BUDMON_HOME}/${dir}"
-    run bash -c "awk -F'\t' '\$1==\"sudo\" && \$3 ~ /^chmod 0?400 /' '${CALLS}'"
-    assert_output --partial "${BUDMON_HOME}/${dir}"
+    path="${BUDMON_HOME}/${dir}"
+    files_at="$(awk -F'\t' -v p="chmod 0400 ${path}/" '$1=="sudo" && index($3, p)==1 { print NR; exit }' "${CALLS}")"
+    dir_at="$(awk -F'\t' -v a="chmod 0500 ${path}" '$1=="sudo" && $3==a { print NR; exit }' "${CALLS}")"
+    chown_at="$(awk -F'\t' -v a="chown -R ${uid}:${uid} ${path}" '$1=="sudo" && $3==a { print NR; exit }' "${CALLS}")"
+    [ -n "${files_at}" ] && [ -n "${dir_at}" ] && [ -n "${chown_at}" ] &&
+      [ "${files_at}" -lt "${dir_at}" ] && [ "${dir_at}" -lt "${chown_at}" ] || {
+      echo "${dir}: files ${files_at:-none}, dir ${dir_at:-none}, chown ${chown_at:-none}"
+      calls_of sudo
+      return 1
+    }
   done
 
   [ "$(stat -c '%a' "${BUDMON_HOME}/site.env")" = "600" ]
@@ -119,9 +126,11 @@ placeholder_ready_home() {
   assert_line "PUBLIC_ORIGIN=https://laptop.tailnet.ts.net"
   assert_line "S3_ENDPOINT=https://s3.eu-central-003.backblazeb2.com"
   assert_line "SMTP_URL=smtp://mailpit:1025"
+  assert_line "WEB_SENTRY_DSN=__FILL_ME__"
 
   run bash -c "printf '%s' \"\${ANSWERS}\" | '${SCRIPT}' install v1.0.0"
   assert_failure 20
+  assert_output --partial "WEB_SENTRY_DSN"
   assert_output --partial "main/api/S3_ACCESS_KEY_ID"
   assert_output --partial "capture/worker-capture/GCP_CREDENTIALS"
   assert_output --partial "GOOGLE_OAUTH_CLIENT_ID"
@@ -193,7 +202,7 @@ CONF
 
   local order
   order="$(grep -oE '[A-Z][A-Z0-9_]+( \[[^]]*\])?: ' <<<"${stderr}" | sed -E 's/( \[.*\])?: $//' | tr '\n' ' ')"
-  [ "${order}" = "PUBLIC_ORIGIN GOOGLE_OAUTH_CLIENT_ID S3_ENDPOINT S3_REGION S3_BUCKET_EXPORTS S3_BUCKET_ERASURE_LOG SENTRY_DSN GOOGLE_SIGNIN_CLIENT_ID GOOGLE_SIGNIN_ANDROID_CLIENT_IDS GOOGLE_SIGNIN_CALLBACK_ORIGIN GOOGLE_SIGNIN_APP_ORIGINS SMTP_URL EMAIL_FROM " ] || {
+  [ "${order}" = "PUBLIC_ORIGIN GOOGLE_OAUTH_CLIENT_ID S3_ENDPOINT S3_REGION S3_BUCKET_EXPORTS S3_BUCKET_ERASURE_LOG SENTRY_DSN GOOGLE_SIGNIN_CLIENT_ID GOOGLE_SIGNIN_ANDROID_CLIENT_IDS GOOGLE_SIGNIN_CALLBACK_ORIGIN GOOGLE_SIGNIN_APP_ORIGINS SMTP_URL EMAIL_FROM WEB_SENTRY_DSN " ] || {
     echo "prompts: ${order}"
     return 1
   }
@@ -215,6 +224,9 @@ CONF
   assert_line "GOOGLE_SIGNIN_APP_ORIGINS=https://laptop.tailnet.ts.net,http://localhost:8080"
   assert_line "SMTP_URL=smtp://mailpit:1025"
   assert_line "EMAIL_FROM=Budmon <no-reply@budmon.local>"
+  # A-423: asked last with no default; blank is a placeholder.
+  [[ "${stderr}" == *"EMAIL_FROM ["*"]: WEB_SENTRY_DSN []: "* ]] || { echo "${stderr}"; return 1; }
+  assert_line "WEB_SENTRY_DSN=__FILL_ME__"
 }
 
 @test "TP-15.22 (c): install with state present exits 2" {

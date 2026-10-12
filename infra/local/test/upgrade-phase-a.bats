@@ -20,12 +20,11 @@ stub_git() {
   case "\${args[0]:-}" in
     fetch) return 0 ;;
     rev-parse|rev-list) echo "${COMMIT}"; return 0 ;;
-    remote) return 0 ;;
-    symbolic-ref) echo "origin/master"; return 0 ;;
+    remote) [ "\${SET_HEAD_FAIL:-0}" = 1 ] && return 1; return 0 ;;
     merge-base)
-      # A-408: the default branch is origin's HEAD (master here), by either name.
+      # A-425: the default branch is known only as origin/HEAD (never main or master).
       local ref="\${args[-1]}"
-      for ok in \${ANCESTOR_OF:-origin/HEAD origin/master}; do [ "\${ref}" = "\${ok}" ] && return 0; done
+      for ok in \${ANCESTOR_OF:-origin/HEAD}; do [ "\${ref}" = "\${ok}" ] && return 0; done
       return 1 ;;
     worktree)
       if [ "\${args[1]}" = "add" ]; then
@@ -104,13 +103,31 @@ CONF
   assert_output --regexp "^budmon-local	.*	_upgrade-continue v1.2.0	REEXEC=1	path=${rel}/budmon-local$"
 }
 
-@test "TP-15.20 (A-408): the ancestry check refreshes origin's HEAD and never names a branch" {
+@test "TP-15.20 (A-425): set-head --auto runs before merge-base --is-ancestor v1.2.0 origin/HEAD; no call names origin/main or origin/master" {
   run "${SCRIPT}" upgrade v1.2.0
   assert_success
-  run bash -c "awk -F'\t' '\$1==\"git\" { print \$3 }' '${CALLS}'"
-  assert_output --partial "remote set-head origin --auto"
-  refute_output --partial "origin/main"
-  assert_output --regexp "merge-base --is-ancestor v1\.2\.0 origin/(HEAD|master)"
+  run bash -c "awk -F'\t' '\$1==\"git\" { print NR \": \" \$3 }' '${CALLS}'"
+  local sethead ancestry
+  sethead="$(grep -m1 'remote set-head origin --auto' <<<"${output}" | cut -d: -f1)"
+  ancestry="$(grep -m1 'merge-base --is-ancestor v1.2.0 origin/HEAD' <<<"${output}" | cut -d: -f1)"
+  [ -n "${sethead}" ] && [ -n "${ancestry}" ] && [ "${sethead}" -lt "${ancestry}" ] || { echo "${output}"; return 1; }
+  run grep -E 'origin/(main|master)' "${CALLS}"
+  assert_failure
+}
+
+@test "TP-15.20 (A-425): remote set-head origin --auto failing exits 11 (can't resolve origin's default branch), no worktree" {
+  export SET_HEAD_FAIL=1
+  run "${SCRIPT}" upgrade v1.2.0
+  assert_failure 11
+  assert_output --partial "can't resolve origin's default branch"
+  run bash -c "awk -F'\t' '\$1==\"git\" && \$3 ~ /worktree add/' '${CALLS}'"
+  assert_output ""
+}
+
+@test "TP-15.20 (A-425): a hotfix tag contained only in origin/HEAD (merged back) proceeds" {
+  export ANCESTOR_OF="origin/HEAD"
+  run "${SCRIPT}" upgrade v1.2.0-hotfix.1
+  assert_success
 }
 
 @test "TP-15.20: upgrade --no-dump is passed on to phase B" {
