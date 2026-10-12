@@ -10,6 +10,13 @@ export const ROOT = path.resolve(SERVER_DIR, "../..");
 export const LOCAL = path.join(ROOT, "infra/local");
 export const TEST_TAG = "tp15";
 
+/**
+ * A-391: the integration parts of TP-15.3, TP-15.13, TP-15.22 and TP-15.28 run in the infra-int CI
+ * job (root script `test:infra`, infra/local/test/run-integration.sh, which sets this), with real
+ * sudo, Docker and time to build the images; elsewhere they skip.
+ */
+export const INFRA_INT = process.env["BUDMON_INFRA_INT"] === "1";
+
 export interface Run {
   status: number | null;
   stdout: string;
@@ -34,18 +41,28 @@ export function sh(
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
 }
 
-/** `docker build -f images/<name>/Dockerfile -t budmon/<name>:tp15 <repo root>`, once per process. */
+/**
+ * Builds budmon/<name>:tp15 once per process, as F-178 phase B does (A-393): images/server and
+ * images/web from the repository root with `-f images/<name>/Dockerfile`; images/postgres from its
+ * own directory, with the named context `sql` for the cluster-bootstrap script.
+ */
 const built = new Set<string>();
 export function buildImage(name: "postgres" | "server" | "web"): string {
   const tag = `budmon/${name}:${TEST_TAG}`;
   if (built.has(name)) return tag;
-  const r = sh(
-    "docker",
-    ["build", "-q", "-f", path.join(ROOT, `images/${name}/Dockerfile`), "-t", tag, ROOT],
-    {
-      timeoutMs: 1_200_000,
-    },
-  );
+  const args =
+    name === "postgres"
+      ? [
+          "build",
+          "-q",
+          "--build-context",
+          `sql=${path.join(ROOT, "apps/server/src/platform/db/sql")}`,
+          "-t",
+          tag,
+          path.join(ROOT, "images/postgres"),
+        ]
+      : ["build", "-q", "-f", path.join(ROOT, `images/${name}/Dockerfile`), "-t", tag, ROOT];
+  const r = sh("docker", args, { timeoutMs: 1_200_000 });
   if (r.status !== 0) throw new Error(`docker build ${name} failed:\n${r.stdout}${r.stderr}`);
   built.add(name);
   return tag;

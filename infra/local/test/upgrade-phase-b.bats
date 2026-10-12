@@ -117,6 +117,14 @@ compose_calls() {
   assert_failure
 }
 
+@test "TP-15.21 (A-386): phase B's up -d calls run without BUDMON_FIRST_SETUP=1" {
+  run_phase_b
+  assert_success
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ / up -d/' '${CALLS}'"
+  [ "${#lines[@]}" -ge 2 ] || { echo "${output}"; return 1; }
+  refute_output --partial "FIRST_SETUP=1"
+}
+
 @test "TP-15.21 (b): migrate failing exits 15 with no up" {
   export MIGRATE_EXIT=1
   run_phase_b

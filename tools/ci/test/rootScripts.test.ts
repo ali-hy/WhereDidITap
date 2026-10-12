@@ -45,6 +45,8 @@ const ROWS: Readonly<Record<string, string>> = {
   // S-15 (A-14)
   "test:bats":
     "bash infra/local/test/setup-bats.sh && .tools/bats/bats-core/bin/bats infra/local/test",
+  // A-391: the infra-int job's integration tests.
+  "test:infra": "bash infra/local/test/run-integration.sh",
   // S-13 (A-14): check:all also runs Android's checks.
   "check:all": "pnpm check && pnpm test:e2e && cd apps/android && ./gradlew check",
 };

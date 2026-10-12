@@ -1563,7 +1563,8 @@ describe("TP-15.25: node dist/main/worker.js with an unfilled placeholder file",
       );
 
       expect(result.status).not.toBe(0);
-      expect(result.stderr).toMatch(/S3_ACCESS_KEY_ID(_FILE)?: placeholder not filled/);
+      // A-389: the problem names the variable that was set.
+      expect(result.stderr).toContain("S3_ACCESS_KEY_ID_FILE: placeholder not filled");
       expect(`${result.stdout}${result.stderr}`).not.toMatch(/__FILL_ME__/);
     } finally {
       rmSync(dir, { recursive: true, force: true });

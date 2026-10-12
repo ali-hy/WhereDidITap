@@ -12,8 +12,10 @@
 #   DB_SIZE                  pg_database_size('budmon') in bytes (default 1000)
 #   DF_AVAIL_BYTES           free space reported by df (default 10^12)
 #
-# Assumed (see the S-15 questions): free space comes from `df` (any of -B1/-k/-m/--output=avail) and
-# the database size from psql's output.
+# A-388: free space is `df -Pk -- <dir>` field 4 × 1024 (pg/, and dumps/ on another filesystem),
+# the dump's size `stat -c %s` (real files here), the database size `pg_database_size('budmon')`
+# through `psql -Atc` in the Postgres container; messages round MB up. A-387: BUDMON_PG_READY_TIMEOUT,
+# BUDMON_READY_TIMEOUT and BUDMON_RENAME_RETRY_DELAY are positive integer seconds, else exit 64.
 
 load helpers
 
@@ -39,12 +41,11 @@ stub_git() {
   return 0
 }
 stub_df() {
-  local avail="${DF_AVAIL_BYTES:-1000000000000}" unit=1 a
-  for a in "$@"; do
-    case "${a}" in -B1) unit=1 ;; -k|-Pk|-kP) unit=1024 ;; -m) unit=1048576 ;; -B*) unit="${a#-B}" ;; esac
-  done
-  echo "Filesystem 1-blocks Used Available Use% Mounted on"
-  echo "/dev/x $((avail / unit)) 0 $((avail / unit)) 0% /"
+  # A-388: only `df -Pk -- <dir>` is answered.
+  [ "$1" = "-Pk" ] && [ "$2" = "--" ] || { echo "stub df: unexpected: $*" >&2; return 2; }
+  local kb=$(( ${DF_AVAIL_BYTES:-1000000000000} / 1024 ))
+  echo "Filesystem 1024-blocks Used Available Capacity Mounted on"
+  echo "/dev/x ${kb} 0 ${kb} 0% /"
 }
 stub_docker() {
   local all="$*"
@@ -148,9 +149,12 @@ events() {
 }
 
 @test "TP-15.22 (g2): a readiness timeout reverses the renames (budmon_restore_failed_<ts>), starts v1.2.0 again, keeps maintenance on, exit 16" {
-  export READY_EXIT=1
+  export READY_EXIT=1 BUDMON_READY_TIMEOUT=1
+  local started=${SECONDS}
   run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
   assert_failure 16
+  # A-387: the 1 s override bounds the wait.
+  [ $((SECONDS - started)) -le 2 ] || { echo "took $((SECONDS - started)) s"; return 1; }
   run bash -c "awk -F'\t' '\$1==\"sql\"' '${CALLS}'"
   assert_output --regexp "RENAME TO budmon_restore_failed_[0-9]{8}T[0-9]{6}Z"
   run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ / up -d/' '${CALLS}' | tail -n 1"
@@ -197,6 +201,34 @@ events() {
   assert_output --regexp "not enough disk space: need [0-9]+ MB, have [0-9]+ MB"
   run grep -c "CREATE DATABASE" "${CALLS}"
   assert_output "0"
+}
+
+@test "TP-15.22 (A-388): 100 MB free, a 30 MB dump and a 20 MB database: exit 23 need 110 MB, have 100 MB, measured with df -Pk on pg/" {
+  truncate -s $((30 * 1024 * 1024)) "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+  export DB_SIZE=$((20 * 1024 * 1024)) DF_AVAIL_BYTES=$((100 * 1024 * 1024))
+  run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+  assert_failure 23
+  assert_output --partial "need 110 MB, have 100 MB"
+  run grep -c "CREATE DATABASE" "${CALLS}"
+  assert_output "0"
+  run bash -c "awk -F'\t' '\$1==\"df\" { print \$3 }' '${CALLS}'"
+  assert_line "-Pk -- ${BUDMON_HOME}/pg"
+  run bash -c "awk -F'\t' '\$1==\"sql\" && \$2 ~ /pg_database_size/' '${CALLS}'"
+  assert_output --partial "psql"
+  assert_output --partial "-Atc"
+}
+
+@test "TP-15.22 (A-387): a timeout override that isn't a positive integer exits 64" {
+  local var value
+  for var in BUDMON_PG_READY_TIMEOUT BUDMON_READY_TIMEOUT BUDMON_RENAME_RETRY_DELAY; do
+    for value in abc 0 -1 1.5; do
+      : >"${CALLS}"
+      BUDMON_REEXEC=1 run env "${var}=${value}" "${BUDMON_HOME}/releases/v1.2.0/budmon-local" restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+      [ "${status}" -eq 64 ] || { echo "${var}=${value}: exit ${status}: ${output}"; return 1; }
+      run grep -c "^sql" "${CALLS}"
+      assert_output "0"
+    done
+  done
 }
 
 @test "TP-15.22 (h6): the first rename failing twice then succeeding: ALLOW_CONNECTIONS false before terminating, three attempts, ALLOW_CONNECTIONS true on the new budmon, exit 0" {

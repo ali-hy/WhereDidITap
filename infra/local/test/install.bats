@@ -2,10 +2,13 @@
 # shellcheck disable=SC2016,SC2030,SC2031 # bats: per-test exports and single-quoted awk programs
 # F-178 `install` and `maintenance`. TP-15.22 (a) to (e), stub part.
 #
-# Assumed (the LLD fixes behaviour, not the mechanics; see the S-15 questions): the prompts read
-# answers from stdin, one line per key in F-175's site.env table order (CAPTURE_KEY_VERSION isn't
-# asked); `sudo` is a stub that records every call and performs `install`/`grep` without changing
-# ownership; F-191 is reached as `pnpm … secrets init-local --home <home>`.
+# A-385: prompts `KEY [default]: ` on stderr in F-175's site.env table order (CAPTURE_KEY_VERSION
+# isn't asked), answers read with `IFS= read -r` from stdin, end of input answering blank for the
+# rest. A-386: only step 11 sets BUDMON_FIRST_SETUP=1, for `up -d postgres`. Assumed: `sudo` is a
+# stub that records every call and performs `install`/`grep` without changing ownership; F-191 is
+# reached as `pnpm … secrets init-local --home <home>`.
+
+bats_require_minimum_version 1.5.0
 
 load helpers
 
@@ -34,7 +37,7 @@ stub_git() {
         # Phase B is recorded, not run: install's own steps are what this file tests.
         cat >"${dir}/infra/local/budmon-local" <<'REC'
 #!/usr/bin/env bash
-printf 'budmon-local\t%s\t%s\tREEXEC=%s\tpath=%s\n' "${PWD}" "$*" "${BUDMON_REEXEC:-}" "$0" >>"${CALLS}"
+printf 'budmon-local\t%s\t%s\tREEXEC=%s\tpath=%s\tFIRST_SETUP=%s\n' "${PWD}" "$*" "${BUDMON_REEXEC:-}" "$0" "${BUDMON_FIRST_SETUP:-}" >>"${CALLS}"
 exit "${PHASE_B_EXIT:-0}"
 REC
         chmod +x "${dir}/infra/local/budmon-local"
@@ -169,6 +172,49 @@ CONF
   run cat "${CALLS}.marker"
   assert_output --partial "marker=tag=v1.0.0 mode=600"
   refute_output --partial "missing"
+}
+
+@test "TP-15.21 (A-386): BUDMON_FIRST_SETUP=1 reaches Compose only for step 11's up -d postgres, and never phase B" {
+  placeholder_ready_home
+  run "${SCRIPT}" install v1.0.0
+  assert_success
+
+  run bash -c "awk -F'\t' '\$NF==\"FIRST_SETUP=1\"' '${CALLS}'"
+  [ "${#lines[@]}" -eq 1 ] || { echo "${output}"; return 1; }
+  assert_line --regexp "^docker	.*compose .*up -d postgres	"
+  run bash -c "awk -F'\t' '\$1==\"budmon-local\"' '${CALLS}'"
+  assert_output --partial "_upgrade-continue v1.0.0"
+  refute_output --partial "FIRST_SETUP=1"
+}
+
+@test "TP-15.22 (A-385): piped input with two answers then end of input: prompts in F-175's order on stderr, the rest default or __FILL_ME__" {
+  run --separate-stderr bash -c "printf 'laptop.tailnet.ts.net\n123-oauth.apps.googleusercontent.com\n' | '${SCRIPT}' install v1.0.0"
+  assert_failure 20
+
+  local order
+  order="$(grep -oE '[A-Z][A-Z0-9_]+( \[[^]]*\])?: ' <<<"${stderr}" | sed -E 's/( \[.*\])?: $//' | tr '\n' ' ')"
+  [ "${order}" = "PUBLIC_ORIGIN GOOGLE_OAUTH_CLIENT_ID S3_ENDPOINT S3_REGION S3_BUCKET_EXPORTS S3_BUCKET_ERASURE_LOG SENTRY_DSN GOOGLE_SIGNIN_CLIENT_ID GOOGLE_SIGNIN_ANDROID_CLIENT_IDS GOOGLE_SIGNIN_CALLBACK_ORIGIN GOOGLE_SIGNIN_APP_ORIGINS SMTP_URL EMAIL_FROM " ] || {
+    echo "prompts: ${order}"
+    return 1
+  }
+  [[ "${stderr}" == *"S3_ENDPOINT [https://s3.eu-central-003.backblazeb2.com]: "* ]] || { echo "${stderr}"; return 1; }
+  [[ "${output}" != *"PUBLIC_ORIGIN"*": "* ]] || { echo "prompt on stdout: ${output}"; return 1; }
+
+  run cat "${BUDMON_HOME}/site.env"
+  assert_line "PUBLIC_ORIGIN=https://laptop.tailnet.ts.net"
+  assert_line "GOOGLE_OAUTH_CLIENT_ID=123-oauth.apps.googleusercontent.com"
+  assert_line "CAPTURE_KEY_VERSION=__FILL_ME__"
+  assert_line "S3_ENDPOINT=https://s3.eu-central-003.backblazeb2.com"
+  assert_line "S3_REGION=eu-central-003"
+  assert_line "S3_BUCKET_EXPORTS=budmon-exports"
+  assert_line "S3_BUCKET_ERASURE_LOG=budmon-erasure-log"
+  assert_line "SENTRY_DSN=__FILL_ME__"
+  assert_line "GOOGLE_SIGNIN_CLIENT_ID=__FILL_ME__"
+  assert_line "GOOGLE_SIGNIN_ANDROID_CLIENT_IDS="
+  assert_line "GOOGLE_SIGNIN_CALLBACK_ORIGIN=http://localhost:8080"
+  assert_line "GOOGLE_SIGNIN_APP_ORIGINS=https://laptop.tailnet.ts.net,http://localhost:8080"
+  assert_line "SMTP_URL=smtp://mailpit:1025"
+  assert_line "EMAIL_FROM=Budmon <no-reply@budmon.local>"
 }
 
 @test "TP-15.22 (c): install with state present exits 2" {

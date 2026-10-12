@@ -9,10 +9,10 @@ setup() {
   common_setup
 }
 
-@test "TP-15.32x: a stub records command, working directory, arguments, BUDMON_REEXEC and BUDMON_TAG" {
-  (cd "${BATS_TEST_TMPDIR}" && BUDMON_REEXEC=1 BUDMON_TAG=v9.9.9 docker compose ps)
+@test "TP-15.32x: a stub records command, working directory, arguments, BUDMON_REEXEC, BUDMON_TAG and BUDMON_FIRST_SETUP" {
+  (cd "${BATS_TEST_TMPDIR}" && BUDMON_REEXEC=1 BUDMON_TAG=v9.9.9 BUDMON_FIRST_SETUP=1 docker compose ps)
   run cat "${CALLS}"
-  assert_output "docker	${BATS_TEST_TMPDIR}	compose ps	REEXEC=1	TAG=v9.9.9"
+  assert_output "docker	${BATS_TEST_TMPDIR}	compose ps	REEXEC=1	TAG=v9.9.9	FIRST_SETUP=1"
 }
 
 @test "TP-15.32x: a stub_<command> function in STUB_CONFIG decides the exit code and output" {

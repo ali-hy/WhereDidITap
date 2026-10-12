@@ -3,7 +3,7 @@
 # Every external command the script uses (git, docker, pg_dump, pg_restore, gcloud, openssl, curl,
 # sudo, pnpm, tailscale) is a stub on PATH that appends one tab-separated line to "$CALLS":
 #   <command> <TAB> <working directory> <TAB> <arguments joined by spaces> <TAB> REEXEC=<BUDMON_REEXEC>
-#   <TAB> TAG=<BUDMON_TAG>
+#   <TAB> TAG=<BUDMON_TAG> <TAB> FIRST_SETUP=<BUDMON_FIRST_SETUP> (A-386: Compose interpolates it)
 # `sleep` is stubbed too, so waits that poll with sleep finish at once.
 # and then runs a function `stub_<command>` from "$STUB_CONFIG" when a test defines one (its exit
 # code is the stub's), or exits 0. Tests define behaviour by writing functions into "$STUB_CONFIG".
@@ -32,7 +32,7 @@ common_setup() {
     cat >"${STUB_DIR}/${cmd}" <<'STUB'
 #!/usr/bin/env bash
 name="$(basename "$0")"
-printf '%s\t%s\t%s\tREEXEC=%s\tTAG=%s\n' "${name}" "${PWD}" "$*" "${BUDMON_REEXEC:-}" "${BUDMON_TAG:-}" >>"${CALLS}"
+printf '%s\t%s\t%s\tREEXEC=%s\tTAG=%s\tFIRST_SETUP=%s\n' "${name}" "${PWD}" "$*" "${BUDMON_REEXEC:-}" "${BUDMON_TAG:-}" "${BUDMON_FIRST_SETUP:-}" >>"${CALLS}"
 if [ -f "${STUB_CONFIG}" ]; then
   # shellcheck disable=SC1090
   source "${STUB_CONFIG}"
@@ -46,7 +46,7 @@ STUB
     chmod +x "${STUB_DIR}/${cmd}"
   done
   export PATH="${STUB_DIR}:${PATH}"
-  unset BUDMON_REEXEC
+  unset BUDMON_REEXEC BUDMON_FIRST_SETUP BUDMON_PG_READY_TIMEOUT BUDMON_READY_TIMEOUT BUDMON_RENAME_RETRY_DELAY
 }
 
 # Lines of $CALLS for one command.

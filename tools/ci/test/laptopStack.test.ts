@@ -506,6 +506,7 @@ describe("TP-15.16: shellcheck and the infra-lint job", () => {
       "infra/local/lib/stack.sh",
       "images/postgres/budmon-entrypoint.sh",
       "infra/local/test/setup-bats.sh",
+      "infra/local/test/run-integration.sh",
     ].map((f) => path.join(ROOT, f));
     const result = spawnSync("shellcheck", ["-x", ...files], { encoding: "utf8" });
 
@@ -525,5 +526,91 @@ describe("TP-15.16: shellcheck and the infra-lint job", () => {
     expect(runs).toMatch(/pnpm test:bats/);
     expect(runs).toMatch(/docker compose .*compose\.main\.yaml.*compose\.capture\.yaml.*config/);
     expect(runs).toMatch(/actionlint/);
+  });
+});
+
+// A-391: the infra-int job runs the integration parts of TP-15.3, TP-15.13, TP-15.22 and TP-15.28.
+describe("TP-15.35x (A-391): ci.yml's infra-int job", () => {
+  interface Step {
+    run?: unknown;
+  }
+  interface Job {
+    needs?: unknown;
+    if?: unknown;
+    "timeout-minutes"?: unknown;
+    outputs?: Record<string, unknown>;
+    steps?: Step[];
+  }
+  const jobs = () =>
+    (parse(read(".github/workflows/ci.yml")) as { jobs?: Record<string, Job> }).jobs ?? {};
+  const runs = (job: Job | undefined) =>
+    (job?.steps ?? []).map((s) => (typeof s.run === "string" ? s.run : "")).join("\n");
+  const cond = (job: Job | undefined) => (typeof job?.if === "string" ? job.if : "");
+  /** The changes output infra-int's `if` reads, e.g. `infra` in needs.changes.outputs.infra. */
+  const output = () =>
+    /needs\.changes\.outputs\.([A-Za-z0-9_-]+)\s*==\s*'true'/.exec(cond(jobs()["infra-int"]))?.[1];
+
+  it("TP-15.35x: infra-int needs changes and runs on its output or a release/hotfix head branch", () => {
+    const job = jobs()["infra-int"];
+    const text = cond(job);
+
+    expect(job).toBeDefined();
+    expect([job?.needs].flat()).toContain("changes");
+    expect(output()).toBeDefined();
+    expect(text).toContain("startsWith(github.head_ref, 'release/')");
+    expect(text).toContain("startsWith(github.head_ref, 'hotfix/')");
+  });
+
+  it("TP-15.35x: the changes job sets that output for infra/, images/ and apps/server/", () => {
+    const changes = jobs()["changes"];
+    const name = output() ?? "<none>";
+
+    expect(Object.keys(changes?.outputs ?? {})).toContain(name);
+    const text = runs(changes);
+    for (const p of ["infra/", "images/", "apps/server/"]) expect(text).toContain(p);
+  });
+
+  it("TP-15.35x: timeout-minutes 30; builds the three images (A-393) before pnpm test:infra", () => {
+    const job = jobs()["infra-int"];
+    const text = runs(job);
+
+    expect(job?.["timeout-minutes"]).toBe(30);
+    const builds = ["server", "web", "postgres"].map((n) => {
+      const m = new RegExp(`docker build[^\\n]*images/${n}(/Dockerfile)?`).exec(text);
+      return m?.index ?? -1;
+    });
+    for (const at of builds) expect(at).toBeGreaterThanOrEqual(0);
+    const test = text.indexOf("pnpm test:infra");
+    expect(test).toBeGreaterThan(Math.max(...builds));
+  });
+
+  it("TP-15.35x: images/server and images/web build from the repository root; images/postgres from its directory (A-393)", () => {
+    const text = runs(jobs()["infra-int"]);
+
+    const buildLines = text.split("\n").filter((l) => /docker build/.test(l));
+    for (const n of ["server", "web"]) {
+      const line = buildLines.find((l) => l.includes(`-f images/${n}/Dockerfile`)) ?? "";
+      expect(line.split(/\s+/), n).toContain(".");
+    }
+    expect(text).toMatch(/docker build[^\n]*\simages\/postgres\/?(\s|$)/m);
+  });
+
+  it("TP-15.35x: a root .dockerignore excludes the A-393 paths", () => {
+    const lines = read(".dockerignore")
+      .split("\n")
+      .map((l) => l.trim());
+
+    for (const p of [
+      "**/node_modules",
+      ".git",
+      ".data",
+      ".tools",
+      ".claude",
+      "**/dist",
+      "apps/android",
+      "docs",
+    ]) {
+      expect(lines).toContain(p);
+    }
   });
 });

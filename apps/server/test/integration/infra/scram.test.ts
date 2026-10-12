@@ -1,5 +1,5 @@
 // F-190 scramVerifier against a real Postgres, and F-92's previous-password fallback with a new
-// verifier. TP-15.11 (integration part). scramVerifier loads from infra/budmonctl until it exists.
+// verifier. TP-15.11 (integration part; A-384's re-key, recorded by connection).
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -56,7 +56,7 @@ describe("TP-15.11: SCRAM verifiers accepted by Postgres (F-190, F-92)", () => {
     expect(await canLogIn("tp15_scram", "not-pw")).toBe(false);
   });
 
-  it("TP-15.11: migrate with DB_PASSWORD new and DB_PASSWORD_PREVIOUS current succeeds through the fallback, logs migrator_previous_password_used, and then new logs in", async () => {
+  it("TP-15.11 (A-384): migrate with DB_PASSWORD new and DB_PASSWORD_PREVIOUS current succeeds through the fallback, re-keys before any other connection, and afterwards only new logs in", async () => {
     const scramVerifier = await loadScram();
     const admin = await db.superuserClient();
     try {
@@ -95,15 +95,46 @@ describe("TP-15.11: SCRAM verifiers accepted by Postgres (F-190, F-92)", () => {
         written.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
         return true;
       });
+    // A-384: every connection attempt of the run, by user and password (pool and pg-boss clients
+    // are pg.Client instances from the same pg copy).
+    const connections: { user: string; password: string }[] = [];
+    const proto = pg.Client.prototype as unknown as {
+      connect: (...args: unknown[]) => Promise<void>;
+    };
+    const originalConnect = proto.connect;
+    const connectSpy = vi.spyOn(proto, "connect").mockImplementation(function (
+      this: { user?: unknown; password?: unknown },
+      ...args: unknown[]
+    ) {
+      connections.push({
+        user: String(this.user),
+        password: typeof this.password === "string" ? this.password : "<not a string>",
+      });
+      return originalConnect.apply(this, args);
+    });
     let code: number;
     try {
       code = await runMigrate(env);
     } finally {
       spy.mockRestore();
+      connectSpy.mockRestore();
     }
 
     expect(code, written.join("")).toBe(0);
     expect(written.join("")).toContain("migrator_previous_password_used");
+    // A-384: one fallback login with the previous password, then only DB_PASSWORD (re-key first).
+    const passwords = connections
+      .filter((c) => c.user === "budmon_migrator")
+      .map((c) => c.password);
+    const fallback = passwords.indexOf("current");
+    expect(fallback, JSON.stringify(passwords)).toBeGreaterThanOrEqual(0);
+    expect(passwords.filter((p) => p === "current")).toHaveLength(1);
+    const after = passwords.slice(fallback + 1);
+    expect(after.length, JSON.stringify(passwords)).toBeGreaterThan(0);
+    expect(
+      after.every((p) => p === "new"),
+      JSON.stringify(passwords),
+    ).toBe(true);
     expect(await canLogIn("budmon_migrator", "new", "budmon")).toBe(true);
     expect(await canLogIn("budmon_migrator", "current", "budmon")).toBe(false);
   }, 180_000);

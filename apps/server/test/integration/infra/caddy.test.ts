@@ -2,12 +2,15 @@
 // and asset caching, headers on every response, an access log without query strings, canaries or
 // headers (A-4), and no TLS (auto_https off). TP-15.13.
 //
-// The web image runs as Compose's caddy service; a stub API (the same image running
-// `caddy respond` on :3000) joins the project's edge network as `api`.
+// The web image runs as Compose's caddy service. A-394: the stub API is the server image running an
+// inline Node HTTP server on :3000 (alias `api`, the Caddyfile's upstream) that answers every request
+// `200 {"stub":true}` and prints each request line, so no extra image is pulled and the test sees
+// exactly what Caddy forwards. A-391: runs in the infra-int job (`pnpm test:infra`), skipped
+// elsewhere.
 import { rmSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildImage, compose, laptopHome, sh, TEST_TAG } from "./support.js";
+import { buildImage, compose, INFRA_INT, laptopHome, sh, TEST_TAG } from "./support.js";
 
 const PROJECT = `budmon-tp15-caddy-${String(process.pid)}`;
 const STUB = `${PROJECT}-api`;
@@ -18,11 +21,28 @@ const CSP =
 const MAINT_BODY =
   '{"defined":true,"code":"SERVICE_UNAVAILABLE","status":503,"message":"Service unavailable","data":{"outcome":"not_applied"}}';
 
+/** A-394: the stub API, about 20 lines of Node; one stdout line per request. */
+const STUB_SERVER = `
+const http = require("node:http");
+http
+  .createServer((req, res) => {
+    process.stdout.write("REQ " + req.method + " " + req.url + "\\n");
+    req.resume();
+    req.on("end", () => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end('{"stub":true}');
+    });
+  })
+  .listen(3000, "0.0.0.0");
+`;
+
 let home = "";
 let createdNetwork = false;
 
 beforeAll(async () => {
+  if (!INFRA_INT) return;
   buildImage("web");
+  buildImage("server");
   home = laptopHome({});
   if (sh("docker", ["network", "inspect", "budmon_capture_db"]).status !== 0) {
     sh("docker", [
@@ -46,13 +66,11 @@ beforeAll(async () => {
     `${PROJECT}_edge`,
     "--network-alias",
     "api",
-    `budmon/web:${TEST_TAG}`,
-    "caddy",
-    "respond",
-    "--listen",
-    ":3000",
-    "--body",
-    '{"stub":true}',
+    "--entrypoint",
+    "node",
+    `budmon/server:${TEST_TAG}`,
+    "-e",
+    STUB_SERVER,
   ]);
   if (stub.status !== 0) throw new Error(`stub api: ${stub.stderr}`);
   for (let i = 0; i < 30; i += 1) {
@@ -67,6 +85,7 @@ beforeAll(async () => {
 }, 1_800_000);
 
 afterAll(() => {
+  if (!INFRA_INT) return;
   sh("docker", ["rm", "-f", STUB]);
   if (home === "") return;
   compose(PROJECT, home, ["down", "-v", "--remove-orphans"]);
@@ -83,7 +102,13 @@ function expectHeaders(res: Response): void {
   expect(res.headers.get("x-content-type-options")).toBe("nosniff");
 }
 
-describe("TP-15.13: Caddy on the laptop (F-175)", () => {
+/** Request lines the stub API received since `since`. */
+const stubRequests = (since: string) => {
+  const r = sh("docker", ["logs", "--since", since, STUB]);
+  return `${r.stdout}${r.stderr}`;
+};
+
+describe.skipIf(!INFRA_INT)("TP-15.13: Caddy on the laptop (F-175)", () => {
   it('TP-15.13: with the maintenance flag, /api/* is the exact 503 envelope with Retry-After 120, and /health/ready is {"status":"maintenance"} 503', async () => {
     writeFileSync(flag(), "");
     try {
@@ -115,6 +140,10 @@ describe("TP-15.13: Caddy on the laptop (F-175)", () => {
     expect(await a.text()).toBe('{"stub":true}');
     expect(b.status).toBe(200);
     expectHeaders(a);
+    // A-394: the stub saw what Caddy forwarded: full URLs, query strings included.
+    const forwarded = stubRequests(since);
+    expect(forwarded).toContain(`REQ GET /api/v1/x?token=${CANARY}`);
+    expect(forwarded).toContain(`REQ GET /api/v1/auth/google/callback?code=${CANARY}`);
     const logs = compose(PROJECT, home, ["logs", "--no-log-prefix", "--since", since, "caddy"]);
     const text = `${logs.stdout}${logs.stderr}`;
     expect(text).toContain("/api/v1/auth/google/callback");
