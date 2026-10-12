@@ -1,10 +1,58 @@
 // F-217: web Sentry with F-35's allowlist: no PII, no Replay, no browser tracing.
 import { ORPCError } from "@orpc/client";
+import { isUuid } from "@budmon/shared";
 import * as Sentry from "@sentry/solid";
 
 type Json = Record<string, unknown>;
 
 const ERROR_KEY = /^[A-Z][A-Z0-9_]{1,63}$/;
+
+// F-35's tag rules (F-30's value rules), as on the server.
+const TOKEN = /^[A-Za-z0-9_.:-]{1,64}$/;
+const ROUTE = /^\/[A-Za-z0-9_./:{}-]{0,200}(\/\*)?$/;
+const UUID_LIKE = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/;
+const LONG_DIGITS = /\d{5}/;
+const JOB_NAME = /^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*$/;
+const SQLSTATE = /^[0-9A-Z]{5}$/;
+const SYSTEM_CODE = /^E[A-Z0-9_]{1,30}$/;
+
+function isRoute(value: string): boolean {
+  return (
+    ROUTE.test(value) &&
+    value.split("/").every((segment) => !UUID_LIKE.test(segment) && !LONG_DIGITS.test(segment))
+  );
+}
+
+function isHttpStatus(value: unknown): boolean {
+  const n =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && /^[1-5]\d\d$/.test(value)
+        ? Number.parseInt(value, 10) // three digits, checked above
+        : Number.NaN;
+  return Number.isInteger(n) && n >= 100 && n <= 599;
+}
+
+/** F-35's tags: only these keys, each value checked, failing values dropped. */
+function checkedTags(tags: Json): Json {
+  const out: Json = {};
+  const route = str(tags["route"]);
+  if (route !== undefined && isRoute(stripToPath(route))) out["route"] = stripToPath(route);
+  const job = str(tags["job"]);
+  if (job !== undefined && JOB_NAME.test(job)) out["job"] = job;
+  const clientKind = str(tags["client_kind"]);
+  if (clientKind !== undefined && TOKEN.test(clientKind)) out["client_kind"] = clientKind;
+  const requestId = str(tags["request_id"]);
+  if (requestId !== undefined && HEX32.test(requestId)) out["request_id"] = requestId;
+  const errorKey = str(tags["error_key"]);
+  if (errorKey !== undefined && ERROR_KEY.test(errorKey)) out["error_key"] = errorKey;
+  const errorCode = str(tags["error_code"]);
+  if (errorCode !== undefined && (SQLSTATE.test(errorCode) || SYSTEM_CODE.test(errorCode))) {
+    out["error_code"] = errorCode;
+  }
+  if (isHttpStatus(tags["http_status"])) out["http_status"] = tags["http_status"];
+  return out;
+}
 
 /** B-5: the error key of a defined oRPC error (the contract's), else undefined. */
 function definedErrorKey(exception: unknown): string | undefined {
@@ -99,6 +147,12 @@ export function scrubWebEvent(e: Json, hint?: { originalException?: unknown }): 
       }),
     };
   }
+  if (isObject(e["tags"])) {
+    const tags = checkedTags(e["tags"]);
+    if (Object.keys(tags).length > 0) out["tags"] = tags;
+  }
+  const userId = isObject(e["user"]) ? str(e["user"]["id"]) : undefined;
+  if (userId !== undefined && isUuid(userId)) out["user"] = { id: userId };
   const trace = isObject(e["contexts"]) ? e["contexts"]["trace"] : undefined;
   if (isObject(trace)) {
     const traceId = str(trace["trace_id"]);

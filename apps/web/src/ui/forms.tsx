@@ -40,9 +40,10 @@ export function FormErrorSummary(props: { messages: readonly SummaryEntry[] }): 
       },
     ),
   );
+  // A-399: nothing is rendered when every issue went to its field.
   return (
-    <div ref={el} role="alert" tabindex="-1">
-      <Show when={props.messages.length > 0}>
+    <Show when={props.messages.length > 0}>
+      <div ref={el} role="alert" tabindex="-1">
         <ul>
           <For each={props.messages}>
             {(m) => (
@@ -54,8 +55,8 @@ export function FormErrorSummary(props: { messages: readonly SummaryEntry[] }): 
             )}
           </For>
         </ul>
-      </Show>
-    </div>
+      </div>
+    </Show>
   );
 }
 
