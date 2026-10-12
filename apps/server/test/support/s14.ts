@@ -1,7 +1,16 @@
 // S-14 helpers (test-architect): loaders for the release-migration tools (F-180 to F-182, F-184),
 //  and throwaway copies of the server project for drizzle-kit to work in.
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
@@ -112,6 +121,28 @@ export function generatePlain(dir: string, name: string): string {
     throw new Error(`drizzle-kit generate failed: ${result.stdout}${result.stderr}`);
   }
   return `${result.stdout}${result.stderr}`;
+}
+
+/**
+ * The server project's baseline release migration as §3.4 has it: drizzle-kit's output with
+ * `ALTER TABLE "rate_limit_counters" SET UNLOGGED;` appended (the generator omits it, F-17 sets it in
+ * push mode), so migrate mode and push mode build the same schema. Returns the .sql file's path.
+ */
+export function generateBaseline(dir: string, name: string): string {
+  generatePlain(dir, name);
+  const drizzle = path.join(dir, "drizzle");
+  const file = readdirSync(drizzle).find((n) => n.endsWith(`_${name}.sql`));
+  if (file === undefined) throw new Error(`no baseline migration named ${name}`);
+  const sqlPath = path.join(drizzle, file);
+  const sql = readFileSync(sqlPath, "utf8");
+  if (!sql.includes('CREATE TABLE "rate_limit_counters"')) {
+    throw new Error("baseline doesn't create rate_limit_counters");
+  }
+  writeFileSync(
+    sqlPath,
+    `${sql.trimEnd()}\n--> statement-breakpoint\nALTER TABLE "rate_limit_counters" SET UNLOGGED;\n`,
+  );
+  return sqlPath;
 }
 
 /**

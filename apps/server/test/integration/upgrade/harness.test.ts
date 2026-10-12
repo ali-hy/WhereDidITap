@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SERVER_DIR } from "../../support/platform.js";
-import { generatePlain, serverFixture } from "../../support/s14.js";
+import { generateBaseline, serverFixture } from "../../support/s14.js";
 import { previousReleaseTag, runUpgradeHarness } from "../../upgrade/harness.js";
 
 const repos: string[] = [];
@@ -63,7 +63,7 @@ describe("TP-14.7: the upgrade harness at the baseline (F-183)", () => {
     const fixture = serverFixture();
     try {
       // F-180's naming (`NNNN_<version>`), which A-376's journal tag pattern accepts.
-      generatePlain(fixture.dir, "v0.1.0");
+      generateBaseline(fixture.dir, "v0.1.0");
       const dir = repo();
       const drizzle = path.join(dir, "apps/server/drizzle");
       mkdirSync(drizzle, { recursive: true });

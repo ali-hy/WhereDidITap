@@ -9,7 +9,7 @@ import {
   type ServerFixture,
   type SpawnPty,
   type StartedPostgres,
-  generatePlain,
+  generateBaseline,
   loadCheckMigrations,
   loadScriptPty,
   serverFixture,
@@ -58,7 +58,7 @@ beforeAll(async () => {
 function fixtureWithBaseline(): ServerFixture {
   const f = serverFixture();
   fixtures.push(f);
-  generatePlain(f.dir, "v0.1.0");
+  generateBaseline(f.dir, "v0.1.0");
   return f;
 }
 

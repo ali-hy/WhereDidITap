@@ -9,7 +9,7 @@ import { SERVER_DIR } from "../../support/platform.js";
 import {
   type ServerFixture,
   type StartedPostgres,
-  generatePlain,
+  generateBaseline,
   serverFixture,
   startPostgres,
 } from "../../support/s14.js";
@@ -58,7 +58,7 @@ const HOTFIX_BAD = 'ALTER TABLE "no_such_table" ADD COLUMN "x" text;';
 function withHotfix(sql: string): { fixture: ServerFixture; file: string } {
   const f = serverFixture();
   fixtures.push(f);
-  generatePlain(f.dir, "v0.1.0");
+  generateBaseline(f.dir, "v0.1.0");
   const name = "0001_v0.1.0-hotfix.1";
   const file = path.join(f.drizzle, `${name}.sql`);
   writeFileSync(file, sql);
