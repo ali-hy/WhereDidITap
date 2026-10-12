@@ -294,7 +294,14 @@ describe("TP-15.33x: F-175 per-service settings (main project)", () => {
     expect(mib(memory(p))).toBe(1024);
     const data = (p.volumes ?? []).find((v) => v.target === "/var/lib/postgresql/data");
     expect(data?.source).toBe(path.join(home, "pg"));
-    expect(data?.bind?.create_host_path).toBe(false);
+    // Read from the file itself: some Compose versions drop create_host_path from `config`.
+    const raw = parse(read("infra/local/compose.main.yaml")) as {
+      services?: Record<string, { volumes?: Service["volumes"] }>;
+    };
+    const rawData = (raw.services?.["postgres"]?.volumes ?? []).find(
+      (v) => typeof v === "object" && v.target === "/var/lib/postgresql/data",
+    );
+    expect(rawData?.bind?.create_host_path).toBe(false);
     expect(p.environment?.["BUDMON_LISTEN_ADDRESSES"]).toBe("172.30.40.10,172.30.42.2");
   });
 

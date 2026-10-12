@@ -259,3 +259,18 @@ describe("TP-0.33: .gitignore keeps source packages named build (A-360)", () => 
     );
   });
 });
+
+// TP-15.32 (A-406): the pgBackRest pin lives next to the base digest, as the ARG's default.
+describe("TP-15.32: images/postgres pins pgBackRest (A-406)", () => {
+  const docker = () => readRootFile("images/postgres/Dockerfile");
+
+  it("TP-15.32: ARG PGBACKREST_VERSION has a full PGDG trixie default", () => {
+    const value = /^ARG PGBACKREST_VERSION=(\S+)$/m.exec(docker())?.[1];
+
+    expect(value).toMatch(/^2\.[0-9]+\.[0-9]+-[0-9]+\.pgdg13\+[0-9]+$/);
+  });
+
+  it("TP-15.32: the RUN installs pgbackrest=${PGBACKREST_VERSION}", () => {
+    expect(docker()).toMatch(/^RUN [\s\S]*?pgbackrest=\$\{PGBACKREST_VERSION\}/m);
+  });
+});

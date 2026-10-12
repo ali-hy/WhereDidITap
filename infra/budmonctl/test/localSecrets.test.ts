@@ -78,14 +78,13 @@ describe("TP-15.23: initLocalSecrets (F-191)", () => {
     for (const dir of Object.keys(GENERATED)) expect(fs.dirs.has(`/h/secrets/${dir}`)).toBe(true);
     const marker = fs.files.get("/h/secrets/.initialised");
     expect(marker?.order).toBe(fs.files.size - 1);
-    // F-191 doesn't say whether `files` is absolute or relative to secrets/, or whether it lists
-    // the .initialised marker (asked); either way it names the table's files.
-    expect(
-      result.files
-        .map((f) => path.resolve("/h/secrets", f))
-        .filter((f) => f !== "/h/secrets/.initialised")
-        .sort(),
-    ).toEqual([...expected].sort());
+    // A-405: relative to /h/secrets, `/` separators, in write order, so .initialised is last.
+    const inWriteOrder = [...fs.files.entries()]
+      .sort(([, a], [, b]) => a.order - b.order)
+      .map(([p]) => path.relative("/h/secrets", p));
+    expect(result.files).toEqual(inWriteOrder);
+    expect(result.files.at(-1)).toBe(".initialised");
+    expect(result.files.every((f) => !f.startsWith("/"))).toBe(true);
   });
 
   it("TP-15.23: api's and worker-general's DB_PASSWORD are the same (both budmon_app); passwords differ otherwise", async () => {

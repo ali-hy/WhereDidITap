@@ -7,9 +7,10 @@
 //     (F-178's layout table) are applied here with sudo, as apply_secret_ownership would, since its
 //     calling convention isn't specified.
 //   - TP-15.34 (I): listen_addresses in the stack, and in the image started alone (A-418).
-//   - TP-15.22 (I1, I2): still todo (see the S-15 report).
-import { mkdtempSync, readFileSync } from "node:fs";
-import { createHash, createHmac, pbkdf2Sync, randomBytes } from "node:crypto";
+//   - TP-15.22 (I1, I2): a real install of a throwaway tag (a temporary origin whose default branch
+//     is master), then restores of a seeded dump, a truncated dump and one failing half-way.
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash, createHmac, generateKeyPairSync, pbkdf2Sync, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -417,7 +418,290 @@ describe.skipIf(!INFRA_INT)("TP-15.28 (I): secret set with real sudo (F-178)", (
   }, 300_000);
 });
 
+/** The PEM of a fresh RSA public key (CAPTURE_PUBLIC_KEY's shape). */
+function rsaPublicPem(): string {
+  return generateKeyPairSync("rsa", { modulusLength: 2048 })
+    .publicKey.export({ type: "spki", format: "pem" })
+    .toString();
+}
+
+// TP-15.22 (I1, I2): a real install of a throwaway tag, then restores, with real sudo and Docker.
 describe.skipIf(!INFRA_INT)("TP-15.22 (I): install and restore on a real runner (F-178)", () => {
-  it.todo("TP-15.22 (I1): a full install, then restore of a dump of a seeded database");
-  it.todo("TP-15.22 (I2): restores of a truncated and of a failing dump leave budmon untouched");
+  const TAG = "v0.0.1";
+  let home = "";
+  let work = "";
+  let repoDir = "";
+  /** The seeded database's per-table row counts, as "table=count,…". */
+  let seeded = "";
+  let firstDump = "";
+
+  const env = () => ({ BUDMON_HOME: home, BUDMON_REPO: repoDir });
+  const budmonLocal = (args: readonly string[], input?: string) =>
+    sh(path.join(LOCAL, "budmon-local"), args, {
+      env: env(),
+      ...(input === undefined ? {} : { input }),
+      timeoutMs: 1_500_000,
+    });
+  const container = (project: "main" | "capture", service: string) =>
+    sh("docker", [
+      "ps",
+      "-q",
+      "--filter",
+      `label=com.docker.compose.project=budmon-${project}`,
+      "--filter",
+      `label=com.docker.compose.service=${service}`,
+    ]).stdout.trim();
+  const adminSql = (sql: string, db = "budmon") =>
+    sh("docker", [
+      "exec",
+      "-u",
+      "postgres",
+      container("main", "postgres"),
+      "psql",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-X",
+      "-q",
+      "-At",
+      "-U",
+      "budmon_admin",
+      "-d",
+      db,
+      "-c",
+      sql,
+    ]);
+  const COUNTS = `SELECT coalesce(string_agg(format('%s=%s', c.relname, (xpath('/row/n/text()', query_to_xml(format('SELECT count(*) AS n FROM public.%I', c.relname), false, true, '')))[1]::text), ',' ORDER BY c.relname), '') FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r'`;
+  const counts = () => {
+    const r = adminSql(COUNTS);
+    if (r.status !== 0) throw new Error(`counts: ${r.stderr}`);
+    return r.stdout.trim();
+  };
+  /** Runs `command` with bash, so binary dumps go through redirections, not through strings. */
+  const bash = (command: string) => sh("bash", ["-c", command], { timeoutMs: 600_000 });
+  const dumpPath = (stamp: string) => path.join(home, "dumps", `${stamp}_${TAG}.dump`);
+  const ready = async () => (await fetch("http://127.0.0.1:8080/health/ready")).status;
+  /** The newest pre-restore dump restores cleanly into a scratch database. */
+  const safetyDumpRestores = (scratch: string) => {
+    const latest = bash(`ls -1t '${home}/dumps/'*_pre-restore.dump | head -n 1`).stdout.trim();
+    expect(latest).not.toBe("");
+    expect(adminSql(`CREATE DATABASE ${scratch}`, "postgres").status).toBe(0);
+    const r = bash(
+      `sudo cat '${latest}' | docker exec -i -u postgres ${container("main", "postgres")} pg_restore -U budmon_admin -d ${scratch} --exit-on-error`,
+    );
+    expect(r.status, r.stderr).toBe(0);
+    adminSql(`DROP DATABASE ${scratch}`, "postgres");
+  };
+
+  beforeAll(async () => {
+    work = mkdtempSync(path.join(tmpdir(), "budmon-tp15-22-"));
+    home = path.join(work, "home");
+    mkdirSync(home, { mode: 0o700 });
+    // A throwaway origin whose default branch is master, holding this commit tagged TAG.
+    const origin = path.join(work, "origin.git");
+    repoDir = path.join(work, "repo");
+    const git = (args: readonly string[], cwd?: string) => {
+      const r = sh("git", cwd === undefined ? args : ["-C", cwd, ...args]);
+      if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
+      return r.stdout.trim();
+    };
+    git(["init", "-q", "--bare", "-b", "master", origin]);
+    git(["config", "receive.shallowUpdate", "true"], origin);
+    git(["push", "-q", origin, "HEAD:refs/heads/master"], ROOT);
+    git(["tag", TAG, "master"], origin);
+    git(["clone", "-q", origin, repoDir]);
+
+    // First install: answers piped, then exit 20 listing the placeholders (A-385).
+    const first = budmonLocal(["install", TAG], "laptop.tailnet.ts.net\n");
+    if (first.status !== 20) throw new Error(`install 1: ${String(first.status)} ${first.stderr}`);
+    const pub = rsaPublicPem();
+    const values: Record<string, string> = {
+      "main/api/S3_ACCESS_KEY_ID": "access-key-id",
+      "main/api/S3_SECRET_ACCESS_KEY": "secret-access-key",
+      "main/api/CAPTURE_PUBLIC_KEY": pub,
+      "main/api/GOOGLE_SIGNIN_CLIENT_SECRET": "signin-secret",
+      "main/worker-general/S3_ACCESS_KEY_ID": "access-key-id",
+      "main/worker-general/S3_SECRET_ACCESS_KEY": "secret-access-key",
+      "main/worker-general/FX_PRIMARY_APP_ID": "oxr-app-id",
+      "main/worker-general/CAPTURE_PUBLIC_KEY": pub,
+      "capture/worker-capture/GCP_CREDENTIALS": JSON.stringify({
+        type: "service_account",
+        project_id: "p",
+      }),
+      "capture/worker-capture/GOOGLE_OAUTH_CLIENT_SECRET": "oauth-secret",
+      "capture/worker-capture/CAPTURE_PUBLIC_KEY": pub,
+    };
+    for (const [key, value] of Object.entries(values)) {
+      const r = budmonLocal(["secret", "set", key], value);
+      if (r.status !== 0) throw new Error(`secret set ${key}: ${r.stderr}`);
+    }
+    writeFileSync(
+      path.join(home, "site.env"),
+      [
+        "PUBLIC_ORIGIN=https://laptop.tailnet.ts.net",
+        "CAPTURE_KEY_VERSION=projects/p/locations/europe-west3/keyRings/budmon/cryptoKeys/capture-credentials/cryptoKeyVersions/1",
+        "GOOGLE_OAUTH_CLIENT_ID=123-oauth.apps.googleusercontent.com",
+        "S3_ENDPOINT=https://s3.eu-central-003.backblazeb2.com",
+        "S3_REGION=eu-central-003",
+        "S3_BUCKET_EXPORTS=budmon-exports",
+        "S3_BUCKET_ERASURE_LOG=budmon-erasure-log",
+        "SENTRY_DSN=https://k@sentry.invalid/1",
+        "GOOGLE_SIGNIN_CLIENT_ID=123-signin.apps.googleusercontent.com",
+        "GOOGLE_SIGNIN_ANDROID_CLIENT_IDS=",
+        "GOOGLE_SIGNIN_CALLBACK_ORIGIN=http://localhost:8080",
+        "GOOGLE_SIGNIN_APP_ORIGINS=https://laptop.tailnet.ts.net,http://localhost:8080",
+        "SMTP_URL=smtp://mailpit:1025",
+        "EMAIL_FROM=Budmon <no-reply@budmon.local>",
+        "WEB_SENTRY_DSN=https://pub@sentry.invalid/2",
+        "",
+      ].join("\n"),
+      { mode: 0o600 },
+    );
+
+    // Second install: builds the three images from the tag and starts both projects.
+    const second = budmonLocal(["install", TAG]);
+    if (second.status !== 0) {
+      throw new Error(`install 2: ${String(second.status)}\n${second.stdout}${second.stderr}`);
+    }
+    for (let i = 0; i < 120 && (await ready().catch(() => 0)) !== 200; i += 1) {
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+  }, 1_700_000);
+
+  afterAll(() => {
+    if (home === "") return;
+    for (const project of ["budmon-main", "budmon-capture"]) {
+      const ids = sh("docker", [
+        "ps",
+        "-aq",
+        "--filter",
+        `label=com.docker.compose.project=${project}`,
+      ])
+        .stdout.split("\n")
+        .filter((id) => id !== "");
+      if (ids.length > 0) sh("docker", ["rm", "-f", "-v", ...ids]);
+      const nets = sh("docker", [
+        "network",
+        "ls",
+        "-q",
+        "--filter",
+        `label=com.docker.compose.project=${project}`,
+      ])
+        .stdout.split("\n")
+        .filter((id) => id !== "");
+      if (nets.length > 0) sh("docker", ["network", "rm", ...nets]);
+    }
+    sh("docker", ["network", "rm", "budmon_capture_db"]);
+    sh("sudo", ["rm", "-rf", work]);
+  });
+
+  it("TP-15.22 (I1): every container is running, and healthy where it has a health check", () => {
+    const ids = ["budmon-main", "budmon-capture"].flatMap((project) =>
+      sh("docker", ["ps", "-aq", "--filter", `label=com.docker.compose.project=${project}`])
+        .stdout.split("\n")
+        .filter((id) => id !== ""),
+    );
+    expect(ids.length).toBeGreaterThan(0);
+    for (const id of ids) {
+      const state = sh("docker", [
+        "inspect",
+        "-f",
+        "{{.Name}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}",
+        id,
+      ]).stdout.trim();
+      expect(state).toMatch(/ running (healthy|none)$/);
+    }
+  });
+
+  it("TP-15.22 (I1): Postgres starts with its TLS key owned by 999", () => {
+    const owner = sh("sudo", [
+      "stat",
+      "-c",
+      "%u",
+      path.join(home, "secrets/main/postgres/TLS_KEY"),
+    ]);
+
+    expect(owner.stdout.trim()).toBe("999");
+  });
+
+  it("TP-15.22 (I1): restore of a dump of a seeded database: row counts equal the seeded ones; CONNECT revoked from PUBLIC and held by every login role; restore:verify ran", () => {
+    const seed = adminSql(
+      "INSERT INTO rate_limit_counters (bucket_key, window_start, hits, expires_at) SELECT 'tp15-22-' || g, now(), g, now() + interval '7 days' FROM generate_series(1, 25) g",
+    );
+    expect(seed.status, seed.stderr).toBe(0);
+    seeded = counts();
+    expect(seeded).toContain("rate_limit_counters=");
+    firstDump = dumpPath("20261012T120000Z");
+    const dump = bash(
+      `docker exec -u postgres ${container("main", "postgres")} pg_dump -Fc -U budmon_admin budmon > '${firstDump}' && chmod 0600 '${firstDump}'`,
+    );
+    expect(dump.status, dump.stderr).toBe(0);
+    // Changed after the dump, so the restore has something to undo.
+    adminSql("DELETE FROM rate_limit_counters WHERE bucket_key LIKE 'tp15-22-%'");
+
+    const r = budmonLocal(["restore", firstDump]);
+
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    expect(counts()).toBe(seeded);
+    expect(
+      adminSql("SELECT has_database_privilege('public', 'budmon', 'CONNECT')").stdout.trim(),
+    ).toBe("f");
+    expect(
+      adminSql(
+        "SELECT string_agg(rolname, ',') FROM pg_roles WHERE rolcanlogin AND NOT has_database_privilege(rolname, 'budmon', 'CONNECT')",
+      ).stdout.trim(),
+    ).toBe("");
+    // restore:verify's report, from the migrate service, whose user is budmon_migrator.
+    expect(`${r.stdout}${r.stderr}`).toMatch(/"ok":\s*true/);
+    const migrateUser = bash(
+      `BUDMON_HOME='${home}' BUDMON_TAG=${TAG} docker compose --project-directory '${home}/releases/${TAG}' -f '${home}/releases/${TAG}/compose.main.yaml' --env-file '${home}/releases/${TAG}/local.env' --profile tools config --format json | jq -r '.services.migrate.environment.DB_USER'`,
+    );
+    expect(migrateUser.stdout.trim()).toBe("budmon_migrator");
+  }, 900_000);
+
+  it("TP-15.22 (I2): a truncated copy of a valid dump fails with 14; budmon keeps the seeded rows, /health/ready is 200, the safety dump restores", async () => {
+    const truncated = dumpPath("20261012T120100Z");
+    const cut = bash(
+      `size=$(stat -c %s '${firstDump}'); head -c $((size / 2)) '${firstDump}' > '${truncated}' && chmod 0600 '${truncated}'`,
+    );
+    expect(cut.status, cut.stderr).toBe(0);
+
+    const r = budmonLocal(["restore", truncated]);
+
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(14);
+    expect(counts()).toBe(seeded);
+    expect(await ready()).toBe(200);
+    safetyDumpRestores("tp15_22_scratch_1");
+  }, 900_000);
+
+  it("TP-15.22 (I2): a valid dump whose pg_restore fails half-way fails with 15 or 6; budmon keeps the seeded rows, /health/ready is 200, the safety dump restores", async () => {
+    // A copy of budmon with a CHECK whose function turns false after the rows are in: pg_dump
+    // writes the constraint before the data, so the restore's COPY fails part-way.
+    const pg = container("main", "postgres");
+    expect(adminSql("CREATE DATABASE tp15_22_craft", "postgres").status).toBe(0);
+    const copy = bash(
+      `docker exec -u postgres ${pg} bash -c 'pg_dump -Fc -U budmon_admin budmon | pg_restore -U budmon_admin -d tp15_22_craft'`,
+    );
+    expect(copy.status, copy.stderr).toBe(0);
+    for (const sql of [
+      "CREATE FUNCTION tp15_22_ok() RETURNS boolean LANGUAGE sql IMMUTABLE AS 'SELECT true'",
+      "ALTER TABLE rate_limit_counters ADD CONSTRAINT tp15_22_check CHECK (tp15_22_ok())",
+      "CREATE OR REPLACE FUNCTION tp15_22_ok() RETURNS boolean LANGUAGE sql IMMUTABLE AS 'SELECT false'",
+    ]) {
+      const r = adminSql(sql, "tp15_22_craft");
+      expect(r.status, r.stderr).toBe(0);
+    }
+    const crafted = dumpPath("20261012T120200Z");
+    const dump = bash(
+      `docker exec -u postgres ${pg} pg_dump -Fc -U budmon_admin tp15_22_craft > '${crafted}' && chmod 0600 '${crafted}'`,
+    );
+    expect(dump.status, dump.stderr).toBe(0);
+    adminSql("DROP DATABASE tp15_22_craft", "postgres");
+
+    const r = budmonLocal(["restore", crafted]);
+
+    expect([15, 6], `${r.stdout}${r.stderr}`).toContain(r.status);
+    expect(counts()).toBe(seeded);
+    expect(await ready()).toBe(200);
+    safetyDumpRestores("tp15_22_scratch_2");
+  }, 900_000);
 });
