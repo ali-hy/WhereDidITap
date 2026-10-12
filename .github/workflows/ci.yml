@@ -20,6 +20,9 @@ jobs:
   check:
     name: check
     runs-on: ubuntu-latest
+    env:
+      # Check (ii): release candidates build the integration template from migrations.
+      BUDMON_SCHEMA_MODE: ${{ (startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')) && 'migrate' || 'push' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -148,6 +151,50 @@ jobs:
           args=(--branch "$HEAD_REF" --changed-files "$RUNNER_TEMP/changed-files.txt")
           if [ "$MERGE_BACK" = "true" ]; then args+=(--hotfix-merge-back); fi
           ./node_modules/.bin/tsx checkMigrationFiles.ts "${args[@]}"
+      - name: Pending schema changes (F-181, job summary)
+        if: ${{ !(startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')) }}
+        continue-on-error: true
+        run: |
+          pnpm --silent --filter @budmon/server db:pending-report > "$RUNNER_TEMP/pending.sql"
+          {
+            echo "## Pending schema changes"
+            if [ -s "$RUNNER_TEMP/pending.sql" ]; then
+              echo '```sql'
+              cat "$RUNNER_TEMP/pending.sql"
+              echo '```'
+            else
+              echo "No pending schema changes."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Check (i), migrations reproduce the schema (F-182)
+        if: ${{ startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/') }}
+        run: pnpm db:check-migrations
+      - name: Check (iii), risky statements in added migrations (F-184)
+        if: ${{ startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/') }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          mapfile -t added < <(git -c core.quotePath=false diff --no-renames --name-only --diff-filter=A "origin/${BASE_REF}...HEAD" -- 'apps/server/drizzle/*.sql')
+          if [ "${#added[@]}" -eq 0 ]; then
+            echo "No added migrations."
+          else
+            pnpm db:check-risky "${added[@]}"
+          fi
+      - name: Check (iv), the upgrade harness (F-183)
+        if: ${{ startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/') }}
+        run: pnpm --filter @budmon/server test:upgrade
+      - name: Merge-back check (F-6b)
+        if: ${{ contains(github.event.pull_request.labels.*.name, 'hotfix-merge-back') || contains(github.event.pull_request.labels.*.name, 'infra-merge-back') }}
+        env:
+          HOTFIX_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'hotfix-merge-back') }}
+          INFRA_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'infra-merge-back') }}
+        working-directory: tools/ci # A-28
+        run: |
+          args=()
+          if [ "$HOTFIX_LABEL" = "true" ]; then args+=(--kind hotfix); fi
+          if [ "$INFRA_LABEL" = "true" ]; then args+=(--kind infra); fi
+          mapfile -t added < <(git -C "$GITHUB_WORKSPACE" -c core.quotePath=false diff --no-renames --name-only --diff-filter=A origin/main...HEAD -- 'apps/server/drizzle/*.sql')
+          ./node_modules/.bin/tsx checkMergeBack.ts "${args[@]}" "${added[@]}"
 
   dev-smoke:
     name: dev-smoke

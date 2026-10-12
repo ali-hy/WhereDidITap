@@ -1,0 +1,59 @@
+name: Tag
+
+# Stage-0 tagging (LLD §4.17 "Stage-0 tagging", D-12): a merged release/* pull request is tagged
+# on its merge commit; a hotfix pull request is tagged on its head when dispatched with its number.
+# Check (i) runs again on the commit before the tag is pushed with GITHUB_TOKEN. The stage-1 LLD
+# replaces this with the App-based chain.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Hotfix pull request number
+        required: true
+        type: number
+
+permissions:
+  contents: write
+  pull-requests: read
+  checks: read
+
+env:
+  TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX: mirror.gcr.io/
+
+concurrency:
+  group: tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: tag
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true && startsWith(github.head_ref, 'release/'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # tags and history, for the ancestry checks
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Tag and push (tagRelease.sh)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_FROM_EVENT: ${{ github.event.pull_request.number }}
+          PR_FROM_INPUT: ${{ inputs.pr }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            bash tools/ci/tagRelease.sh hotfix "$PR_FROM_INPUT"
+          else
+            bash tools/ci/tagRelease.sh release "$PR_FROM_EVENT"
+          fi

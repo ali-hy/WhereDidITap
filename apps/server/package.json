@@ -8,6 +8,11 @@
     "db:reset": "tsx src/main/dbReset.ts",
     "db:seed": "tsx src/main/dbReset.ts --seed-only",
     "db:migrate": "tsx src/main/devMigrate.ts",
+    "db:release-migration": "tsx tools/releaseMigration.ts generate",
+    "db:pending-report": "tsx tools/releaseMigration.ts pending",
+    "db:check-migrations": "tsx tools/checkMigrations.ts",
+    "db:check-risky": "tsx tools/checkRisky.ts",
+    "test:upgrade": "tsx test/upgrade/harness.ts",
     "build": "tsx scripts/build.ts",
     "e2e:serve": "tsx scripts/e2eServe.ts"
   },

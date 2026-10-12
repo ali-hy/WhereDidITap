@@ -53,6 +53,19 @@ isn't supported.
 Migration files exist only on `release/*` and `hotfix/*` branches; development databases are
 built from the schema directly.
 
+Release migrations (on a `release/*` or `hotfix/*` branch):
+
+| Command                                     | What it does                                                                                                        |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `pnpm db:release-migration <version>`       | Generates `apps/server/drizzle/NNNN_<version>.sql`, answering create-or-rename prompts with create and listing them |
+| `pnpm db:pending-report`                    | Prints the SQL a release would generate now, without writing to the repository                                      |
+| `pnpm db:check-migrations`                  | Check (i): the migrations rebuild exactly the schema, and nothing is pending (Docker)                               |
+| `pnpm db:check-risky <files…>`              | Flags risky statements; a `-- reviewed: <reason>` line above a statement accepts it                                 |
+| `pnpm --filter @budmon/server test:upgrade` | Check (iv): migrates the previous release's database to this one (skipped before the first release)                 |
+
+CI runs checks (i), (iii) and (iv) on `release/*` and `hotfix/*` pull requests and puts the pending
+report in other pull requests' job summary. Tags are pushed by `tag.yml` (`tools/ci/tagRelease.sh`).
+
 ## Tests
 
 | Command              | What it runs                                                   |
