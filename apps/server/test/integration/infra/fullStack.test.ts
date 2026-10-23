@@ -137,8 +137,23 @@ describe.skipIf(!INFRA_INT)("TP-15.3: pg_hba.conf on the laptop (F-175)", () => 
       BUDMON_FIRST_SETUP: "1",
     });
     if (up.status !== 0) throw new Error(`compose up postgres: ${up.stderr}`);
-    for (let i = 0; i < 90; i += 1) {
-      if (psqlAdmin("SELECT 1").status === 0) break;
+    // First setup runs the upstream entrypoint's temporary server (socket only), stops it, then
+    // starts the real one, so one successful SELECT 1 can still be followed by a refused socket.
+    // Ready means: the init process has completed (its log line) and 3 SELECT 1s in a row pass.
+    const logs = () => {
+      const r = compose(PROJECT, home, ["logs", "--no-color", "postgres"]);
+      return `${r.stdout}${r.stderr}`;
+    };
+    const deadline = Date.now() + 150_000;
+    let inARow = 0;
+    while (inARow < 3) {
+      if (Date.now() > deadline) {
+        throw new Error(
+          `postgres never became ready:\n${logs().split("\n").slice(-40).join("\n")}`,
+        );
+      }
+      const initDone = logs().includes("PostgreSQL init process complete");
+      inARow = initDone && psqlAdmin("SELECT 1").status === 0 ? inARow + 1 : 0;
       await new Promise((r) => setTimeout(r, 1_000));
     }
     for (const sql of [
