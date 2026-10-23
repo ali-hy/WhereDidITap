@@ -163,9 +163,10 @@ describe("TP-16.17: the rehearsal overlays' compose config (A-392, A-449 to A-45
     volumes?: { type?: string; source?: string; target?: string; read_only?: boolean }[];
     extra_hosts?: string[] | Record<string, string | string[]>;
     networks?: Record<string, { aliases?: string[] } | null>;
+    logging?: { driver?: string };
   }
   const CA = "/w/ca";
-  const rehearsalConfig = (project: "main" | "capture") => {
+  const rehearsalConfig = (project: "main" | "capture", doctored?: string) => {
     const args = [
       "compose",
       "--project-directory",
@@ -176,6 +177,8 @@ describe("TP-16.17: the rehearsal overlays' compose config (A-392, A-449 to A-45
       path.join(LOCAL, `compose.${project}.yaml`),
       "-f",
       path.join(LOCAL, `rehearsal/compose.rehearsal.${project}.yaml`),
+      // A-468: composeArgs appends the doctored overlay after the project's rehearsal overlay.
+      ...(doctored === undefined ? [] : ["-f", doctored]),
       "--env-file",
       path.join(LOCAL, "local.env"),
       // migrate is in profile tools.
@@ -192,10 +195,16 @@ describe("TP-16.17: the rehearsal overlays' compose config (A-392, A-449 to A-45
     return {
       status: result.status,
       stderr: result.stderr,
-      services:
-        result.status === 0
-          ? ((JSON.parse(result.stdout) as { services?: Record<string, RService> }).services ?? {})
-          : {},
+      ...(() => {
+        const parsed =
+          result.status === 0
+            ? (JSON.parse(result.stdout) as {
+                services?: Record<string, RService>;
+                networks?: Record<string, { external?: boolean; name?: string }>;
+              })
+            : {};
+        return { services: parsed.services ?? {}, networks: parsed.networks ?? {} };
+      })(),
     };
   };
   const mounts = (sv: RService | undefined) =>
@@ -299,6 +308,86 @@ describe("TP-16.17: the rehearsal overlays' compose config (A-392, A-449 to A-45
       "compose.rehearsal.capture.yaml",
       "compose.rehearsal.main.yaml",
     ]);
+  });
+
+  // A-468: the test-architect's doctored overlays merge, and each changes what its step checks.
+  describe("TP-16.17x: the doctored overlays (A-468)", () => {
+    const DOCTORED = path.join(ROOT, "tools/rehearsal/test/doctored");
+    const config = (name: string) => {
+      const file = readdirSync(DOCTORED).find(
+        (f) => f.startsWith(`${name}.`) && f.endsWith(".yaml"),
+      );
+      if (file === undefined) throw new Error(`no doctored overlay ${name}`);
+      const project = file.endsWith(".capture.yaml") ? "capture" : "main";
+      return rehearsalConfig(project, path.join(DOCTORED, file));
+    };
+
+    it("TP-16.17x: expectations.json names exactly the five overlays with A-468's steps, one file each", () => {
+      const expectations = JSON.parse(
+        readFileSync(path.join(DOCTORED, "expectations.json"), "utf8"),
+      ) as Record<string, string>;
+
+      expect(expectations).toEqual({
+        "api-stage-env": "no-stage-setting",
+        "api-capture-secret": "cross-role-secrets",
+        "api-capture-key": "cross-role-secrets",
+        "capture-on-data": "cross-role-secrets",
+        "mailpit-logged": "mailpit-quiet",
+      });
+      expect(
+        readdirSync(DOCTORED)
+          .filter((f) => f.endsWith(".yaml"))
+          .sort(),
+      ).toEqual(
+        [
+          "api-capture-key.main.yaml",
+          "api-capture-secret.main.yaml",
+          "api-stage-env.main.yaml",
+          "capture-on-data.capture.yaml",
+          "mailpit-logged.main.yaml",
+        ].sort(),
+      );
+    });
+
+    it("TP-16.17x: api-stage-env sets INFRA_STAGE=0 on api", () => {
+      const c = config("api-stage-env");
+
+      expect(c.status, c.stderr).toBe(0);
+      expect(c.services["api"]?.environment?.["INFRA_STAGE"]).toBe("0");
+    });
+
+    it("TP-16.17x: api-capture-secret mounts secrets/capture into api", () => {
+      const c = config("api-capture-secret");
+
+      expect(c.status, c.stderr).toBe(0);
+      expect(mounts(c.services["api"]).map((m) => m.source)).toContain(
+        path.posix.join(home, "secrets/capture"),
+      );
+    });
+
+    it("TP-16.17x: api-capture-key mounts the capture private key into api", () => {
+      const c = config("api-capture-key");
+
+      expect(c.status, c.stderr).toBe(0);
+      expect(mounts(c.services["api"]).map((m) => m.source)).toContain(
+        "/w/capture-key/CAPTURE_PRIVATE_KEY",
+      );
+    });
+
+    it("TP-16.17x: capture-on-data attaches worker-capture to data, external budmon-main_data", () => {
+      const c = config("capture-on-data");
+
+      expect(c.status, c.stderr).toBe(0);
+      expect(Object.keys(c.services["worker-capture"]?.networks ?? {})).toContain("data");
+      expect(c.networks["data"]).toMatchObject({ external: true, name: "budmon-main_data" });
+    });
+
+    it("TP-16.17x: mailpit-logged leaves mailpit without the none logging driver", () => {
+      const c = config("mailpit-logged");
+
+      expect(c.status, c.stderr).toBe(0);
+      expect(c.services["mailpit"]?.logging?.driver ?? "default").not.toBe("none");
+    });
   });
 });
 

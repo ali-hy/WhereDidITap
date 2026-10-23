@@ -1,0 +1,11 @@
+# A-468, TP-16.7: worker-capture attached to budmon-main's data network; step 10
+# (cross-role-secrets) must fail, because it can then reach Postgres's data address.
+services:
+  worker-capture:
+    networks:
+      data: {}
+
+networks:
+  data:
+    external: true
+    name: budmon-main_data

@@ -124,9 +124,17 @@ export interface RehearsalServices {
   startFakeFx: FakeFxModule["startFakeFx"];
   startSentryCapture: SentryCaptureModule["startSentryCapture"];
 }
+/** A-468: a doctored run's overlay and the step that must fail first. */
+export interface RehearsalDoctor {
+  name: string;
+  project: "main" | "capture";
+  file: string;
+  expectStep: StepName;
+}
 export interface RehearsalOptions {
   previousTag: string | null;
   version: string;
+  doctor?: RehearsalDoctor | null;
   images: { server: string; web: string; postgres: string };
   workDir: string;
   repoRoot: string;
@@ -158,7 +166,11 @@ export interface RehearsalDeps {
 export interface RunModule {
   STEP_ORDER: readonly StepName[];
   defaultSteps: Readonly<Record<StepName, StepFn>>;
-  composeArgs: (ctx: Pick<RehearsalContext, "releaseDir">, project: "main" | "capture") => string[];
+  composeArgs: (
+    ctx: Pick<RehearsalContext, "releaseDir"> & { opts?: { doctor?: RehearsalDoctor | null } },
+    project: "main" | "capture",
+  ) => string[];
+  doctorVerdict: (steps: StepRecord[], expectStep: StepName) => { ok: boolean; message: string };
   runRehearsal: (
     opts: RehearsalOptions,
     deps: RehearsalDeps,

@@ -57,9 +57,9 @@ class PlatformUiTest {
     }
 
     @Test
-    fun `TP-13_7 UpdateRequiredScreen with 1500 pending shows 1,000+`() {
+    fun `TP-13_7 UpdateRequiredScreen with 1500 pending shows exactly the 999+ note (A-467)`() {
         set { UpdateRequiredScreen(pending = 1500, downloadUrl = "https://x/app.apk", onOpenDownload = { true }) }
-        compose.onNodeWithText("1,000+", substring = true).assertExists()
+        compose.onNodeWithText("999+ entries you saved offline are kept and will sync after you update.").assertExists()
     }
 
     @Test
@@ -93,9 +93,15 @@ class PlatformUiTest {
     }
 
     @Test
-    fun `TP-13_7 SyncIndicator with 120 pending shows 99+`() {
+    fun `TP-13_7 SyncIndicator with 120 pending shows exactly 99+ waiting to sync (A-467)`() {
         set { SyncIndicator(pending = 120, syncing = false, failed = 0) }
-        compose.onNodeWithText("99+", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("99+ waiting to sync").assertIsDisplayed()
+    }
+
+    @Test
+    fun `TP-13_7 SyncIndicator with 120 failed shows exactly 99+ need attention (A-467)`() {
+        set { SyncIndicator(pending = 0, syncing = false, failed = 120) }
+        compose.onNodeWithText("99+ need attention").assertIsDisplayed()
     }
 
     @Test
