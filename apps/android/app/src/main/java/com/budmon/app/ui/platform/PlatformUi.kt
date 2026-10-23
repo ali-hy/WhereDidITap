@@ -42,10 +42,10 @@ import com.budmon.app.R
 import kotlinx.coroutines.delay
 import java.text.NumberFormat
 
-/** A count as text, capped: "999+" above 999 (formatted for the locale, e.g. "1,000+"). */
+/** A count as text, capped: "<cap>+" above the cap ("99+", "999+"), formatted for the locale. */
 private fun capped(count: Int, cap: Int): String {
     val format = NumberFormat.getIntegerInstance()
-    return if (count > cap) "${format.format(cap + 1L)}+" else format.format(count.toLong())
+    return if (count > cap) "${format.format(cap.toLong())}+" else format.format(count.toLong())
 }
 
 /** S-1: the full screen while this version is no longer supported. */
