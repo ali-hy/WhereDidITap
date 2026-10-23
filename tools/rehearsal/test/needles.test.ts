@@ -52,7 +52,7 @@ describe("TP-16.15: the rehearsal constants (F-193)", () => {
     expect(m.REHEARSAL_SIGNIN_CLIENT_ID).toBe("rehearsal-signin.apps.googleusercontent.com");
   });
 
-  it("TP-16.15: REHEARSAL_FX_FAIL_DATE, REHEARSAL_PORTS and REHEARSAL_HOSTS (A-443, A-445)", () => {
+  it("TP-16.15: REHEARSAL_FX_FAIL_DATE, REHEARSAL_PORTS, REHEARSAL_HOSTS and REHEARSAL_PUBLIC_ORIGIN (A-443, A-445, A-450, A-452, A-454)", () => {
     expect(m.REHEARSAL_FX_FAIL_DATE).toBe("2024-03-05");
     expect(m.REHEARSAL_PORTS).toEqual({
       googleTls: 443,
@@ -60,10 +60,13 @@ describe("TP-16.15: the rehearsal constants (F-193)", () => {
       fxTls: 8444,
       fxControl: 18082,
       sentryTls: 8445,
+      upgradePg: 15433,
     });
     expect(m.REHEARSAL_HOSTS).toEqual({
       fx: "fx.rehearsal.invalid",
       sentry: "sentry.rehearsal.invalid",
+      s3: "s3.rehearsal.invalid",
     });
+    expect(m.REHEARSAL_PUBLIC_ORIGIN).toBe("https://rehearsal.budmon.invalid");
   });
 });

@@ -42,6 +42,7 @@ beforeAll(async () => {
 
 const opts = (previousTag: string | null): RehearsalOptions => ({
   previousTag,
+  version: "v1.0.0",
   images: { server: "budmon/server:rc", web: "budmon/web:rc", postgres: "budmon/postgres:rc" },
   workDir: "/tmp/budmon-rehearsal-unit",
   repoRoot: "/repo",

@@ -17,8 +17,10 @@ export interface NeedlesModule {
     fxTls: number;
     fxControl: number;
     sentryTls: number;
+    upgradePg: number;
   };
-  REHEARSAL_HOSTS: { fx: string; sentry: string };
+  REHEARSAL_HOSTS: { fx: string; sentry: string; s3: string };
+  REHEARSAL_PUBLIC_ORIGIN: string;
   scanForNeedles: (
     sources: readonly { name: string; text: string }[],
     needles: readonly Needle[],
@@ -124,6 +126,7 @@ export interface RehearsalServices {
 }
 export interface RehearsalOptions {
   previousTag: string | null;
+  version: string;
   images: { server: string; web: string; postgres: string };
   workDir: string;
   repoRoot: string;

@@ -4,7 +4,7 @@
 // postgresql.conf, local.env and the Caddyfile. IDs ending in "x" are test-architect additions, not
 // LLD test-plan IDs. `docker compose config` needs only the Docker CLI (no daemon work).
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -154,15 +154,151 @@ describe("TP-15.31: laptop images are digest-pinned; Mailpit matches the develop
   });
 });
 
-describe("TP-16.17: the rehearsal overlay's compose config (A-392)", () => {
-  it("TP-16.17: docker compose config of both laptop files and rehearsal/compose.rehearsal.yaml with local.env exits 0", () => {
-    const all = composeConfig([
-      "compose.main.yaml",
-      "compose.capture.yaml",
-      "rehearsal/compose.rehearsal.yaml",
-    ]);
+// A-449 to A-451: one rehearsal overlay per project, each checked with its own project's file.
+describe("TP-16.17: the rehearsal overlays' compose config (A-392, A-449 to A-451)", () => {
+  interface RService {
+    image?: string;
+    command?: string[] | string;
+    environment?: Record<string, string | null>;
+    volumes?: { type?: string; source?: string; target?: string; read_only?: boolean }[];
+    extra_hosts?: string[] | Record<string, string | string[]>;
+    networks?: Record<string, { aliases?: string[] } | null>;
+  }
+  const CA = "/w/ca";
+  const rehearsalConfig = (project: "main" | "capture") => {
+    const args = [
+      "compose",
+      "--project-directory",
+      LOCAL,
+      "-p",
+      `budmon-${project}`,
+      "-f",
+      path.join(LOCAL, `compose.${project}.yaml`),
+      "-f",
+      path.join(LOCAL, `rehearsal/compose.rehearsal.${project}.yaml`),
+      "--env-file",
+      path.join(LOCAL, "local.env"),
+      // migrate is in profile tools.
+      "--profile",
+      "tools",
+      "config",
+      "--format",
+      "json",
+    ];
+    const result = spawnSync("docker", args, {
+      encoding: "utf8",
+      env: { ...process.env, BUDMON_HOME: home, BUDMON_TAG: "rehearsal", REHEARSAL_CA_DIR: CA },
+    });
+    return {
+      status: result.status,
+      stderr: result.stderr,
+      services:
+        result.status === 0
+          ? ((JSON.parse(result.stdout) as { services?: Record<string, RService> }).services ?? {})
+          : {},
+    };
+  };
+  const mounts = (sv: RService | undefined) =>
+    (sv?.volumes ?? []).map((v) => ({
+      source: path.posix.normalize(v.source ?? ""),
+      target: v.target,
+      readOnly: v.read_only === true,
+    }));
+  const hosts = (sv: RService | undefined): string[] => {
+    const raw = sv?.extra_hosts ?? [];
+    if (Array.isArray(raw)) return raw.map((h) => h.replace("=", ":"));
+    return Object.entries(raw).flatMap(([k, v]) =>
+      (Array.isArray(v) ? v : [v]).map((ip) => `${k}:${ip}`),
+    );
+  };
+  const COMMON = {
+    APP_ENV: "rehearsal",
+    KMS_PROVIDER: "local",
+    SENTRY_DSN: "https://rehearsal@sentry.rehearsal.invalid:8445/1",
+    NODE_EXTRA_CA_CERTS: "/run/rehearsal/ca.crt",
+  };
+  const CA_MOUNT = { source: `${CA}/ca.crt`, target: "/run/rehearsal/ca.crt", readOnly: true };
 
-    expect(all.status, all.stderr).toBe(0);
+  let main: ReturnType<typeof rehearsalConfig>;
+  let capture: ReturnType<typeof rehearsalConfig>;
+  beforeAll(() => {
+    main = rehearsalConfig("main");
+    capture = rehearsalConfig("capture");
+  });
+
+  it("TP-16.17 (a), (b): config of each project with its overlay exits 0", () => {
+    expect(main.status, main.stderr).toBe(0);
+    expect(capture.status, capture.stderr).toBe(0);
+  });
+
+  it.each(["api", "worker-general", "migrate"])(
+    "TP-16.17 (a): %s has the rehearsal variables and the read-only CA mount",
+    (name) => {
+      const sv = main.services[name];
+
+      expect(sv?.environment).toMatchObject(COMMON);
+      expect(mounts(sv)).toContainEqual(CA_MOUNT);
+    },
+  );
+
+  it("TP-16.17 (a): worker-general has the three FX URLs of F-195 step 4", () => {
+    expect(main.services["worker-general"]?.environment).toMatchObject({
+      FX_PRIMARY_BASE_URL: "https://fx.rehearsal.invalid:8444/oxr",
+      FX_FALLBACK_BASE_URL: "https://fx.rehearsal.invalid:8444/fawaz/{date}",
+      FX_FALLBACK_MIRROR_URL: "https://fx.rehearsal.invalid:8444/mirror/{date}",
+    });
+  });
+
+  it("TP-16.17 (a): s3 is the pinned S3 test image over TLS on :7070, aliased s3.rehearsal.invalid on egress", () => {
+    const s3 = main.services["s3"];
+    const command = Array.isArray(s3?.command) ? s3.command : [s3?.command ?? ""];
+
+    expect(s3?.image).toBe(
+      "versity/versitygw:v1.8.0@sha256:30292fc2eeacc67a36993b01f7a7a5e3361a19cced0e80c1d71cfa2a4b0a2499",
+    );
+    for (const part of ["--port", ":7070", "--cert", "--key", "posix", "/data"]) {
+      expect(command).toContain(part);
+    }
+    expect(s3?.networks?.["egress"]?.aliases).toContain("s3.rehearsal.invalid");
+  });
+
+  it("TP-16.17 (a): no main service mounts the capture key or sets CAPTURE_PRIVATE_KEY_FILE; no worker-capture", () => {
+    for (const [name, sv] of Object.entries(main.services)) {
+      for (const m of mounts(sv)) expect(m.source, name).not.toMatch(/^\/w\/capture-key(\/|$)/);
+      expect(sv.environment ?? {}, name).not.toHaveProperty("CAPTURE_PRIVATE_KEY_FILE");
+    }
+    expect(main.services).not.toHaveProperty("worker-capture");
+  });
+
+  it("TP-16.17 (b): worker-capture has the variables, the capture key and CA mounts, and the five extra_hosts", () => {
+    const wc = capture.services["worker-capture"];
+
+    expect(wc?.environment).toMatchObject({
+      ...COMMON,
+      CAPTURE_PRIVATE_KEY_FILE: "/run/rehearsal-capture/CAPTURE_PRIVATE_KEY",
+    });
+    expect(mounts(wc)).toContainEqual({
+      source: "/w/capture-key/CAPTURE_PRIVATE_KEY",
+      target: "/run/rehearsal-capture/CAPTURE_PRIVATE_KEY",
+      readOnly: true,
+    });
+    expect(mounts(wc)).toContainEqual(CA_MOUNT);
+    expect(hosts(wc)).toEqual(
+      expect.arrayContaining([
+        "oauth2.googleapis.com:host-gateway",
+        "www.googleapis.com:host-gateway",
+        "gmail.googleapis.com:host-gateway",
+        "pubsub.googleapis.com:host-gateway",
+        "sentry.rehearsal.invalid:host-gateway",
+      ]),
+    );
+  });
+
+  it("TP-16.17 (c): rehearsal/ holds exactly the two overlays", () => {
+    expect(readdirSync(path.join(LOCAL, "rehearsal")).sort()).toEqual([
+      "compose.rehearsal.capture.yaml",
+      "compose.rehearsal.main.yaml",
+    ]);
   });
 });
 
