@@ -67,20 +67,10 @@ fun UpdateRequiredScreen(
         Text(stringResource(R.string.update_required_title), style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
         Text(stringResource(R.string.update_required_body), textAlign = TextAlign.Center)
         if (pending > 0) {
-            // A count above 999 shows "999+"-style text, through the plural's "other" form.
+            // A-467: the real count picks the plural form; the text shows "999+" above 999.
             val text = capped(pending, 999)
             Text(
-                pluralStringResource(
-                    R.plurals.update_required_pending,
-                    if (pending >
-                        999
-                    ) {
-                        1000
-                    } else {
-                        pending
-                    },
-                    text,
-                ),
+                pluralStringResource(R.plurals.update_required_pending, pending, text),
                 textAlign = TextAlign.Center,
             )
         }
