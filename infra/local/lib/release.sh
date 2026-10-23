@@ -39,7 +39,10 @@ make_worktree() {
     if [ -n "${want}" ] && [ "${have}" = "${want}" ]; then
       return 0
     fi
-    git -C "${BUDMON_REPO}" worktree remove --force "${dir}" >/dev/null 2>&1 || rm -rf "${dir}"
+    if ! git -C "${BUDMON_REPO}" worktree remove --force "${dir}" >/dev/null 2>&1; then
+      rm -rf "${dir}"
+      git -C "${BUDMON_REPO}" worktree prune
+    fi
   fi
   mkdir -p "${BUDMON_HOME}/build"
   git -C "${BUDMON_REPO}" worktree add --detach "${dir}" "${tag}" >/dev/null 2>&1 ||
