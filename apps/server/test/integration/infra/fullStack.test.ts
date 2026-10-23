@@ -250,19 +250,27 @@ describe.skipIf(!INFRA_INT)("TP-15.3: pg_hba.conf on the laptop (F-175)", () => 
   });
 
   // A-432: the image runs as postgres (999) with every capability dropped.
-  it("TP-15.42 (I): postgres is healthy after first setup and runs with CapEff 0000000000000000", () => {
+  // A-448: Health.Status is healthy within 120 s.
+  it("TP-15.42 (I): postgres is healthy after first setup and runs with CapEff 0000000000000000", async () => {
     const id = compose(PROJECT, home, ["ps", "-q", "postgres"]).stdout.trim();
-    const health = sh("docker", [
-      "inspect",
-      "-f",
-      "{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}",
-      id,
-    ]);
-    expect(health.stdout.trim()).toBe("healthy");
+    const health = () =>
+      sh("docker", [
+        "inspect",
+        "-f",
+        "{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}",
+        id,
+      ]).stdout.trim();
+    const deadline = Date.now() + 120_000;
+    let state = health();
+    while (state !== "healthy" && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 1_000));
+      state = health();
+    }
+    expect(state).toBe("healthy");
     const status = sh("docker", ["exec", id, "cat", "/proc/1/status"]);
 
     expect(status.stdout).toMatch(/^CapEff:\s+0000000000000000$/m);
-  });
+  }, 150_000);
 
   it("TP-15.3: budmon_app to budmon_restore: rejected", () => {
     const r = probe({
@@ -785,7 +793,7 @@ describe.skipIf(!INFRA_INT)("TP-15.22 (I): install and restore on a real runner 
     expect(`${asApp.stdout}${asApp.stderr}`).not.toMatch(/"ok":\s*true/);
   }, 900_000);
 
-  it("TP-15.22 (I2): a truncated copy of a valid dump fails with 14; budmon keeps the seeded rows, /health/ready is 200, the safety dump restores", async () => {
+  it("TP-15.22 (I2): a truncated copy of a valid dump fails with 14 or 29 (A-447); budmon keeps the seeded rows, /health/ready is 200, the safety dump restores", async () => {
     const truncated = dumpPath("20261012T120100Z");
     const cut = bash(
       `size=$(stat -c %s '${firstDump}'); head -c $((size / 2)) '${firstDump}' > '${truncated}' && chmod 0600 '${truncated}'`,
@@ -794,13 +802,17 @@ describe.skipIf(!INFRA_INT)("TP-15.22 (I): install and restore on a real runner 
 
     const r = budmonLocal(["restore", truncated]);
 
-    expect(r.status, `${r.stdout}${r.stderr}`).toBe(14);
+    // A-447: 14 when the cut breaks the table of contents; a custom-format dump stores it first,
+    // so the listing can pass and pg_restore then fails in step 5 (29).
+    const out = `${r.stdout}${r.stderr}`;
+    expect([14, 29], out).toContain(r.status);
+    if (r.status === 29) expect(out).toContain("pg_restore into budmon_restore failed");
     expect(counts()).toBe(seeded);
     expect(await ready()).toBe(200);
     safetyDumpRestores("tp15_22_scratch_1");
   }, 900_000);
 
-  it("TP-15.22 (I2): a valid dump whose pg_restore fails half-way fails with 15 or 6; budmon keeps the seeded rows, /health/ready is 200, the safety dump restores", async () => {
+  it("TP-15.22 (I2): a valid dump whose pg_restore fails half-way fails with 29 (A-447); budmon keeps the seeded rows, /health/ready is 200, the safety dump restores", async () => {
     // A copy of budmon with a CHECK whose function turns false after the rows are in: pg_dump
     // writes the constraint before the data, so the restore's COPY fails part-way.
     const pg = container("main", "postgres");
@@ -826,7 +838,8 @@ describe.skipIf(!INFRA_INT)("TP-15.22 (I): install and restore on a real runner 
 
     const r = budmonLocal(["restore", crafted]);
 
-    expect([15, 6], `${r.stdout}${r.stderr}`).toContain(r.status);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(29);
+    expect(r.stderr).toContain("pg_restore into budmon_restore failed");
     expect(counts()).toBe(seeded);
     expect(await ready()).toBe(200);
     safetyDumpRestores("tp15_22_scratch_2");

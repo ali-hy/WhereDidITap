@@ -763,4 +763,41 @@ describe("TP-15.42: postgres runs with no capabilities (A-432)", () => {
     expect(pg?.cap_drop).toEqual(["ALL"]);
     expect(pg?.security_opt).toEqual(expect.arrayContaining(["no-new-privileges:true"]));
   });
+
+  it("TP-15.42 (A-448): postgres's healthcheck is pg_isready over the socket as budmon_admin", () => {
+    const raw = parse(read("infra/local/compose.main.yaml")) as {
+      services?: Record<string, { healthcheck?: Record<string, unknown> }>;
+    };
+
+    expect(raw.services?.["postgres"]?.healthcheck).toEqual({
+      test: [
+        "CMD",
+        "pg_isready",
+        "-q",
+        "-h",
+        "/var/run/postgresql",
+        "-U",
+        "budmon_admin",
+        "-d",
+        "postgres",
+      ],
+      interval: "5s",
+      timeout: "5s",
+      retries: 12,
+      start_period: "60s",
+    });
+  });
+
+  it.each(["api", "worker-general", "migrate"])(
+    "TP-15.42 (A-448): %s depends on postgres with condition service_healthy",
+    (name) => {
+      const raw = parse(read("infra/local/compose.main.yaml")) as {
+        services?: Record<string, { depends_on?: unknown }>;
+      };
+      const deps = raw.services?.[name]?.depends_on as
+        Record<string, { condition?: unknown }> | undefined;
+
+      expect(deps?.["postgres"]?.condition).toBe("service_healthy");
+    },
+  );
 });

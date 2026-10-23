@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createFsObjectStore } from "../../../src/platform/storage/fsObjectStore.js";
 import type { ObjectStore } from "../../../src/platform/storage/objectStore.js";
 import { recordingLogger } from "../../support/platform.js";
-import { EXPORT_ID, USER, exportKey } from "../../support/s10.js";
+import { USER, exportKey } from "../../support/s10.js";
 
 const ROOT_USER = process.getuid?.() === 0;
 const OTHER = "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0d";
@@ -86,30 +86,31 @@ describe.skipIf(ROOT_USER)("TP-10.13 (a): <root>/exports at mode 000 (A-439)", (
 });
 
 describe.skipIf(ROOT_USER)(
-  "TP-10.13 (b): <root>/exports at 0500 with an existing object (A-439)",
+  "TP-10.13 (b): the object's own parent directory at 0500 (A-439, A-440)",
   () => {
+    // users/<uuid>/exports: readable, not writable, so neither creating a file nor unlinking one works.
+    const parent = () => path.join(exportsDir, "users", USER, "exports");
+
     beforeEach(async () => {
       await store.put("exports", exportKey(), Buffer.from("x"), "application/zip");
-      chmodSync(exportsDir, 0o500);
+      chmodSync(parent(), 0o500);
+    });
+    afterEach(() => {
+      chmodSync(parent(), 0o700);
     });
 
-    it("TP-10.13 (b): put of a new key rejects with denied, cause EACCES", async () => {
+    it("TP-10.13 (b): put of a second key in that directory rejects with denied, cause EACCES", async () => {
       expectDenied(
         await rejection(
-          store.put(
-            "exports",
-            exportKey(EXPORT_ID, "zip", OTHER),
-            Buffer.from("y"),
-            "application/zip",
-          ),
+          store.put("exports", exportKey(OTHER), Buffer.from("y"), "application/zip"),
         ),
         "EACCES",
       );
     });
 
-    // Pending a planner answer: an exports key is users/<uuid>/exports/<id>.<ext>, so the object's
-    // parent directory isn't <root>/exports and stays writable; unlinking it succeeds at 0500.
-    it.todo("TP-10.13 (b): delete of the existing object rejects with denied, cause EACCES");
+    it("TP-10.13 (b): delete of the existing key rejects with denied, cause EACCES", async () => {
+      expectDenied(await rejection(store.delete("exports", exportKey())), "EACCES");
+    });
   },
 );
 

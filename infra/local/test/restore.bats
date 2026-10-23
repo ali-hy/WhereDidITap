@@ -16,6 +16,7 @@
 #   PG_FAIL_AFTER_READY      pg_isready fails once a readiness probe has failed (A-426 (b))
 #   PROBE_SLEEP / PG_PROBE_SLEEP  seconds each readiness / pg_isready probe takes (A-433)
 #   MIGRATE_FAIL             budmon_restore's migrate prints a log line and exits 1 (A-435)
+#   RESTORE_EXIT             `pg_restore` into budmon_restore (not --list) (default 0; A-447)
 #   DF_AVAIL_BYTES           free space reported by df (default 10^12)
 #
 # A-388: free space is `df -Pk -- <dir>` field 4 × 1024 (pg/, and dumps/ on another filesystem),
@@ -93,6 +94,11 @@ stub_docker() {
       printf '%s\n' "215; 1259 16390 TABLE public currencies budmon_migrator" "216; 1259 16400 TABLE pgboss job budmon_queue"
     fi
     return "${LIST_EXIT:-0}"
+  fi
+  if [[ "${all}" == *"pg_restore"* && "${all}" == *"budmon_restore"* ]]; then
+    cat >/dev/null
+    [ "${RESTORE_EXIT:-0}" != 0 ] && echo "pg_restore: error: stub failure" >&2
+    return "${RESTORE_EXIT:-0}"
   fi
   if [[ "${all}" == *"pg_dump"* ]]; then printf 'PGDMP-safety'; return "${SAFETY_EXIT:-0}"; fi
   if [[ "${all}" == *"restore:verify"* ]]; then echo '{"ok":true}'; return "${VERIFY_EXIT:-0}"; fi
@@ -175,6 +181,35 @@ events() {
   refute [ -e "${BUDMON_HOME}/maintenance/on" ]
   run cat "${BUDMON_HOME}/state"
   assert_line "current=v1.2.0"
+}
+
+# A-447: every step-5 failure exits 29 with its reason, after the safety dump's path.
+assert_step5_failure() {
+  local reason="$1"
+  assert_failure 29
+  [[ "${stderr}" =~ budmon-local:\ safety\ dump:\ [^$'\n']*dumps/[0-9]{8}T[0-9]{6}Z_v1\.2\.0_pre-restore\.dump$'\n'[^$'\n']*"${reason}" ]] ||
+    { echo "stderr: ${stderr}"; return 1; }
+  run events
+  refute_output --partial "migrate"
+  refute_output --partial "verify"
+  run grep -c "RENAME TO" "${CALLS}"
+  assert_output "0"
+  refute [ -e "${BUDMON_HOME}/maintenance/on" ]
+  run cat "${BUDMON_HOME}/state"
+  assert_line "current=v1.2.0"
+  assert_line "previous=v1.1.0"
+}
+
+@test "TP-15.22 (h8): pg_restore into budmon_restore failing exits 29 after the safety dump's path; no migrate, maintenance, rename or state change" {
+  export RESTORE_EXIT=1
+  BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.2.0/budmon-local" restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+  assert_step5_failure "pg_restore into budmon_restore failed"
+}
+
+@test "TP-15.22 (h8): the cluster bootstrap re-apply failing exits 29 after the safety dump's path; no migrate, maintenance, rename or state change" {
+  export SQL_FAIL_PATTERN="10-budmon\.sql\.tpl"
+  BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.2.0/budmon-local" restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+  assert_step5_failure "re-applying the cluster bootstrap failed"
 }
 
 @test "TP-15.22 (g2): a readiness timeout reverses the renames (budmon_restore_failed_<ts>), starts v1.2.0 again, keeps maintenance on, exit 16" {
