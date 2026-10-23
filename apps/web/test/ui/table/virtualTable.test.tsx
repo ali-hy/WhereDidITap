@@ -7,7 +7,12 @@ import { fireEvent, screen } from "@solidjs/testing-library";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { AppError } from "../../support/s11b.js";
 import { renderWithI18n } from "../../support/render.js";
-import { type Column, type InfiniteListSource, loadVirtualTable } from "../../support/s12.js";
+import {
+  type Column,
+  type InfiniteListSource,
+  loadInfiniteList,
+  loadVirtualTable,
+} from "../../support/s12.js";
 
 interface Row {
   id: string;
@@ -384,5 +389,98 @@ describe("TP-12.6x (T-4): keyboard (A-341)", () => {
     expect(stops).toHaveLength(1);
     expect(stops[0]?.getAttribute("role")).toBe("row");
     expect(stops[0]?.getAttribute("aria-rowindex")).toBe("2");
+  });
+});
+
+// A-458: the table owns the first-load and empty states; consumers supply only the empty content.
+describe("TP-12.2 (A-458): first load and empty", () => {
+  async function mountList(empty?: () => import("solid-js").JSX.Element) {
+    const { createInfiniteList } = await loadInfiniteList();
+    const { VirtualTable } = await loadVirtualTable();
+    let resolve: (page: { items: Row[]; nextCursor: string | null }) => void = () => undefined;
+    const fetchPage = vi.fn(
+      () =>
+        new Promise<{ items: Row[]; nextCursor: string | null }>((res) => {
+          resolve = res;
+        }),
+    );
+    const source = createInfiniteList<Row>({ fetchPage, pageSize: 10 });
+    const result = renderWithI18n(() => (
+      <VirtualTable<Row>
+        label="Transactions"
+        columns={COLUMNS}
+        source={source}
+        rowHeight={ROW_HEIGHT}
+        getRowId={(row) => row.id}
+        {...(empty === undefined ? {} : { empty })}
+      />
+    ));
+    const grid = await screen.findByRole("grid");
+    return {
+      ...result,
+      grid,
+      fetchPage,
+      settle: (p: { items: Row[]; nextCursor: string | null }) => {
+        resolve(p);
+      },
+    };
+  }
+
+  it("TP-12.2 (A-458): while the first page is pending: aria-busy, aria-rowcount -1, 3 hidden placeholder rows without aria-rowindex or tabindex", async () => {
+    const { grid, fetchPage } = await mountList();
+    await vi.waitFor(() => {
+      expect(fetchPage).toHaveBeenCalled();
+    });
+
+    expect(grid.getAttribute("aria-busy")).toBe("true");
+    expect(grid.getAttribute("aria-rowcount")).toBe("-1");
+    const skeletons = [
+      ...grid.querySelectorAll<HTMLElement>('[data-placeholder][aria-hidden="true"]'),
+    ];
+    expect(skeletons).toHaveLength(3);
+    for (const row of skeletons) {
+      expect(row.hasAttribute("aria-rowindex")).toBe(false);
+      expect(row.hasAttribute("tabindex")).toBe(false);
+      expect(row.style.height).toBe(`${String(ROW_HEIGHT)}px`);
+    }
+  });
+
+  it("TP-12.2 (A-458): resolved empty, no empty prop: no aria-busy, aria-rowcount 1, only the header row, div[data-empty] after the grid with Nothing to show yet., described by it", async () => {
+    const { grid, fetchPage, settle } = await mountList();
+    await vi.waitFor(() => {
+      expect(fetchPage).toHaveBeenCalled();
+    });
+
+    settle({ items: [], nextCursor: null });
+
+    await vi.waitFor(() => {
+      expect(grid.hasAttribute("aria-busy")).toBe(false);
+    });
+    expect(grid.getAttribute("aria-rowcount")).toBe("1");
+    expect(grid.querySelectorAll('[role="row"]')).toHaveLength(1);
+    const emptyEl = document.querySelector<HTMLElement>("div[data-empty]");
+    expect(emptyEl).not.toBeNull();
+    expect(grid.contains(emptyEl)).toBe(false);
+    expect(
+      grid.compareDocumentPosition(emptyEl as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(emptyEl?.textContent).toContain("Nothing to show yet.");
+    expect(emptyEl?.id).not.toBe("");
+    expect(grid.getAttribute("aria-describedby")).toBe(emptyEl?.id);
+  });
+
+  it("TP-12.2 (A-458): resolved empty with empty = Add button: the button renders in div[data-empty]", async () => {
+    const { grid, fetchPage, settle } = await mountList(() => <button>Add</button>);
+    await vi.waitFor(() => {
+      expect(fetchPage).toHaveBeenCalled();
+    });
+
+    settle({ items: [], nextCursor: null });
+
+    const add = await screen.findByRole("button", { name: "Add" });
+    const emptyEl = add.closest("div[data-empty]");
+    expect(emptyEl).not.toBeNull();
+    expect(grid.contains(add)).toBe(false);
+    expect(grid.getAttribute("aria-describedby")).toBe(emptyEl?.id);
   });
 });
