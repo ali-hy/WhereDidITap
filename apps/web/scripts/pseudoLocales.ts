@@ -100,11 +100,22 @@ function literalElement(value: string): MessageFormatElement {
   return { type: TYPE.literal, value };
 }
 
-/** Accented look-alikes, `~` padding (one per 3 characters), the whole wrapped as `[…]`. */
+/**
+ * `~` padding, one per 3 characters, in groups of at most 3 separated by spaces, so a long message's
+ * padding can wrap instead of overflowing a narrow screen (Q-D3).
+ */
+function padding(length: number): string {
+  const count = Math.floor(length / 3);
+  const groups: string[] = [];
+  for (let left = count; left > 0; left -= 3) groups.push("~".repeat(Math.min(3, left)));
+  return groups.join(" ");
+}
+
+/** Accented look-alikes, breakable `~` padding (one per 3 characters), the whole wrapped as `[…]`. */
 export function toAccented(icuMessage: string): string {
   const ast = mapLiterals(parse(icuMessage), (text) => {
     const accented = text.replace(/[A-Za-z]/g, (ch) => ACCENTS[ch] ?? ch);
-    return accented + "~".repeat(Math.floor(text.length / 3));
+    return accented + padding(text.length);
   });
   return print([literalElement("["), ...ast, literalElement("]")]);
 }

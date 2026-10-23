@@ -14,14 +14,23 @@ import { NotFound } from "./pages/NotFound.js";
 import { announce } from "./ui/a11y.js";
 import { ErrorFallback } from "./ui/ErrorFallback.js";
 
-function RootLayout(): JSX.Element {
+/** The layout's frame; the error fallback renders inside it too (§4.18, Q-D2). */
+function Shell(props: { children: JSX.Element }): JSX.Element {
   return (
     <>
       <header />
       <main id="main" class="mx-auto max-w-[40rem] p-4">
-        <Outlet />
+        {props.children}
       </main>
     </>
+  );
+}
+
+function RootLayout(): JSX.Element {
+  return (
+    <Shell>
+      <Outlet />
+    </Shell>
   );
 }
 
@@ -35,13 +44,16 @@ export async function createAppRouter() {
     component: RootLayout,
     errorComponent: (props: ErrorComponentProps) => {
       const error = toAppError(props.error);
+      // The root's errorComponent replaces RootLayout, so it brings the layout's frame with it.
       return (
-        <ErrorFallback
-          error={error}
-          {...(error.requestId === undefined ? {} : { requestId: error.requestId })}
-          stillFailing={retryFailed()}
-          onRetry={() => retry()}
-        />
+        <Shell>
+          <ErrorFallback
+            error={error}
+            {...(error.requestId === undefined ? {} : { requestId: error.requestId })}
+            stillFailing={retryFailed()}
+            onRetry={() => retry()}
+          />
+        </Shell>
       );
     },
     notFoundComponent: NotFound,

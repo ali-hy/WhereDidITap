@@ -32,19 +32,19 @@ export function ErrorFallback(props: {
     }
   };
 
-  /** "Reference: {ref}" around a <bdi dir="ltr"> holding the first 8 characters. */
-  const reference = (requestId: string) => {
-    const [before = "", after = ""] = t(messages.errorReference, { ref: SLOT })
-      .replace(/[⁨⁩]/g, "")
-      .split(SLOT);
-    return (
-      <p>
-        {before}
-        <bdi dir="ltr">{requestId.slice(0, 8)}</bdi>
-        {after}
-      </p>
-    );
-  };
+  /**
+   * "Reference: {ref}" around a <bdi dir="ltr"> holding the first 8 characters. The parts are read
+   * in JSX, so they follow the catalog and setLocale like the other strings (Q-D1).
+   */
+  const referenceParts = (): string[] =>
+    t(messages.errorReference, { ref: SLOT }).replace(/[⁨⁩]/g, "").split(SLOT);
+  const reference = (requestId: () => string) => (
+    <p>
+      {referenceParts()[0] ?? ""}
+      <bdi dir="ltr">{requestId().slice(0, 8)}</bdi>
+      {referenceParts()[1] ?? ""}
+    </p>
+  );
 
   return (
     <section class="mx-auto max-w-[40rem] p-4">
@@ -52,7 +52,7 @@ export function ErrorFallback(props: {
         {t(messages.errorFallbackTitle)}
       </h1>
       <p>{t(messages.errorFallbackBody)}</p>
-      <Show when={props.requestId}>{(id) => reference(id())}</Show>
+      <Show when={props.requestId}>{(id) => reference(id)}</Show>
       <div class="mt-4 flex gap-4">
         <button
           type="button"
