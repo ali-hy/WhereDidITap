@@ -182,6 +182,14 @@ val checkReleaseApiBaseUrl = tasks.register("checkReleaseApiBaseUrl") {
 tasks.matching { it.name == "preDebugBuild" }.configureEach { dependsOn(checkDebugApiBaseUrl) }
 tasks.matching { it.name == "preReleaseBuild" }.configureEach { dependsOn(checkReleaseApiBaseUrl) }
 
+// A-348: gradleTestKit() puts the running Gradle's own kotlin-stdlib (newer metadata than Kotlin
+// 2.2.20 reads) on the unit-test classpath; only the unit-test compilation skips that check.
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    if (name.endsWith("UnitTestKotlin")) {
+        compilerOptions.freeCompilerArgs.add("-Xskip-metadata-version-check")
+    }
+}
+
 // A-348: the TestKit cases build a copy of this project.
 tasks.withType<Test>().configureEach {
     systemProperty("budmon.androidRoot", rootDir.path)
