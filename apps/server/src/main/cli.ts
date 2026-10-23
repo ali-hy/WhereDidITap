@@ -3,7 +3,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
-import { Temporal, isUuid } from "@budmon/shared";
+import { Temporal, isUuid, systemClock, utcDateOf, type Clock } from "@budmon/shared";
 import { EXIT_CONFIG, loadConfigOrReport } from "../platform/config/startup.js";
 import { describeFailure } from "../platform/observability/describeFailure.js";
 import { createLogger } from "../platform/observability/logger.js";
@@ -21,6 +21,8 @@ import { buildJobRegistry } from "../platform/queue/appRegistry.js";
 import { createPgBoss } from "../platform/queue/workers.js";
 import { installProxySupport } from "../platform/crypto/proxy.js";
 import type { WorkerRole } from "../platform/queue/jobs.js";
+import { fxBackfillJob } from "../platform/fx/fxJobs.js";
+import { FX_FALLBACK_FIRST_DATE } from "../platform/fx/fxService.js";
 
 const EXIT_USAGE = 64;
 const USAGE = [
@@ -31,6 +33,7 @@ const USAGE = [
   "  jobs:dead redrive --role capture|general --id <uuid>",
   "  restore:verify",
   "  erasure:replay --since <RFC 3339 instant>",
+  "  fx:backfill --date <YYYY-MM-DD>",
 ].join("\n");
 /** F-93: restore:verify's report isn't ok. */
 const EXIT_RESTORE_NOT_OK = 6;
@@ -182,12 +185,75 @@ async function erasureReplay(
   }
 }
 
+/** A-444: the date `fx:backfill --date` names, or undefined when the arguments are wrong. */
+function backfillDate(args: readonly string[]): string | undefined {
+  const [flag, value] = args;
+  if (args.length !== 2 || flag !== "--date" || value === undefined) return undefined;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
+  try {
+    return Temporal.PlainDate.from(value, { overflow: "reject" }).toString();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * F-93 fx:backfill (A-444; kind worker, general): enqueues F-137 for one date, singleton by date.
+ * Arguments and the date range are checked before any configuration is read.
+ */
+async function fxBackfill(
+  args: readonly string[],
+  env: Readonly<Record<string, string | undefined>>,
+  io: Io,
+  clock: Clock,
+): Promise<number> {
+  const rateDate = backfillDate(args);
+  if (rateDate === undefined) {
+    io.stderr(USAGE);
+    return EXIT_USAGE;
+  }
+  const today = utcDateOf(clock.now()).toString();
+  if (rateDate < FX_FALLBACK_FIRST_DATE || rateDate >= today) {
+    io.stderr("date out of range");
+    return 2;
+  }
+  const config = loadConfigOrReport(
+    "worker",
+    { ...env, WORKER_ROLES: "general" },
+    readFileSync,
+    io.stderr,
+  );
+  if (config === null) return EXIT_CONFIG;
+  const logger = cliLogger(config);
+  const boss = createPgBoss(config, "cli", logger);
+  const database = createDatabase(config.db, { applicationName: "budmon-cli" });
+  try {
+    await boss.start();
+    const queue = createJobQueue({ boss, registry: buildJobRegistry() });
+    // Autocommit; pg-boss answers null for a duplicate singleton.
+    const id = await queue.enqueue(
+      database.handle,
+      fxBackfillJob,
+      { rateDate },
+      { singletonKey: rateDate },
+    );
+    io.stdout(JSON.stringify({ enqueued: id !== null }));
+    return 0;
+  } catch (error) {
+    logger.error("cli_failed", describeFailure(error));
+    return 1;
+  } finally {
+    await boss.stop({ graceful: false });
+    await database.close();
+  }
+}
+
 export async function runCli(
   argv: readonly string[],
   env: Readonly<Record<string, string | undefined>>,
   io: Io,
-  /** A-288: restore:verify's migrations folder (tests use a fixture). */
-  deps: { migrationsFolder?: string } = {},
+  /** A-288: restore:verify's migrations folder (tests use a fixture); fx:backfill's clock. */
+  deps: { migrationsFolder?: string; clock?: Clock } = {},
 ): Promise<number> {
   // F-122: first.
   installProxySupport(env);
@@ -198,6 +264,9 @@ export async function runCli(
     return restoreVerify(env, io, deps.migrationsFolder ?? path.join(serverRoot(), "drizzle"));
   if (command === "erasure:replay") {
     return erasureReplay(argv.slice(1), env, io);
+  }
+  if (command === "fx:backfill") {
+    return fxBackfill(argv.slice(1), env, io, deps.clock ?? systemClock);
   }
   if (command !== "jobs:dead" || (sub !== "list" && sub !== "redrive")) {
     io.stderr(`Unknown command: ${[command, sub].filter((x) => x !== undefined).join(" ")}`);
