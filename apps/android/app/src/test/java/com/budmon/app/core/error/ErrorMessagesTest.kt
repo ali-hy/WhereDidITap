@@ -13,18 +13,17 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class ErrorMessagesTest {
-    private fun defined(key: String, status: Int, vararg data: Pair<String, Any>) =
-        ApiError.Defined(
-            key,
-            status,
-            if (data.isEmpty()) {
-                null
-            } else {
-                buildJsonObject {
-                    for ((k, v) in data) put(k, if (v is Number) JsonPrimitive(v) else JsonPrimitive(v.toString()))
-                }
-            },
-        )
+    private fun defined(key: String, status: Int, vararg data: Pair<String, Any>) = ApiError.Defined(
+        key,
+        status,
+        if (data.isEmpty()) {
+            null
+        } else {
+            buildJsonObject {
+                for ((k, v) in data) put(k, if (v is Number) JsonPrimitive(v) else JsonPrimitive(v.toString()))
+            }
+        },
+    )
 
     private fun check(error: ApiError, op: Operation, resId: Int) {
         assertEquals(resId, ErrorMessages.forError(error, op).resId)
@@ -64,7 +63,7 @@ class ErrorMessagesTest {
     }
 
     @Test
-    fun `TP-13_3 SERVICE_UNAVAILABLE unknown on a non-read is error_generic_unknown_outcome; otherwise unavailable`() {
+    fun `TP-13_3 SERVICE_UNAVAILABLE unknown on a non-read is error_generic_unknown_outcome, otherwise unavailable`() {
         check(defined("SERVICE_UNAVAILABLE", 503, "outcome" to "unknown"), Operation.Create, R.string.error_generic_unknown_outcome)
         check(defined("SERVICE_UNAVAILABLE", 503, "outcome" to "unknown"), Operation.Read, R.string.error_unavailable)
         check(defined("SERVICE_UNAVAILABLE", 503, "outcome" to "not_applied"), Operation.Create, R.string.error_unavailable)

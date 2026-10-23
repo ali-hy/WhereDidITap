@@ -19,10 +19,6 @@ import com.budmon.app.core.update.UpdateState
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
-import java.time.Clock
-import java.time.Instant
-import java.time.ZoneOffset
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
@@ -37,6 +33,10 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 class SyncWorkerTest {
@@ -68,21 +68,25 @@ class SyncWorkerTest {
         server.shutdown()
     }
 
-    private suspend fun add(key: String, ageMs: Long = 0, status: String = "PENDING", body: ByteArray = """{"k":"$key"}""".toByteArray()): Long =
-        dao.insert(
-            OutboxEntry(
-                id = 0,
-                idempotencyKey = key,
-                method = "POST",
-                path = "/api/v1/things",
-                body = body,
-                contentType = "application/json",
-                createdAtEpochMs = now.toEpochMilli() - ageMs,
-                status = status,
-                lastErrorKey = null,
-                attempts = 0,
-            ),
-        )
+    private suspend fun add(
+        key: String,
+        ageMs: Long = 0,
+        status: String = "PENDING",
+        body: ByteArray = """{"k":"$key"}""".toByteArray(),
+    ): Long = dao.insert(
+        OutboxEntry(
+            id = 0,
+            idempotencyKey = key,
+            method = "POST",
+            path = "/api/v1/things",
+            body = body,
+            contentType = "application/json",
+            createdAtEpochMs = now.toEpochMilli() - ageMs,
+            status = status,
+            lastErrorKey = null,
+            attempts = 0,
+        ),
+    )
 
     private suspend fun run(): ListenableWorker.Result {
         val context = ApplicationProvider.getApplicationContext<Context>()
@@ -98,11 +102,12 @@ class SyncWorkerTest {
         .setHeader("Content-Type", "application/json")
         .setBody("""{"defined":true,"code":"$code","status":$status,"message":"x"${data?.let { ",\"data\":$it" } ?: ""}}""")
 
-    private suspend fun statusOf(key: String) =
-        db.query("SELECT status FROM outbox WHERE idempotencyKey = ?", arrayOf(key)).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+    private suspend fun statusOf(key: String) = db.query("SELECT status FROM outbox WHERE idempotencyKey = ?", arrayOf(key)).use { c ->
+        if (c.moveToFirst()) c.getString(0) else null
+    }
 
     @Test
-    fun `TP-13_5 an entry left in SENDING is reset and sent with the stored bytes and key; 201 deletes it`() = runTest {
+    fun `TP-13_5 an entry left in SENDING is reset and sent with the stored bytes and key, 201 deletes it`() = runTest {
         val body = byteArrayOf(0x7b, 0x22, 0x61, 0x22, 0x3a, 0x31, 0x7d)
         add("sending-key", status = "SENDING", body = body)
         server.enqueue(MockResponse().setResponseCode(201).setBody("{}"))
@@ -137,7 +142,10 @@ class SyncWorkerTest {
         run()
 
         assertEquals("FAILED", statusOf("bad"))
-        val key = db.query("SELECT lastErrorKey FROM outbox WHERE idempotencyKey = 'bad'", null).use { c -> c.moveToFirst(); c.getString(0) }
+        val key = db.query("SELECT lastErrorKey FROM outbox WHERE idempotencyKey = 'bad'", null).use { c ->
+            c.moveToFirst()
+            c.getString(0)
+        }
         assertEquals("VALIDATION_FAILED", key)
     }
 
@@ -222,7 +230,10 @@ class SyncWorkerTest {
 
         run()
 
-        val attempts = db.query("SELECT attempts FROM outbox WHERE idempotencyKey = 'count'", null).use { c -> c.moveToFirst(); c.getInt(0) }
+        val attempts = db.query("SELECT attempts FROM outbox WHERE idempotencyKey = 'count'", null).use { c ->
+            c.moveToFirst()
+            c.getInt(0)
+        }
         assertEquals(1, attempts)
     }
 }

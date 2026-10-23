@@ -5,8 +5,6 @@
 // and the request tag class IdempotencyKey(value: UUID).
 package com.budmon.app.core.network
 
-import java.util.UUID
-import kotlin.random.Random
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.mockwebserver.MockResponse
@@ -17,6 +15,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.util.UUID
+import kotlin.random.Random
 
 class InterceptorsTest {
     private lateinit var server: MockWebServer

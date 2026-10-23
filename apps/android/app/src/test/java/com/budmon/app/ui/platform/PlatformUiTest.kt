@@ -28,7 +28,11 @@ class PlatformUiTest {
     @get:Rule
     val compose = createComposeRule()
 
-    private fun set(direction: LayoutDirection = LayoutDirection.Ltr, fontScale: Float = 1f, content: @androidx.compose.runtime.Composable () -> Unit) {
+    private fun set(
+        direction: LayoutDirection = LayoutDirection.Ltr,
+        fontScale: Float = 1f,
+        content: @androidx.compose.runtime.Composable () -> Unit,
+    ) {
         compose.setContent {
             CompositionLocalProvider(
                 LocalLayoutDirection provides direction,

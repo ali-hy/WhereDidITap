@@ -8,14 +8,14 @@
 // AgpPaths.kt.
 package com.budmon.app.build
 
-import java.io.File
-import java.nio.file.Files
 import org.gradle.testkit.runner.BuildResult
 import org.gradle.testkit.runner.GradleRunner
 import org.junit.After
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.File
+import java.nio.file.Files
 
 class BuildPropertiesTest {
     private val source: File = File(checkNotNull(System.getProperty("budmon.androidRoot")) { "budmon.androidRoot not set" })
@@ -64,7 +64,7 @@ class BuildPropertiesTest {
     }
 
     @Test
-    fun `TP-13_16 assembleRelease with https and a trailing slash succeeds, and BuildConfig has it; release permits no cleartext`() {
+    fun `TP-13_16 assembleRelease with https and a trailing slash succeeds, and BuildConfig has it, release permits no cleartext`() {
         succeeds(":app:assembleRelease", "-Pbudmon.apiBaseUrl=https://x.ts.net/")
 
         assertTrue(buildConfig("release").contains("API_BASE_URL = \"https://x.ts.net/\""))
@@ -73,7 +73,7 @@ class BuildPropertiesTest {
     }
 
     @Test
-    fun `TP-13_16 assembleDebug without the property uses http 10_0_2_2 5173; cleartext only to 10_0_2_2, localhost and 127_0_0_1 (A-349)`() {
+    fun `TP-13_16 assembleDebug without the property uses http 10_0_2_2 5173, cleartext only to 10_0_2_2, localhost, 127_0_0_1 (A-349)`() {
         succeeds(":app:assembleDebug")
 
         assertTrue(buildConfig("debug").contains("API_BASE_URL = \"http://10.0.2.2:5173/\""))
@@ -86,7 +86,7 @@ class BuildPropertiesTest {
     }
 
     @Test
-    fun `TP-13_16 assembleDebug with port 8080 fails; with 3000 succeeds; with an https host fails`() {
+    fun `TP-13_16 assembleDebug with port 8080 fails, with 3000 succeeds, with an https host fails`() {
         assertTrue(fails(":app:assembleDebug", "-Pbudmon.apiBaseUrl=http://10.0.2.2:8080/").output.contains("budmon.apiBaseUrl"))
         succeeds(":app:assembleDebug", "-Pbudmon.apiBaseUrl=http://10.0.2.2:3000/")
         assertTrue(buildConfig("debug").contains("API_BASE_URL = \"http://10.0.2.2:3000/\""))
@@ -96,7 +96,7 @@ class BuildPropertiesTest {
     // ---- TP-13.17 (F-265) ----
 
     @Test
-    fun `TP-13_17 budmon_googleServerClientId is copied into BuildConfig; missing gives an empty string`() {
+    fun `TP-13_17 budmon_googleServerClientId is copied into BuildConfig, missing gives an empty string`() {
         succeeds(":app:assembleDebug", "-Pbudmon.googleServerClientId=123-abc.apps.googleusercontent.com")
         assertTrue(buildConfig("debug").contains("GOOGLE_SERVER_CLIENT_ID = \"123-abc.apps.googleusercontent.com\""))
 

@@ -8,8 +8,6 @@
 // MoneyRangeError beyond ±(2^53 − 1).
 package com.budmon.app.core.money
 
-import java.math.BigInteger
-import java.util.Locale
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -23,6 +21,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.math.BigInteger
+import java.util.Locale
 
 @RunWith(RobolectricTestRunner::class)
 class MoneyVectorsTest {
@@ -51,7 +51,8 @@ class MoneyVectorsTest {
     @Test
     fun `TP-13_9 allocate vectors`() {
         for (c in cases("allocate")) {
-            val parts = allocate(Money.of(big(c.s("minor")), c.s("currency")), (c["weights"] as JsonArray).map { big(it.jsonPrimitive.content) })
+            val parts =
+                allocate(Money.of(big(c.s("minor")), c.s("currency")), (c["weights"] as JsonArray).map { big(it.jsonPrimitive.content) })
             assertEquals(c.toString(), (c["expected"] as JsonArray).map { big(it.jsonPrimitive.content) }, parts.map { it.minor })
         }
     }
@@ -91,7 +92,7 @@ class MoneyVectorsTest {
     }
 
     @Test
-    fun `TP-13_9 format vectors, normalised (A-37); a mismatch fails, nothing is skipped`() {
+    fun `TP-13_9 format vectors, normalised (A-37), a mismatch fails, nothing is skipped`() {
         val all = cases("format")
         assertTrue(all.isNotEmpty())
         for (c in all) {

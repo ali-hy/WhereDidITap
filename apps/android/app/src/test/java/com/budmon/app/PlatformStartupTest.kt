@@ -13,9 +13,9 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.testing.WorkManagerTestInitHelper
 import com.budmon.app.core.observability.SentryScrubber
+import com.budmon.app.core.startup.PlatformStartup
 import io.sentry.Sentry
 import io.sentry.android.core.SentryAndroidOptions
-import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -23,6 +23,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 class PlatformStartupTest {
@@ -50,7 +51,7 @@ class PlatformStartupTest {
     }
 
     @Test
-    fun `TP-13_14 an empty DSN doesn't call sentryInit; outbox-sync is enqueued every 15 minutes, CONNECTED`() {
+    fun `TP-13_14 an empty DSN doesn't call sentryInit, outbox-sync is enqueued every 15 minutes, CONNECTED`() {
         PlatformStartup.run(app, "", workManager, sentryInit)
 
         assertTrue(recorded.isEmpty())
@@ -58,7 +59,7 @@ class PlatformStartupTest {
     }
 
     @Test
-    fun `TP-13_14 a DSN calls sentryInit once with F-260's options; outbox-sync is enqueued`() {
+    fun `TP-13_14 a DSN calls sentryInit once with F-260's options, outbox-sync is enqueued`() {
         val dsn = "https://k@o1.ingest.sentry.io/1"
 
         PlatformStartup.run(app, dsn, workManager, sentryInit)

@@ -42,7 +42,7 @@ class ComposeTextLiteralDetectorTest : LintDetectorTest() {
         ).indented(),
     )
 
-    fun `test TP-13_10 Text("Hello") is an error`() {
+    fun testTp1310TextHelloIsAnError() {
         lint().files(
             *stubs,
             kotlin(
@@ -56,7 +56,7 @@ class ComposeTextLiteralDetectorTest : LintDetectorTest() {
         ).run().expectErrorCount(1).expectContains("BudmonHardcodedComposeText")
     }
 
-    fun `test TP-13_10 Text(stringResource(R_string_x)) is ok`() {
+    fun testTp1310TextStringResourceIsOk() {
         lint().files(
             *stubs,
             kotlin(
@@ -71,7 +71,7 @@ class ComposeTextLiteralDetectorTest : LintDetectorTest() {
         ).run().expectClean()
     }
 
-    fun `test TP-13_10 Icon with contentDescription = "x" is an error`() {
+    fun testTp1310IconContentDescriptionLiteralIsAnError() {
         lint().files(
             *stubs,
             kotlin(
@@ -85,7 +85,7 @@ class ComposeTextLiteralDetectorTest : LintDetectorTest() {
         ).run().expectErrorCount(1).expectContains("BudmonHardcodedComposeText")
     }
 
-    fun `test TP-13_10 a string template in Text is an error; a variable is ok`() {
+    fun testTp1310StringTemplateInTextIsAnErrorVariableIsOk() {
         lint().files(
             *stubs,
             kotlin(

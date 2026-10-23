@@ -15,11 +15,6 @@ import com.budmon.api.models.ClientConfigAndroid
 import com.budmon.api.models.ClientConfigWeb
 import io.mockk.coEvery
 import io.mockk.mockk
-import java.io.File
-import java.time.Clock
-import java.time.Duration
-import java.time.Instant
-import java.time.ZoneOffset
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -27,6 +22,11 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import retrofit2.Response
+import java.io.File
+import java.time.Clock
+import java.time.Duration
+import java.time.Instant
+import java.time.ZoneOffset
 
 @RunWith(RobolectricTestRunner::class)
 class UpdateRepositoryTest {
@@ -46,11 +46,16 @@ class UpdateRepositoryTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val file = File(context.filesDir, "update-$versionCode-${System.nanoTime()}.preferences_pb")
         val store = PreferenceDataStoreFactory.create(scope = backgroundScope) { file }
-        return UpdateRepository(api(min = 5, latest = 7), store, versionCode, object : Clock() {
-            override fun getZone() = ZoneOffset.UTC
-            override fun withZone(zone: java.time.ZoneId?) = this
-            override fun instant(): Instant = clock().instant()
-        })
+        return UpdateRepository(
+            api(min = 5, latest = 7),
+            store,
+            versionCode,
+            object : Clock() {
+                override fun getZone() = ZoneOffset.UTC
+                override fun withZone(zone: java.time.ZoneId?) = this
+                override fun instant(): Instant = clock().instant()
+            },
+        )
     }
 
     @Test
@@ -66,7 +71,7 @@ class UpdateRepositoryTest {
     }
 
     @Test
-    fun `TP-13_6 dismissing Available hides it; 3 days later it is Available again`() = runTest {
+    fun `TP-13_6 dismissing Available hides it, 3 days later it is Available again`() = runTest {
         var now = start
         val repo = repository(6) { Clock.fixed(now, ZoneOffset.UTC) }
         repo.refresh()

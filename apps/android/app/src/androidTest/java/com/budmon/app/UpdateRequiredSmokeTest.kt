@@ -16,8 +16,6 @@ import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
 import dagger.hilt.components.SingletonComponent
 import dagger.hilt.testing.TestInstallIn
-import javax.inject.Named
-import javax.inject.Singleton
 import okhttp3.HttpUrl
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -28,6 +26,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
+import javax.inject.Named
+import javax.inject.Singleton
 
 /** The stub API, started once per process before Hilt builds the graph. */
 object StubApi {
