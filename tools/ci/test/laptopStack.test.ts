@@ -937,3 +937,45 @@ describe("TP-15.42: postgres runs with no capabilities (A-432)", () => {
     },
   );
 });
+
+// A-455: the runbook's recovery section, by layout.
+describe('TP-15.46: runbook "A restore didn\'t finish" (A-455)', () => {
+  /** From the heading or bullet naming the section to the next heading or top-level bullet. */
+  const section = (): string => {
+    const lines = read("infra/runbooks/stage0-laptop.md").split("\n");
+    const start = lines.findIndex(
+      (l) => /^(#+ |[-*] )/.test(l) && l.includes("A restore didn't finish"),
+    );
+    if (start < 0) return "";
+    const head = lines[start] ?? "";
+    const level = /^(#+) /.exec(head)?.[1]?.length;
+    const end = lines.findIndex((l, i) => {
+      if (i <= start) return false;
+      if (level !== undefined) {
+        const m = /^(#+) /.exec(l);
+        return m !== null && (m[1]?.length ?? 0) <= level;
+      }
+      return /^(#+ |[-*] )/.test(l);
+    });
+    return lines.slice(start, end < 0 ? undefined : end).join("\n");
+  };
+
+  it("TP-15.46: the section exists", () => {
+    expect(section()).not.toBe("");
+  });
+
+  it.each(["L1", "L2", "L3-done", "L3-undo", "L3-same", "L4", "L5", "none"])(
+    "TP-15.46: it names layout %s",
+    (layout) => {
+      expect(section()).toMatch(new RegExp(`(^|[^\\w-])${layout.replace("-", "\\-")}($|[^\\w-])`));
+    },
+  );
+
+  it("TP-15.46: it contains ln -sfn and pg_terminate_backend, and no DROP DATABASE", () => {
+    const text = section();
+
+    expect(text).toContain("ln -sfn");
+    expect(text).toContain("pg_terminate_backend");
+    expect(text).not.toMatch(/DROP DATABASE/i);
+  });
+});
