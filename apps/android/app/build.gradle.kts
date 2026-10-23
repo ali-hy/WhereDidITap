@@ -41,7 +41,8 @@ fun quoted(value: String): String = "\"" + value.replace("\\", "\\\\").replace("
 
 android {
     namespace = "com.budmon.app"
-    compileSdk = 36
+    // OkHttp 5.5.0's AAR metadata requires compiling against API 37 (targetSdk is separate).
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.budmon.app"
@@ -79,14 +80,13 @@ android {
 
     sourceSets {
         // AGP 9 takes no Provider here; the generator's output directory, resolved once.
-        getByName("main").java.srcDir(
+        getByName("main").java.directories +=
             layout.buildDirectory
                 .dir("generated/openapi/src/main/kotlin")
                 .get()
-                .asFile,
-        )
+                .asFile.path
         // TP-13.9: the shared money vectors (F-313).
-        getByName("test").resources.srcDir("$rootDir/../../packages/shared/test-vectors")
+        getByName("test").resources.directories += "$rootDir/../../packages/shared/test-vectors"
     }
 
     testOptions {
@@ -157,7 +157,7 @@ tasks.matching { it.name.startsWith("ksp") || it.name.startsWith("runKtlint") }.
 
 // F-264: each build type checks its own URL when it's built, so a release property never fails a
 // debug build (or the reverse).
-val checkDebugApiBaseUrl by tasks.registering {
+val checkDebugApiBaseUrl = tasks.register("checkDebugApiBaseUrl") {
     val url = debugApiBaseUrl
     doLast {
         val port = Regex("""^http://10\.0\.2\.2:(\d+)/$""").matchEntire(url)?.groupValues?.get(1)
@@ -168,7 +168,7 @@ val checkDebugApiBaseUrl by tasks.registering {
 }
 
 /** F-264: a release build fails without an https:// base URL ending in `/`. */
-val checkReleaseApiBaseUrl by tasks.registering {
+val checkReleaseApiBaseUrl = tasks.register("checkReleaseApiBaseUrl") {
     val url = releaseApiBaseUrl
     doLast {
         require(url != null && url.startsWith("https://") && url.endsWith("/")) {
