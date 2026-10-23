@@ -1,10 +1,7 @@
-# F-195 step 4: the rehearsal overlay, added to both laptop files by the harness (composeArgs). It
-# points the stack at the harness's fakes and test services; nothing here is used on the laptop.
-#   - APP_ENV=rehearsal with KMS_PROVIDER=local (worker-capture decrypts with the run's key);
-#   - the S3 test image for B2 (A-287), with its buckets created by the harness as folders;
-#   - fake FX (F-197), fake Google (F-196) and the Sentry sink (F-194) on the runner host, reached
-#     through host-gateway with the harness CA as NODE_EXTRA_CA_CERTS (A-24, A-443).
-# REHEARSAL_CA_DIR is <workDir>/ca: ca.crt, the S3 test image's certificate and the capture key.
+# F-195 step 4 (A-449): the rehearsal overlay for budmon-main, added by the harness's composeArgs.
+# Nothing in it is used on the laptop. It points api, worker-general and migrate at the harness's
+# fakes (host-gateway, trusting the harness CA) and adds the S3 test image over TLS (A-450).
+# REHEARSAL_CA_DIR is <workDir>/ca, so ${REHEARSAL_CA_DIR}/.. is <workDir>.
 
 x-rehearsal-env: &rehearsal-env
   APP_ENV: rehearsal
@@ -44,23 +41,6 @@ services:
     volumes:
       - *rehearsal-ca
 
-  worker-capture:
-    environment:
-      <<: *rehearsal-env
-      CAPTURE_PRIVATE_KEY_FILE: /run/rehearsal/capture.key
-    extra_hosts:
-      - "oauth2.googleapis.com:host-gateway"
-      - "www.googleapis.com:host-gateway"
-      - "gmail.googleapis.com:host-gateway"
-      - "pubsub.googleapis.com:host-gateway"
-      - "sentry.rehearsal.invalid:host-gateway"
-    volumes:
-      - *rehearsal-ca
-      - type: bind
-        source: ${REHEARSAL_CA_DIR}/capture.key
-        target: /run/rehearsal/capture.key
-        read_only: true
-
   migrate:
     environment:
       <<: *rehearsal-env
@@ -70,10 +50,18 @@ services:
       - *rehearsal-ca
 
   s3:
-    # A-287's S3 test image, standing in for B2 over TLS (S3_ENDPOINT must be https outside
-    # development and test).
     image: versity/versitygw:v1.8.0@sha256:30292fc2eeacc67a36993b01f7a7a5e3361a19cced0e80c1d71cfa2a4b0a2499
-    command: ["--cert", "/run/rehearsal/s3.crt", "--key", "/run/rehearsal/s3.key", "posix", "/data"]
+    command:
+      [
+        "--port",
+        ":7070",
+        "--cert",
+        "/run/rehearsal/s3.crt",
+        "--key",
+        "/run/rehearsal/s3.key",
+        "posix",
+        "/data",
+      ]
     environment:
       ROOT_ACCESS_KEY: rehearsal-access-key
       ROOT_SECRET_KEY: rehearsal-secret-key

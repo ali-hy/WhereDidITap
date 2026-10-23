@@ -1,0 +1,28 @@
+# F-195 step 4 (A-449): the rehearsal overlay for budmon-capture, added by the harness's
+# composeArgs. Nothing in it is used on the laptop. worker-capture reaches the fake Google and the
+# Sentry sink through host-gateway, trusts the harness CA, and decrypts with the run's capture key
+# (A-451), mounted read-only from <workDir>/capture-key (REHEARSAL_CA_DIR is <workDir>/ca).
+
+services:
+  worker-capture:
+    environment:
+      APP_ENV: rehearsal
+      KMS_PROVIDER: local
+      SENTRY_DSN: https://rehearsal@sentry.rehearsal.invalid:8445/1
+      NODE_EXTRA_CA_CERTS: /run/rehearsal/ca.crt
+      CAPTURE_PRIVATE_KEY_FILE: /run/rehearsal-capture/CAPTURE_PRIVATE_KEY
+    extra_hosts:
+      - "oauth2.googleapis.com:host-gateway"
+      - "www.googleapis.com:host-gateway"
+      - "gmail.googleapis.com:host-gateway"
+      - "pubsub.googleapis.com:host-gateway"
+      - "sentry.rehearsal.invalid:host-gateway"
+    volumes:
+      - type: bind
+        source: ${REHEARSAL_CA_DIR}/ca.crt
+        target: /run/rehearsal/ca.crt
+        read_only: true
+      - type: bind
+        source: ${REHEARSAL_CA_DIR}/../capture-key/CAPTURE_PRIVATE_KEY
+        target: /run/rehearsal-capture/CAPTURE_PRIVATE_KEY
+        read_only: true

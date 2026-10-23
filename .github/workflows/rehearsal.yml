@@ -49,8 +49,10 @@ jobs:
       - name: Rehearse (F-195)
         env:
           PREVIOUS: ${{ steps.previous.outputs.tag }}
+          HEAD_REF: ${{ github.head_ref }}
           TMPDIR: ${{ runner.temp }}
-        run: pnpm --filter @budmon/tools-rehearsal rehearse --previous "$PREVIOUS"
+        # A-452: the candidate's version is the head branch's suffix, as A-411 does for F-183.
+        run: pnpm --filter @budmon/tools-rehearsal rehearse --previous "$PREVIOUS" --version "${HEAD_REF#*/}"
       - name: Rehearsal artifacts
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

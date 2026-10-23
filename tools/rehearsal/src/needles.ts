@@ -13,11 +13,17 @@ export const REHEARSAL_PORTS = {
   fxTls: 8444,
   fxControl: 18082,
   sentryTls: 8445,
+  /** A-452: the throwaway Postgres of step 6, on the runner's loopback. */
+  upgradePg: 15433,
 } as const;
+/** A-443; s3 (A-450) is a network alias on egress, port 7070 inside Docker. */
 export const REHEARSAL_HOSTS = {
   fx: "fx.rehearsal.invalid",
   sentry: "sentry.rehearsal.invalid",
+  s3: "s3.rehearsal.invalid",
 } as const;
+/** A-454: https, as F-10 requires; .invalid never resolves, so rehearsal e-mail links lead nowhere. */
+export const REHEARSAL_PUBLIC_ORIGIN = "https://rehearsal.budmon.invalid";
 
 export interface Needle {
   name: string;

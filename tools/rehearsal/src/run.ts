@@ -4,7 +4,7 @@
 // `deps.exec` (child processes), `deps.http` (HTTP) or `deps.services` (the fakes), each call tagged
 // with the record name it belongs to, so a unit run can replace any of them.
 import { generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import path from "node:path";
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
@@ -15,6 +15,7 @@ import {
   REHEARSAL_HOSTS,
   REHEARSAL_OWNER_EMAIL,
   REHEARSAL_PORTS,
+  REHEARSAL_PUBLIC_ORIGIN,
   REHEARSAL_SIGNIN_CLIENT_ID,
   scanForNeedles,
   type Needle,
@@ -104,6 +105,8 @@ export interface RunningServices {
 }
 export interface RehearsalOptions {
   previousTag: string | null;
+  /** A-452: the candidate's version; selects apps/server/test/upgrade/<version>/. */
+  version: string;
   images: { server: string; web: string; postgres: string };
   workDir: string;
   repoRoot: string;
@@ -168,7 +171,7 @@ export function composeArgs(
     "-f",
     `${r}/compose.${project}.yaml`,
     "-f",
-    `${r}/rehearsal/compose.rehearsal.yaml`,
+    `${r}/rehearsal/compose.rehearsal.${project}.yaml`,
     "--env-file",
     `${r}/local.env`,
   ];
@@ -176,6 +179,16 @@ export function composeArgs(
 
 function caDir(ctx: RehearsalContext): string {
   return path.join(ctx.opts.workDir, "ca");
+}
+
+/** A-451: the capture private key's folder, outside BUDMON_HOME and ca/. */
+function captureKeyDir(ctx: Pick<RehearsalContext, "opts">): string {
+  return path.join(ctx.opts.workDir, "capture-key");
+}
+
+/** apps/server/test/upgrade/<version>/ (A-452). */
+function upgradeCaseDir(ctx: RehearsalContext): string {
+  return path.join(ctx.opts.repoRoot, "apps/server/test/upgrade", ctx.opts.version);
 }
 
 function stackEnv(ctx: RehearsalContext, tag = "rehearsal"): Record<string, string> {
@@ -480,10 +493,10 @@ function placeholderValues(capturePublicPem: string): Record<string, string> {
 
 function siteEnv(): string {
   return [
-    "PUBLIC_ORIGIN=https://rehearsal.budmon.invalid",
+    `PUBLIC_ORIGIN=${REHEARSAL_PUBLIC_ORIGIN}`,
     "CAPTURE_KEY_VERSION=local:1",
     "GOOGLE_OAUTH_CLIENT_ID=123-rehearsal.apps.googleusercontent.com",
-    "S3_ENDPOINT=https://s3.rehearsal.invalid:7070",
+    `S3_ENDPOINT=https://${REHEARSAL_HOSTS.s3}:7070`,
     "S3_REGION=us-east-1",
     "S3_BUCKET_EXPORTS=budmon-exports",
     "S3_BUCKET_ERASURE_LOG=budmon-erasure-log",
@@ -587,12 +600,35 @@ const secretsStep: StepFn = (ctx) =>
       ),
       "secret_set",
     );
-    // KMS_PROVIDER=local: worker-capture decrypts with this run's private key (CAPTURE_KEY_VERSION
-    // local:1); the public half fills the CAPTURE_PUBLIC_KEY placeholders.
+    // A-451: KMS_PROVIDER=local, so worker-capture decrypts with this run's private key
+    // (CAPTURE_KEY_VERSION local:1), owned by its UID at 0400 in a 0500 folder outside ca/; the
+    // public half fills the CAPTURE_PUBLIC_KEY placeholders.
     const pair = generateKeyPairSync("rsa", { modulusLength: 3072 });
-    await x("install", ["-m", "0644", "/dev/stdin", path.join(ca, "capture.key")], "capture_key", {
-      input: pair.privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
-    });
+    const privatePem = pair.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+    const keyDir = captureKeyDir(ctx);
+    await x(
+      "sudo",
+      ["install", "-d", "-o", "10003", "-g", "10003", "-m", "0500", keyDir],
+      "capture_key",
+    );
+    await x(
+      "sudo",
+      [
+        "install",
+        "-o",
+        "10003",
+        "-g",
+        "10003",
+        "-m",
+        "0400",
+        "/dev/stdin",
+        path.join(keyDir, "CAPTURE_PRIVATE_KEY"),
+      ],
+      "capture_key",
+      { input: privatePem },
+    );
+    const firstLine = privatePem.split("\n")[1] ?? "";
+    ctx.needles.push({ name: "capture-private-key", value: firstLine });
     const publicPem = pair.publicKey.export({ type: "spki", format: "pem" }).toString();
     for (const [rel, value] of Object.entries(placeholderValues(publicPem))) {
       await must(secretSet(ctx, step, rel, value), "secret_set");
@@ -693,6 +729,36 @@ const previousDbStep: StepFn = (ctx) =>
     const previous = ctx.opts.previousTag;
     if (previous === null) return ok();
     await must(runMigrate(ctx, step, previous), "previous_migrate");
+    // A-452: the candidate's upgrade fixtures, as the superuser over the socket, in one transaction.
+    const fixtures = path.join(upgradeCaseDir(ctx), "fixtures.sql");
+    if (existsSync(fixtures)) {
+      await must(
+        compose(
+          ctx,
+          step,
+          "main",
+          [
+            "exec",
+            "-T",
+            "-u",
+            "postgres",
+            "postgres",
+            "psql",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-X",
+            "-q",
+            "-1",
+            "-U",
+            "budmon_admin",
+            "-d",
+            "budmon",
+          ],
+          { input: readFileSync(fixtures, "utf8") },
+        ),
+        "fixtures_failed",
+      );
+    }
     return ok();
   });
 
@@ -715,7 +781,7 @@ const stackUpStep: StepFn = (ctx) =>
     const google = await leafCertificate(ctx, step, "google", GOOGLE_NAMES);
     const fx = await leafCertificate(ctx, step, "fx", [REHEARSAL_HOSTS.fx]);
     const sentry = await leafCertificate(ctx, step, "sentry", [REHEARSAL_HOSTS.sentry]);
-    await leafCertificate(ctx, step, "s3", ["s3.rehearsal.invalid"]);
+    await leafCertificate(ctx, step, "s3", [REHEARSAL_HOSTS.s3]);
     // Readable by the containers' users through the read-only mount.
     await must(ctx.exec("chmod", ["-R", "a+rX", caDir(ctx)], { step }), "ca_mode");
     ctx.running.google = await ctx.services.startFakeGoogle({
@@ -744,10 +810,159 @@ const readyStep: StepFn = (ctx) => waitReady(ctx, "ready");
 
 // ---- step 6 ----
 
-// F-183's tests need the candidate's version folder and a database URL the runner can reach; F-195
-// names neither for the rehearsal's internal-only Postgres (reported to the planner), so this step
-// fails rather than passing unchecked.
-const upgradeAssertionsStep: StepFn = () => Promise.resolve(fail("upgrade_assertions_unspecified"));
+const UPGRADE_PG = "budmon-rehearsal-upgrade";
+
+/** The first FROM of images/postgres/Dockerfile: the base Postgres image (never budmon/postgres). */
+function basePostgresImage(ctx: RehearsalContext): string {
+  const dockerfile = readFileSync(
+    path.join(ctx.opts.repoRoot, "images/postgres/Dockerfile"),
+    "utf8",
+  );
+  const image = /^FROM\s+(\S+)/m.exec(dockerfile)?.[1];
+  if (image === undefined) throw new StepFailure("upgrade_pg_failed");
+  return image;
+}
+
+/**
+ * A-452: F-183's tests against a copy of the migrated database in a throwaway Postgres on the
+ * runner's loopback (the rehearsal's Postgres is internal and admits the superuser only over its
+ * socket).
+ */
+const upgradeAssertionsStep: StepFn = async (ctx) => {
+  const step = "upgrade-assertions";
+  const caseDir = upgradeCaseDir(ctx);
+  const files = existsSync(caseDir)
+    ? readdirSync(caseDir)
+        .filter((f) => f.endsWith(".test.ts"))
+        .sort()
+    : [];
+  if (files.length === 0) return ok(`skipped: no upgrade tests for ${ctx.opts.version}`);
+  const env = stackEnv(ctx);
+  const dump = path.join(ctx.opts.workDir, "upgrade.dump");
+  const dumped = await ctx.exec(
+    "sh",
+    [
+      "-c",
+      '"$@" > "$DUMP"',
+      "sh",
+      "docker",
+      ...composeArgs(ctx, "main"),
+      "exec",
+      "-T",
+      "-u",
+      "postgres",
+      "postgres",
+      "pg_dump",
+      "-Fc",
+      "-U",
+      "budmon_admin",
+      "budmon",
+    ],
+    { step, env: { ...env, DUMP: dump } },
+  );
+  if (dumped.code !== 0) return fail("upgrade_dump_failed");
+  const roles = await adminSql(
+    ctx,
+    step,
+    "SELECT rolname FROM pg_roles WHERE rolname LIKE 'budmon\\_%' ORDER BY 1",
+  );
+  const names = roles.stdout.split("\n").filter((l) => l !== "");
+  if (roles.code !== 0 || names.some((n) => !/^budmon_[a-z_]+$/.test(n)))
+    return fail("upgrade_roles_failed");
+
+  const password = randomBytes(24).toString("base64url");
+  const image = basePostgresImage(ctx);
+  const started = await ctx.exec(
+    "docker",
+    [
+      "run",
+      "-d",
+      "--rm",
+      "--name",
+      UPGRADE_PG,
+      "-e",
+      "POSTGRES_PASSWORD",
+      "-p",
+      `127.0.0.1:${String(REHEARSAL_PORTS.upgradePg)}:5432`,
+      image,
+    ],
+    { step, env: { POSTGRES_PASSWORD: password } },
+  );
+  try {
+    if (started.code !== 0) return fail("upgrade_pg_failed");
+    const pending = await poll(ctx, 60_000, 1_000, async () => {
+      const r = await ctx.exec(
+        "docker",
+        ["exec", UPGRADE_PG, "pg_isready", "-q", "-h", "127.0.0.1", "-U", "postgres"],
+        { step },
+      );
+      return r.code === 0 ? null : "postgres";
+    });
+    if (pending !== null) return fail("upgrade_pg_not_ready");
+    const prepared = await ctx.exec(
+      "docker",
+      [
+        "exec",
+        "-i",
+        UPGRADE_PG,
+        "psql",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-X",
+        "-q",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+      ],
+      {
+        step,
+        input: [
+          ...names.map((n) => `CREATE ROLE "${n}" NOLOGIN;`),
+          "CREATE DATABASE budmon;",
+          "",
+        ].join("\n"),
+      },
+    );
+    if (prepared.code !== 0) return fail("upgrade_restore_failed");
+    const restored = await ctx.exec(
+      "sh",
+      [
+        "-c",
+        '"$@" < "$DUMP"',
+        "sh",
+        "docker",
+        "exec",
+        "-i",
+        UPGRADE_PG,
+        "pg_restore",
+        "--exit-on-error",
+        "-U",
+        "postgres",
+        "-d",
+        "budmon",
+      ],
+      { step, env: { DUMP: dump } },
+    );
+    if (restored.code !== 0) return fail("upgrade_restore_failed");
+    const run = await ctx.exec(
+      path.join(ctx.opts.repoRoot, "node_modules/.bin/vitest"),
+      ["run", "--root", caseDir, ...files],
+      {
+        step,
+        cwd: ctx.opts.repoRoot,
+        env: {
+          UPGRADE_DATABASE_URL: `postgresql://postgres:${password}@127.0.0.1:${String(REHEARSAL_PORTS.upgradePg)}/budmon`,
+        },
+        timeoutMs: 600_000,
+      },
+    );
+    return run.code === 0 ? ok() : fail("upgrade_assertions_failed");
+  } finally {
+    await ctx.exec("docker", ["rm", "-f", UPGRADE_PG], { step }).catch(() => undefined);
+    await ctx.exec("rm", ["-f", dump], { step }).catch(() => undefined);
+  }
+};
 
 // ---- step 7: canary flows and the identity sub-steps ----
 
@@ -1115,15 +1330,16 @@ const noStageSettingStep: StepFn = async (ctx) => {
 const crossRoleSecretsStep: StepFn = async (ctx) => {
   const step = "cross-role-secrets";
   const found: string[] = [];
-  for (const [project, other] of [
-    ["main", "/secrets/capture"],
-    ["capture", "/secrets/main"],
+  // A-451: the capture key folder belongs to the capture project only.
+  for (const [project, others] of [
+    ["main", ["/secrets/capture", captureKeyDir(ctx)]],
+    ["capture", ["/secrets/main"]],
   ] as const) {
     for (const id of await containers(ctx, step, project)) {
       const info = await inspect(ctx, step, id);
       const mounts = field(info, "Mounts");
       const sources = Array.isArray(mounts) ? mounts.map((m) => String(field(m, "Source"))) : [];
-      if (sources.some((s) => s.includes(other))) found.push(serviceOf(info) || id);
+      if (sources.some((s) => others.some((o) => s.includes(o)))) found.push(serviceOf(info) || id);
     }
   }
   if (found.length > 0) return fail(`cross_role_mount: ${found.join(", ")}`);
@@ -1463,6 +1679,8 @@ const defaultCleanup: StepFn = async (ctx) => {
       failures.push(name);
     }
   }
+  // A-452: step 6's throwaway Postgres, if it outlived the step; a failure here is ignored.
+  await ctx.exec("docker", ["rm", "-f", UPGRADE_PG], { step }).catch(() => undefined);
   for (const project of ["capture", "main"] as const) {
     const r = await compose(ctx, step, project, [
       "--profile",
@@ -1474,7 +1692,7 @@ const defaultCleanup: StepFn = async (ctx) => {
     if (r.code !== 0) failures.push(`down_${project}`);
   }
   await ctx.exec("docker", ["network", "rm", "budmon_capture_db"], { step });
-  const rm = await ctx.exec("sudo", ["rm", "-rf", ctx.budmonHome], { step });
+  const rm = await ctx.exec("sudo", ["rm", "-rf", ctx.budmonHome, captureKeyDir(ctx)], { step });
   if (rm.code !== 0) failures.push("home");
   return failures.length === 0 ? ok() : fail(`cleanup: ${failures.join(", ")}`);
 };
