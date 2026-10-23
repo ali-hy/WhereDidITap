@@ -266,16 +266,16 @@ cmd_restore() {
     die "$1" "$2"
   }
   admin_sql "${current}" "DROP DATABASE IF EXISTS budmon_restore WITH (FORCE)" >/dev/null ||
-    restore_fail 1 "dropping budmon_restore failed"
+    restore_fail 29 "dropping budmon_restore failed"
   admin_sql "${current}" "CREATE DATABASE budmon_restore OWNER budmon_migrator" >/dev/null ||
-    restore_fail 1 "creating budmon_restore failed"
+    restore_fail 29 "creating budmon_restore failed"
   compose_for "${current}" main exec -T -u postgres postgres \
     pg_restore --exit-on-error -U budmon_admin -d budmon_restore <"${file}" >/dev/null ||
-    restore_fail 1 "pg_restore into budmon_restore failed"
+    restore_fail 29 "pg_restore into budmon_restore failed"
   # shellcheck disable=SC2016 # expanded inside the container
   compose_for "${current}" main exec -T -u postgres postgres sh -c \
     'BUDMON_MIGRATOR_PASSWORD="$(cat /run/secrets/MIGRATOR_VERIFIER)" psql -v ON_ERROR_STOP=1 -X -U budmon_admin -d postgres -v dbname=budmon_restore -f /docker-entrypoint-initdb.d/10-budmon.sql.tpl' \
-    </dev/null >/dev/null || restore_fail 1 "re-applying the cluster bootstrap failed"
+    </dev/null >/dev/null || restore_fail 29 "re-applying the cluster bootstrap failed"
 
   # 6. The dump's release migrates and verifies it, as the migrate service.
   local migrate_out

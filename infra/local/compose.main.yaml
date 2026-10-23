@@ -71,7 +71,9 @@ services:
       test: ["CMD", "node", "dist/main/healthcheck.js", "--ready"]
       interval: 15s
       retries: 4
-    depends_on: [postgres]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   worker-general:
     <<: *app
@@ -103,7 +105,9 @@ services:
       test: ["CMD", "node", "dist/main/healthcheck.js", "--heartbeat"]
       interval: 15s
       retries: 4
-    depends_on: [postgres]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   migrate:
     <<: *app
@@ -125,6 +129,10 @@ services:
         source: ${BUDMON_HOME}/secrets/main/migrate
         target: /run/secrets
         read_only: true
+    # A-448: compose run migrate waits for a healthy Postgres.
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   postgres:
     image: budmon/postgres:${BUDMON_TAG:?BUDMON_TAG is not set}
@@ -165,6 +173,24 @@ services:
         source: ./postgres/pg_ident.conf
         target: /etc/budmon/pg_ident.conf
         read_only: true
+    # A-448: on the socket, as a real role and database, so the probe logs nothing.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "pg_isready",
+          "-q",
+          "-h",
+          "/var/run/postgresql",
+          "-U",
+          "budmon_admin",
+          "-d",
+          "postgres",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
     stop_grace_period: 60s
 
   mailpit:
