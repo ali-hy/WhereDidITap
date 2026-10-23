@@ -11,7 +11,8 @@ import { loadRun, type RunModule } from "./support/load.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.join(HERE, "../src/cli.ts");
-const TSX = path.join(HERE, "../../../node_modules/.bin/tsx");
+// The package's own tsx (a devDependency of @budmon/tools-rehearsal); the root doesn't declare one.
+const TSX = path.join(HERE, "../node_modules/.bin/tsx");
 const USAGE = "usage: rehearse --previous <tag|none> --version <vX.Y.Z[-hotfix.N]>";
 
 let m: RunModule;
@@ -59,6 +60,7 @@ describe("TP-16.21: the CLI's arguments (A-452)", () => {
   ])("TP-16.21: %j is accepted (not exit 64, no usage line)", (args) => {
     const r = cli(args);
 
+    expect(r.error, String(r.error)).toBeUndefined();
     expect(r.status, r.stderr).not.toBe(64);
     expect(r.stderr).not.toContain(USAGE);
   });
@@ -71,7 +73,8 @@ describe("TP-16.21: the CLI's arguments (A-452)", () => {
   ])("TP-16.21: %j exits 64 with the usage line", (args) => {
     const r = cli(args);
 
-    expect(r.status).toBe(64);
+    expect(r.error, String(r.error)).toBeUndefined();
+    expect(r.status, r.stderr).toBe(64);
     expect(r.stderr).toContain(USAGE);
   });
 });
