@@ -889,11 +889,17 @@ describe.skipIf(!INFRA_INT)("TP-15.22 (I): install and restore on a real runner 
     expect(r.status, `${r.stdout}${r.stderr}`).toBe(16);
     expect(r.stderr).toContain("isn't ready on the restored database");
     expect(counts()).toBe(seeded);
+    // The listing goes into the message, so a failure shows what the databases are called.
+    const databases = adminSql(
+      "SELECT string_agg(datname, ',' ORDER BY datname) FROM pg_database",
+      "postgres",
+    ).stdout.trim();
     expect(
       adminSql(
         "SELECT count(*) FROM pg_database WHERE datname ~ '^budmon_restore_failed_[0-9]{8}T[0-9]{6}Z$'",
         "postgres",
       ).stdout.trim(),
+      `pg_database: ${databases}`,
     ).not.toBe("0");
     expect(existsSync(path.join(home, "restore.inprogress"))).toBe(false);
 
