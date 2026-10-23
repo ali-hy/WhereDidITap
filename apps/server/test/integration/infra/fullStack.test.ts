@@ -9,7 +9,15 @@
 //   - TP-15.34 (I): listen_addresses in the stack, and in the image started alone (A-418).
 //   - TP-15.22 (I1, I2): a real install of a throwaway tag (a temporary origin whose default branch
 //     is master), then restores of a seeded dump, a truncated dump and one failing half-way.
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { createHash, createHmac, generateKeyPairSync, pbkdf2Sync, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -455,6 +463,7 @@ describe.skipIf(!INFRA_INT)("TP-15.22 (I): install and restore on a real runner 
   let home = "";
   let work = "";
   let repoDir = "";
+  let origin = "";
   /** The seeded database's per-table row counts, as "table=count,…". */
   let seeded = "";
   let firstDump = "";
@@ -566,7 +575,7 @@ describe.skipIf(!INFRA_INT)("TP-15.22 (I): install and restore on a real runner 
     // A throwaway origin whose default branch is master: this commit, then a release commit adding
     // the server's baseline migration (as a real first release has; before it, migrate builds no
     // tables, A-179), tagged TAG.
-    const origin = path.join(work, "origin.git");
+    origin = path.join(work, "origin.git");
     repoDir = path.join(work, "repo");
     const git = (args: readonly string[], cwd?: string) => {
       const r = sh("git", cwd === undefined ? args : ["-C", cwd, ...args]);
@@ -844,4 +853,57 @@ describe.skipIf(!INFRA_INT)("TP-15.22 (I): install and restore on a real runner 
     expect(await ready()).toBe(200);
     safetyDumpRestores("tp15_22_scratch_2");
   }, 900_000);
+
+  // The restore's rollback on a real runner (PR nit): a second release whose api never becomes
+  // ready (its configuration names a key file that doesn't exist, so it exits at start-up).
+  it("TP-15.22 (I3): restore of a dump of a release that never becomes ready exits 16; budmon keeps the seeded rows, budmon_restore_failed_<ts> is kept, no marker, and /health/ready is 200 once maintenance is off", async () => {
+    const BROKEN = "v0.0.2";
+    const git = (args: readonly string[], cwd: string) => {
+      const r = sh("git", ["-C", cwd, ...args]);
+      if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
+    };
+    const compose = path.join(repoDir, "infra/local/compose.main.yaml");
+    writeFileSync(
+      compose,
+      readFileSync(compose, "utf8").replaceAll(
+        "CAPTURE_PUBLIC_KEY_FILE: /run/secrets/CAPTURE_PUBLIC_KEY",
+        "CAPTURE_PUBLIC_KEY_FILE: /run/secrets/NO_SUCH_KEY",
+      ),
+    );
+    git(["add", "infra/local/compose.main.yaml"], repoDir);
+    git(
+      ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", BROKEN],
+      repoDir,
+    );
+    git(["push", "-q", "origin", "HEAD:refs/heads/master"], repoDir);
+    git(["tag", BROKEN, "master"], origin);
+    const dump = path.join(home, "dumps", `20261012T120300Z_${BROKEN}.dump`);
+    copyFileSync(firstDump, dump);
+    bash(`chmod 0600 '${dump}'`);
+
+    const r = sh(path.join(LOCAL, "budmon-local"), ["restore", dump], {
+      env: { ...env(), BUDMON_READY_TIMEOUT: "1" },
+      timeoutMs: 1_500_000,
+    });
+
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(16);
+    expect(r.stderr).toContain("isn't ready on the restored database");
+    expect(counts()).toBe(seeded);
+    expect(
+      adminSql(
+        "SELECT count(*) FROM pg_database WHERE datname ~ '^budmon_restore_failed_[0-9]{8}T[0-9]{6}Z$'",
+        "postgres",
+      ).stdout.trim(),
+    ).not.toBe("0");
+    expect(existsSync(path.join(home, "restore.inprogress"))).toBe(false);
+
+    const off = budmonLocal(["maintenance", "off"]);
+    expect(off.status, off.stderr).toBe(0);
+    let status = 0;
+    for (let i = 0; i < 120 && status !== 200; i += 1) {
+      status = await ready().catch(() => 0);
+      if (status !== 200) await new Promise((res) => setTimeout(res, 1_000));
+    }
+    expect(status).toBe(200);
+  }, 1_700_000);
 });

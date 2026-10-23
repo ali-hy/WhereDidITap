@@ -72,9 +72,7 @@ const isUpgradePgReady = (c: Call) =>
 const isRunContainer = (c: Call) => c.cmd === "docker" && c.args[0] === "run";
 const isVitest = (c: Call) => c.cmd.endsWith("node_modules/.bin/vitest");
 
-async function run(
-  answer: (c: Call) => number | undefined = () => undefined,
-): Promise<{
+async function run(answer: (c: Call) => number | undefined = () => undefined): Promise<{
   result: Awaited<ReturnType<RunModule["runRehearsal"]>>;
   calls: Call[];
   called: string[];

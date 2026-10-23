@@ -346,6 +346,33 @@ assert_step5_failure() {
   assert_line "current=v1.2.0"
 }
 
+@test "TP-15.22 (h7): the second rename failing 3 times exits 24, renames budmon_old_<ts> back, re-opens budmon, no marker, state unchanged" {
+  export SQL_FAIL_PATTERN="budmon_restore RENAME TO budmon( |;|$)"
+  run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+  assert_failure 24
+  assert_output --partial "budmon_restore is still in use; the names are restored"
+  run grep -c "budmon_restore RENAME TO budmon" "${CALLS}"
+  assert_output "3"
+  run bash -c "awk -F'\t' '\$1==\"sql\" { print \$2 }' '${CALLS}' | tr '\n' ' '"
+  [[ "${output}" =~ budmon_old_[0-9]{8}T[0-9]{6}Z\ RENAME\ TO\ budmon ]] || { echo "${output}"; return 1; }
+  [[ "${output}" == *"budmon_restore RENAME TO budmon"*"RENAME TO budmon"*"ALTER DATABASE budmon WITH ALLOW_CONNECTIONS true"* ]] || { echo "${output}"; return 1; }
+  [ ! -e "${BUDMON_HOME}/restore.inprogress" ]
+  run cat "${BUDMON_HOME}/state"
+  assert_line "current=v1.2.0"
+}
+
+@test "TP-15.22 (h8): dropping budmon_restore failing exits 29 after the safety dump's path; no migrate, maintenance, rename or state change" {
+  export SQL_FAIL_PATTERN="DROP DATABASE IF EXISTS budmon_restore"
+  BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.2.0/budmon-local" restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+  assert_step5_failure "dropping budmon_restore failed"
+}
+
+@test "TP-15.22 (h8): creating budmon_restore failing exits 29 after the safety dump's path; no migrate, maintenance, rename or state change" {
+  export SQL_FAIL_PATTERN="CREATE DATABASE budmon_restore"
+  BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.2.0/budmon-local" restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+  assert_step5_failure "creating budmon_restore failed"
+}
+
 # ---- TP-15.36 (A-426): the rollback stops only the app and checks every step ----
 
 # The rollback's part of $CALLS: everything after the last readiness probe.

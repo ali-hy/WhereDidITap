@@ -590,6 +590,11 @@ describe("TP-14.11 (A-437): tag.yml's job graph isolates the outputs", () => {
     f.git("checkout", "-q", "--detach", f.commits.merge);
     const verified = runJob(jobs["verify"], f.work, withResolve, stubEnv);
     expect(verified.status, verified.output).toBe(0);
+    // The attack happened: the forging pnpm ran in verify and its values reached verify's own
+    // outputs, which tag must not read.
+    expect(readFileSync(log, "utf8")).toMatch(/^pnpm /m);
+    expect(verified.outputs["commit"]).toBe("f".repeat(40));
+    expect(verified.outputs["tag"]).toBe("v9.9.9");
 
     const tagged = runJob(jobs["tag"], f.work, withResolve, stubEnv);
     expect(tagged.status, tagged.output).toBe(0);
