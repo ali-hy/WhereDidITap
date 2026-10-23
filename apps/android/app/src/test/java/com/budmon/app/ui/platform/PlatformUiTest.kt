@@ -6,13 +6,20 @@
 package com.budmon.app.ui.platform
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -116,14 +123,69 @@ class PlatformUiTest {
         compose.onNodeWithText("You're offline. New entries are saved on this phone and sync when you're back online.").assertIsDisplayed()
     }
 
+    /** Every text node lies horizontally inside the root (review B-7: the root is the window). */
+    private fun assertTextsInsideRoot() {
+        val root = compose.onRoot().fetchSemanticsNode().boundsInRoot
+        val texts = compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text)).fetchSemanticsNodes()
+        assertTrue("no text nodes", texts.isNotEmpty())
+        for (node in texts) {
+            val b = node.boundsInRoot
+            val label = node.config.getOrNull(SemanticsProperties.Text)?.joinToString() ?: "?"
+            assertTrue("$label: $b outside $root", b.left >= root.left - 1f && b.right <= root.right + 1f)
+            assertTrue("$label has no width", b.width > 0f)
+        }
+    }
+
     @Test
-    fun `TP-13_7 at font scale 2 and 360 dp nothing is clipped (the root fits its width)`() {
+    fun `TP-13_7 at font scale 2 and 360 dp nothing is clipped - every text inside the root, Update reachable by scrolling`() {
         set(fontScale = 2f) { UpdateRequiredScreen(pending = 1500, downloadUrl = "https://x/app.apk", onOpenDownload = { true }) }
 
+        assertTextsInsideRoot()
         compose.onNodeWithText("Update Budmon to continue").assertIsDisplayed()
-        compose.onNodeWithText("Update Budmon").assertIsDisplayed()
-        val root = compose.onRoot().fetchSemanticsNode().boundsInRoot
-        assertTrue(root.width <= 360f * 2f + 1f)
+        compose.onNodeWithText("Update Budmon").performScrollTo().assertIsDisplayed()
+        compose
+            .onNodeWithText("999+ entries you saved offline are kept and will sync after you update.")
+            .performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun `TP-13_7 UpdateRequiredScreen in RTL renders every text inside the root, Update reachable`() {
+        set(direction = LayoutDirection.Rtl) {
+            UpdateRequiredScreen(pending = 3, downloadUrl = "https://x/app.apk", onOpenDownload = { true })
+        }
+
+        assertTextsInsideRoot()
+        compose.onNodeWithText("Update Budmon to continue").assertIsDisplayed()
+        compose.onNodeWithText("Update Budmon").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("3 entries you saved offline are kept and will sync after you update.").assertExists()
+    }
+
+    @Test
+    fun `TP-13_7 SyncIndicator while syncing shows exactly Syncing 3 with an ellipsis`() {
+        set { SyncIndicator(pending = 3, syncing = true, failed = 0) }
+
+        compose.onNodeWithText("Syncing 3…").assertIsDisplayed()
+        compose.onNodeWithText("waiting to sync", substring = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun `TP-13_7 OfflineBanner back online with 2 pending shows Back online - Syncing 2 entries for 3 s, then hides`() {
+        var online by mutableStateOf(false)
+        compose.mainClock.autoAdvance = false
+        set { OfflineBanner(isOnline = online, pending = 2) }
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithText("You're offline", substring = true).assertExists()
+
+        online = true
+        compose.mainClock.advanceTimeBy(100)
+        compose.onNodeWithText("Back online. Syncing 2 entries…").assertIsDisplayed()
+
+        compose.mainClock.advanceTimeBy(2_500)
+        compose.onNodeWithText("Back online. Syncing 2 entries…").assertExists()
+
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.onNodeWithText("Back online", substring = true).assertDoesNotExist()
     }
 
     @Test

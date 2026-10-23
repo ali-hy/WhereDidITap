@@ -88,11 +88,11 @@ class SyncWorkerTest {
         ),
     )
 
-    private suspend fun run(): ListenableWorker.Result {
+    private suspend fun run(client: OkHttpClient = OkHttpClient()): ListenableWorker.Result {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val factory = object : WorkerFactory() {
             override fun createWorker(appContext: Context, workerClassName: String, workerParameters: WorkerParameters) =
-                SyncWorker(appContext, workerParameters, dao, OkHttpClient(), server.url("/"), updates, clock)
+                SyncWorker(appContext, workerParameters, dao, client, server.url("/"), updates, clock)
         }
         return TestListenableWorkerBuilder<SyncWorker>(context).setWorkerFactory(factory).build().doWork()
     }
@@ -235,5 +235,59 @@ class SyncWorkerTest {
             c.getInt(0)
         }
         assertEquals(1, attempts)
+    }
+
+    // ---- Review B-9: the rest of F-255's response table ----
+
+    @Test
+    fun `TP-13_5 a 429 without an envelope retries and keeps the entry PENDING`() = runTest {
+        add("busy")
+        server.enqueue(MockResponse().setResponseCode(429))
+
+        assertEquals(ListenableWorker.Result.retry(), run())
+        assertEquals("PENDING", statusOf("busy"))
+    }
+
+    @Test
+    fun `TP-13_5 a RATE_LIMITED envelope retries and keeps the entry PENDING`() = runTest {
+        add("limited")
+        server.enqueue(envelope("RATE_LIMITED", 429, """{"retryAfterSeconds":30}"""))
+
+        assertEquals(ListenableWorker.Result.retry(), run())
+        assertEquals("PENDING", statusOf("limited"))
+    }
+
+    @Test
+    fun `TP-13_5 a 500 INTERNAL envelope retries and keeps the entry PENDING`() = runTest {
+        add("boom")
+        server.enqueue(envelope("INTERNAL", 500))
+
+        assertEquals(ListenableWorker.Result.retry(), run())
+        assertEquals("PENDING", statusOf("boom"))
+    }
+
+    @Test
+    fun `TP-13_5 a timeout retries and keeps the entry PENDING`() = runTest {
+        add("slow")
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+        val client = OkHttpClient.Builder().readTimeout(500, TimeUnit.MILLISECONDS).build()
+
+        assertEquals(ListenableWorker.Result.retry(), run(client))
+        assertEquals("PENDING", statusOf("slow"))
+    }
+
+    @Test
+    fun `TP-13_5 a 400 marks the first entry FAILED and the batch goes on - the second is sent and deleted`() = runTest {
+        add("first-bad", ageMs = 2_000)
+        add("second-ok", ageMs = 1_000)
+        server.enqueue(envelope("VALIDATION_FAILED", 400))
+        server.enqueue(MockResponse().setResponseCode(201).setBody("{}"))
+
+        assertEquals(ListenableWorker.Result.success(), run())
+        assertEquals(2, server.requestCount)
+        assertEquals("FAILED", statusOf("first-bad"))
+        assertNull(statusOf("second-ok"))
+        server.takeRequest()
+        assertEquals("second-ok", server.takeRequest().getHeader("Idempotency-Key"))
     }
 }

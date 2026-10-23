@@ -24,6 +24,13 @@ class BuildPropertiesTest {
     private lateinit var base: File
     private lateinit var root: File
 
+    /**
+     * Review B-10: the nested build's own home (HOME and user.home), never the real one. One
+     * directory for the class, emptied before each case, so every nested build has the same JVM
+     * arguments and TestKit reuses one daemon.
+     */
+    private val home: File get() = sharedHome
+
     @Before
     fun copyProject() {
         base = Files.createTempDirectory("budmon-android-testkit-").toFile()
@@ -38,6 +45,16 @@ class BuildPropertiesTest {
         for (path in listOf("packages/contract/openapi.json", "packages/shared/test-vectors")) {
             repo.resolve(path).copyRecursively(base.resolve(path), overwrite = true)
         }
+        home.deleteRecursively()
+        home.mkdirs()
+        // The nested daemon reads ~/.budmon/android.properties through user.home (F-264).
+        val properties = File(root, "gradle.properties")
+        val lines = properties.readLines().filterNot { it.startsWith("org.gradle.jvmargs=") }
+        val jvmArgs = source.resolve("gradle.properties").readLines()
+            .firstOrNull { it.startsWith("org.gradle.jvmargs=") }
+            ?.removePrefix("org.gradle.jvmargs=")
+            ?: ""
+        properties.writeText((lines + "org.gradle.jvmargs=$jvmArgs -Duser.home=${home.path}").joinToString("\n", postfix = "\n"))
     }
 
     @After
@@ -45,8 +62,10 @@ class BuildPropertiesTest {
         base.deleteRecursively()
     }
 
-    private fun gradle(vararg args: String): GradleRunner =
-        GradleRunner.create().withProjectDir(root).withArguments(*args, "--stacktrace", "-q")
+    private fun gradle(vararg args: String): GradleRunner = GradleRunner.create()
+        .withProjectDir(root)
+        .withEnvironment(System.getenv() + ("HOME" to home.path))
+        .withArguments(*args, "--stacktrace", "-q")
 
     private fun fails(vararg args: String): BuildResult = gradle(*args).buildAndFail()
     private fun succeeds(vararg args: String): BuildResult = gradle(*args).build()
@@ -101,6 +120,19 @@ class BuildPropertiesTest {
         assertTrue(fails(":app:assembleDebug", "-Pbudmon.apiBaseUrl=https://x.ts.net/").output.contains("budmon.apiBaseUrl"))
     }
 
+    // Review B-10, pinning B-1: the laptop file feeds release builds only.
+    @Test
+    fun `TP-13_16 with the laptop file present, release reads it and debug ignores it`() {
+        File(home, ".budmon").mkdirs()
+        File(home, ".budmon/android.properties").writeText("budmon.apiBaseUrl=https://laptop.tailnet.ts.net/\n")
+
+        succeeds(":app:assembleRelease")
+        assertTrue(buildConfig("release").contains("API_BASE_URL = \"https://laptop.tailnet.ts.net/\""))
+
+        succeeds(":app:assembleDebug")
+        assertTrue(buildConfig("debug").contains("API_BASE_URL = \"http://10.0.2.2:5173/\""))
+    }
+
     // ---- TP-13.17 (F-265) ----
 
     @Test
@@ -115,5 +147,9 @@ class BuildPropertiesTest {
     @Test
     fun `TP-13_17 an invalid id fails the build naming the property`() {
         assertTrue(fails(":app:assembleDebug", "-Pbudmon.googleServerClientId=abc").output.contains("budmon.googleServerClientId"))
+    }
+
+    private companion object {
+        val sharedHome: File by lazy { Files.createTempDirectory("budmon-android-testkit-home-").toFile() }
     }
 }

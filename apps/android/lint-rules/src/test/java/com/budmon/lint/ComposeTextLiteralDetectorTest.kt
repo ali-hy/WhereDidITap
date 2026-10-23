@@ -37,7 +37,40 @@ class ComposeTextLiteralDetectorTest : LintDetectorTest() {
         kotlin(
             """
             package com.example
-            object R { object string { const val x = 1 } }
+            object R {
+                object string { const val x = 1 }
+                object plurals { const val p = 2 }
+            }
+            """,
+        ).indented(),
+        kotlin(
+            """
+            package androidx.compose.foundation.text
+            import androidx.compose.runtime.Composable
+            @Composable fun BasicText(text: String) {}
+            """,
+        ).indented(),
+        kotlin(
+            """
+            package androidx.compose.ui
+            interface Modifier { companion object : Modifier }
+            """,
+        ).indented(),
+        kotlin(
+            """
+            package androidx.compose.ui.semantics
+            import androidx.compose.ui.Modifier
+            interface SemanticsPropertyReceiver
+            var SemanticsPropertyReceiver.contentDescription: String
+                get() = ""
+                set(value) {}
+            fun Modifier.semantics(properties: SemanticsPropertyReceiver.() -> Unit): Modifier = this
+            """,
+        ).indented(),
+        kotlin(
+            """
+            package androidx.compose.ui.res
+            fun pluralStringResource(id: Int, count: Int, vararg formatArgs: Any): String = ""
             """,
         ).indented(),
     )
@@ -98,5 +131,51 @@ class ComposeTextLiteralDetectorTest : LintDetectorTest() {
                 """,
             ).indented(),
         ).run().expectErrorCount(1)
+    }
+
+    // Review B-11: F-261's other report sites, and the allowed plural resource.
+    fun testTp1310BasicTextHelloIsAnError() {
+        lint().files(
+            *stubs,
+            kotlin(
+                """
+                package com.example
+                import androidx.compose.foundation.text.BasicText
+                import androidx.compose.runtime.Composable
+                @Composable fun Screen() { BasicText("x") }
+                """,
+            ).indented(),
+        ).run().expectErrorCount(1).expectContains("BudmonHardcodedComposeText")
+    }
+
+    fun testTp1310SemanticsContentDescriptionLiteralIsAnError() {
+        lint().files(
+            *stubs,
+            kotlin(
+                """
+                package com.example
+                import androidx.compose.runtime.Composable
+                import androidx.compose.ui.Modifier
+                import androidx.compose.ui.semantics.contentDescription
+                import androidx.compose.ui.semantics.semantics
+                @Composable fun Screen() { val m = Modifier.semantics { contentDescription = "x" } }
+                """,
+            ).indented(),
+        ).run().expectErrorCount(1).expectContains("BudmonHardcodedComposeText")
+    }
+
+    fun testTp1310TextPluralStringResourceIsOk() {
+        lint().files(
+            *stubs,
+            kotlin(
+                """
+                package com.example
+                import androidx.compose.material3.Text
+                import androidx.compose.runtime.Composable
+                import androidx.compose.ui.res.pluralStringResource
+                @Composable fun Screen(n: Int) { Text(pluralStringResource(R.plurals.p, n, n)) }
+                """,
+            ).indented(),
+        ).run().expectClean()
     }
 }
