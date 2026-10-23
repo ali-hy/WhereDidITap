@@ -4,8 +4,10 @@
 //
 // A-348: `testImplementation(gradleTestKit())` in app/build.gradle.kts, which also sets the system
 // property `budmon.androidRoot`. Each case builds a temporary copy of apps/android (without build/,
-// .gradle/ and local.properties), so it never contends with the outer build. AGP paths are in
-// AgpPaths.kt.
+// .gradle/ and local.properties), so it never contends with the outer build. The copy keeps the
+// repository layout (<tmp>/apps/android) and brings the two files the build reads from outside
+// apps/android: packages/contract/openapi.json (openApiGenerate) and packages/shared/test-vectors.
+// AGP paths are in AgpPaths.kt.
 package com.budmon.app.build
 
 import org.gradle.testkit.runner.BuildResult
@@ -19,22 +21,28 @@ import java.nio.file.Files
 
 class BuildPropertiesTest {
     private val source: File = File(checkNotNull(System.getProperty("budmon.androidRoot")) { "budmon.androidRoot not set" })
+    private lateinit var base: File
     private lateinit var root: File
 
     @Before
     fun copyProject() {
-        root = Files.createTempDirectory("budmon-android-testkit-").toFile()
+        base = Files.createTempDirectory("budmon-android-testkit-").toFile()
+        root = File(base, "apps/android")
         val skip = setOf("build", ".gradle", "local.properties")
         source.walkTopDown()
             .onEnter { dir -> dir == source || dir.name !in skip }
             .filter { it.isFile && it.name !in skip }
             .forEach { file -> file.copyTo(File(root, file.relativeTo(source).path), overwrite = true) }
         File(root, "gradlew").setExecutable(true)
+        val repo = source.resolve("../..").canonicalFile
+        for (path in listOf("packages/contract/openapi.json", "packages/shared/test-vectors")) {
+            repo.resolve(path).copyRecursively(base.resolve(path), overwrite = true)
+        }
     }
 
     @After
     fun removeCopy() {
-        root.deleteRecursively()
+        base.deleteRecursively()
     }
 
     private fun gradle(vararg args: String): GradleRunner =
