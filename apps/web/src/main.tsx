@@ -10,9 +10,8 @@ import { I18nProvider, supportedLocales } from "./i18n/I18nProvider.js";
 import "./index.css";
 import { initWebSentry } from "./observability/sentry.js";
 import { createAppRouter } from "./router.js";
-import { OfflineBanner } from "./ui/OfflineBanner.js";
+import { AppBanners } from "./ui/AppBanners.js";
 import { Toaster } from "./ui/Toaster.js";
-import { UpdateNotifier } from "./ui/UpdateNotifier.js";
 
 const buildNumber = Number.parseInt(import.meta.env.VITE_BUILD_NUMBER, 10) || 0;
 
@@ -43,9 +42,8 @@ if (root !== null) {
     () => (
       <I18nProvider initialLocale={initialLocale}>
         <QueryClientProvider client={queryClient}>
-          <OfflineBanner />
+          <AppBanners buildNumber={buildNumber} />
           <RouterProvider router={router} />
-          <UpdateNotifier buildNumber={buildNumber} />
           <Toaster />
           <div id="live-polite" class="sr-only" aria-live="polite" aria-atomic="true" />
           <div id="live-assertive" class="sr-only" aria-live="assertive" aria-atomic="true" />

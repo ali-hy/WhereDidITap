@@ -34,7 +34,8 @@ export function createRateLimitGate(now: () => number = Date.now): {
         retryAfterSeconds > 0
           ? retryAfterSeconds
           : DEFAULT_RETRY_AFTER_S;
-      setExpiresAt(now() + seconds * 1000);
+      // A-461: only extends; a shorter block never shortens the wait.
+      setExpiresAt(Math.max(expiresAt(), now() + seconds * 1000));
       stop();
       timer = setInterval(() => {
         setTick((n) => n + 1);

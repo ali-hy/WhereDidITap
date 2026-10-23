@@ -5,6 +5,7 @@ import { ErrorFallback } from "../ui/ErrorFallback.js";
 import { FieldError, FormErrorSummary } from "../ui/forms.js";
 import { Icon } from "../ui/icons/Icon.js";
 import { RateLimitNotice } from "../ui/RateLimitNotice.js";
+import { useFixtureTitle } from "./title.js";
 
 function Probed(props: { title: string; children: JSX.Element }): JSX.Element {
   return (
@@ -20,6 +21,7 @@ function Probed(props: { title: string; children: JSX.Element }): JSX.Element {
 }
 
 export function RtlProbeFixture(): JSX.Element {
+  useFixtureTitle("RTL probe");
   return (
     <>
       <h1 tabindex="-1">RTL probe</h1>

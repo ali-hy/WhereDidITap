@@ -1,4 +1,8 @@
-// F-218: screen-reader announcements through the visually hidden live regions.
+// F-218: screen-reader announcements through the visually hidden live regions, and page titles.
+import { APP_NAME } from "../app/brand.js";
+import { messages } from "../i18n/messages.js";
+import type { MessageDescriptor } from "../i18n/useI18n.js";
+
 const IDS = { polite: "live-polite", assertive: "live-assertive" } as const;
 
 /** The live region, created (visually hidden) if the page doesn't have it yet. */
@@ -21,4 +25,16 @@ export function announce(text: string, politeness: "polite" | "assertive" = "pol
   queueMicrotask(() => {
     el.textContent = text;
   });
+}
+
+/** `useI18n().t`'s type. */
+export type Translate = (d: MessageDescriptor, v?: Record<string, unknown>) => string;
+
+/**
+ * A-464: the tab title for a page: APP_NAME for null, otherwise app.documentTitle with the page's
+ * translated <h1> text, without bidi isolates (tab titles render them inconsistently).
+ */
+export function setDocumentTitle(page: string | null, t: Translate): void {
+  document.title =
+    page === null ? APP_NAME : t(messages.appDocumentTitle, { page }).replace(/[⁦-⁩]/g, "");
 }

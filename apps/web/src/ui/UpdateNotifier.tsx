@@ -3,6 +3,7 @@ import { onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
 import { clientUpdateRequired } from "../api/clientUpdate.js";
 import { messages } from "../i18n/messages.js";
 import { useI18n } from "../i18n/useI18n.js";
+import { Icon } from "./icons/Icon.js";
 import { showToast } from "./Toaster.js";
 
 const FOCUS_MIN_INTERVAL_MS = 60_000;
@@ -74,7 +75,12 @@ export function UpdateNotifier(props: {
 
   return (
     <Show when={required()}>
-      <div role="alert" class="flex items-center gap-4 p-3">
+      {/* A-462: alert icon, text and Reload on white, with a 2 px red block-end border. */}
+      <div
+        role="alert"
+        class="flex items-center gap-4 border-b-2 border-red-700 bg-white p-3 text-gray-900"
+      >
+        <Icon name="alert" class="shrink-0" />
         <p>{t(messages.updateRequiredWeb)}</p>
         <button
           type="button"

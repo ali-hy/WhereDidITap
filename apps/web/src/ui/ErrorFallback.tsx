@@ -1,9 +1,10 @@
 // F-209: the S-2 error fallback (§8.1): title, body, an optional reference, Try again and a link
 // home (a plain link, so it works without a router).
-import { createSignal, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, createUniqueId, Show, type JSX } from "solid-js";
 import type { AppError } from "../api/errors.js";
 import { messages } from "../i18n/messages.js";
 import { useI18n } from "../i18n/useI18n.js";
+import { setDocumentTitle } from "./a11y.js";
 import { Icon } from "./icons/Icon.js";
 
 /** Marks where the reference goes inside the translated sentence (private use, never shown). */
@@ -19,6 +20,13 @@ export function ErrorFallback(props: {
   const { t } = useI18n();
   const [busy, setBusy] = createSignal(false);
   const [stillFailing, setStillFailing] = createSignal(false);
+  const statusId = createUniqueId();
+  let button: HTMLButtonElement | undefined;
+
+  // A-464: the tab title follows the <h1>.
+  createEffect(() => {
+    setDocumentTitle(t(messages.errorFallbackTitle), t);
+  });
 
   const retry = async (): Promise<void> => {
     setBusy(true);
@@ -27,6 +35,9 @@ export function ErrorFallback(props: {
       await props.onRetry();
     } catch {
       setStillFailing(true);
+      // A-456: back on Try again (enabled first), described by the status line.
+      setBusy(false);
+      if (button?.isConnected === true) button.focus();
     } finally {
       setBusy(false);
     }
@@ -51,11 +62,19 @@ export function ErrorFallback(props: {
       <h1 tabindex="-1" class="text-xl font-semibold">
         {t(messages.errorFallbackTitle)}
       </h1>
-      <p>{t(messages.errorFallbackBody)}</p>
+      {/* A-457: "share this reference" only when there is one. */}
+      <p>
+        {props.requestId === undefined || props.requestId === ""
+          ? t(messages.errorFallbackBodyNoReference)
+          : t(messages.errorFallbackBody)}
+      </p>
       <Show when={props.requestId}>{(id) => reference(id)}</Show>
       <div class="mt-4 flex gap-4">
         <button
+          ref={button}
           type="button"
+          data-fallback-retry
+          aria-describedby={statusId}
           aria-busy={busy() ? "true" : undefined}
           disabled={busy()}
           onClick={() => void retry()}
@@ -69,7 +88,7 @@ export function ErrorFallback(props: {
         <a href="/">{t(messages.errorFallbackHome)}</a>
       </div>
       {/* A-400: the status element is always rendered and filled when the retry failed. */}
-      <p role="status">
+      <p id={statusId} role="status">
         {stillFailing() || props.stillFailing === true ? t(messages.errorFallbackStillFailing) : ""}
       </p>
     </section>

@@ -2,6 +2,7 @@
 // router.invalidate(), which re-runs it without moving focus or announcing (A-402). TP-11.15 (b).
 import { useRouter } from "@tanstack/solid-router";
 import { createSignal, type JSX } from "solid-js";
+import { useFixtureTitle } from "./title.js";
 
 const [runs, setRuns] = createSignal(0);
 
@@ -10,6 +11,7 @@ export function invalidateLoader(): void {
 }
 
 export function InvalidateFixture(): JSX.Element {
+  useFixtureTitle("Invalidate fixture");
   const router = useRouter();
   return (
     <>

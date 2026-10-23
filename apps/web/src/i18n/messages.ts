@@ -3,10 +3,16 @@
 import { defineMessages } from "@formatjs/intl";
 
 export const messages = defineMessages({
+  appDocumentTitle: { id: "app.documentTitle", defaultMessage: "{page} – {appName}" },
   errorFallbackBody: {
     id: "error.fallback.body",
     defaultMessage:
       "Try again in a moment. If it keeps happening, share this reference with the person who invited you.",
+  },
+  errorFallbackBodyNoReference: {
+    id: "error.fallback.bodyNoReference",
+    defaultMessage:
+      "Try again in a moment. If it keeps happening, let the person who invited you know.",
   },
   errorFallbackHome: { id: "error.fallback.home", defaultMessage: "Go to home" },
   errorFallbackRetry: { id: "error.fallback.retry", defaultMessage: "Try again" },
@@ -57,6 +63,7 @@ export const messages = defineMessages({
   homePlaceholder: { id: "home.placeholder", defaultMessage: "Nothing here yet." },
   offlineBack: { id: "offline.back", defaultMessage: "Back online." },
   offlineBannerWeb: { id: "offline.banner.web", defaultMessage: "You're offline." },
+  tableEmpty: { id: "table.empty", defaultMessage: "Nothing to show yet." },
   updateRequiredWeb: {
     id: "update.required.web",
     defaultMessage: "This version of {appName} is out of date. Reload to continue.",

@@ -5,6 +5,12 @@ function languageOf(locale: string): string {
   return (locale.split("-")[0] ?? "").toLowerCase();
 }
 
+/** A-465: pseudo-locales (second subtag XA or XB) are chosen only by an exact request. */
+function isPseudoLocale(locale: string): boolean {
+  const second = (locale.split("-")[1] ?? "").toUpperCase();
+  return second === "XA" || second === "XB";
+}
+
 export function resolveLocale(
   requested: string | null,
   supported: readonly string[],
@@ -19,7 +25,9 @@ export function resolveLocale(
     return exact;
   }
   const language = languageOf(wanted);
-  const sameLanguage = supported.filter((tag) => languageOf(tag) === language);
+  const sameLanguage = supported.filter(
+    (tag) => languageOf(tag) === language && !isPseudoLocale(tag),
+  );
   const bare = sameLanguage.find((tag) => tag.toLowerCase() === language);
   return bare ?? sameLanguage[0] ?? fallback ?? "en";
 }

@@ -1,5 +1,7 @@
 {
+  "app.documentTitle": "{page} – {appName}",
   "error.fallback.body": "Try again in a moment. If it keeps happening, share this reference with the person who invited you.",
+  "error.fallback.bodyNoReference": "Try again in a moment. If it keeps happening, let the person who invited you know.",
   "error.fallback.home": "Go to home",
   "error.fallback.retry": "Try again",
   "error.fallback.stillFailing": "Still not working.",
@@ -18,6 +20,7 @@
   "home.placeholder": "Nothing here yet.",
   "offline.back": "Back online.",
   "offline.banner.web": "You're offline.",
+  "table.empty": "Nothing to show yet.",
   "update.required.web": "This version of {appName} is out of date. Reload to continue.",
   "update.web.available": "{appName} has been updated. Reload to get the latest version.",
   "update.web.reload": "Reload",

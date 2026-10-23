@@ -80,15 +80,25 @@ export function applyServerIssues(
 ): { summary: SummaryEntry[]; focus: { fieldId: string } | "summary" } {
   const unmapped: SummaryEntry[] = [];
   const invalid: string[] = [];
+  const message = (issue: Issue) => t(VALIDATION[issue.code] ?? messages.validationInvalid);
   for (const issue of issues) {
-    const path = issue.path.join(".");
-    const field = Object.hasOwn(fields, path) ? fields[path] : undefined;
-    if (field !== undefined) {
-      field.setError(t(VALIDATION[issue.code] ?? messages.validationInvalid));
-      invalid.push(field.id);
-    } else {
-      unmapped.push({ text: t(messages.errorValidationUnknownField, { label: path }) });
+    // A-460 (1): a form-level issue is a summary entry with its own message.
+    if (issue.path.length === 0) {
+      unmapped.push({ text: message(issue) });
+      continue;
     }
+    const key = fieldKeyFor(issue.path, fields);
+    if (key === undefined) {
+      unmapped.push({
+        text: t(messages.errorValidationUnknownField, { label: issue.path.join(".") }),
+      });
+      continue;
+    }
+    const field = fields[key];
+    // A-460 (3): the first issue for a field sets its error; later ones are skipped.
+    if (field === undefined || invalid.includes(field.id)) continue;
+    field.setError(message(issue));
+    invalid.push(field.id);
   }
   const first = firstInDocumentOrder(invalid);
   if (unmapped.length === 0 && first !== undefined) {
@@ -96,6 +106,19 @@ export function applyServerIssues(
     return { summary: [], focus: { fieldId: first } };
   }
   return { summary: [{ text: t(messages.errorValidationForm) }, ...unmapped], focus: "summary" };
+}
+
+/** A-460 (2): the field whose key is the longest whole-segment prefix of `path`. */
+function fieldKeyFor(
+  path: Issue["path"],
+  fields: Readonly<Record<string, unknown>>,
+): string | undefined {
+  const segments = path.map(String);
+  for (let n = segments.length; n > 0; n -= 1) {
+    const key = segments.slice(0, n).join(".");
+    if (Object.hasOwn(fields, key)) return key;
+  }
+  return undefined;
 }
 
 /** The id whose element comes first in the document (ids without an element last). */

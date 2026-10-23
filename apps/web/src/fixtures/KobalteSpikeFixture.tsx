@@ -5,10 +5,12 @@ import { Dialog } from "@kobalte/core/dialog";
 import { DropdownMenu } from "@kobalte/core/dropdown-menu";
 import { TextField } from "@kobalte/core/text-field";
 import { createSignal, type JSX } from "solid-js";
+import { useFixtureTitle } from "./title.js";
 
 const CURRENCIES = ["USD", "EUR", "EGP"];
 
 export function KobalteSpikeFixture(): JSX.Element {
+  useFixtureTitle("Kobalte spike");
   const [picked, setPicked] = createSignal("");
   return (
     <>

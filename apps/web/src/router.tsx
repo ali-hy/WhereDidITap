@@ -75,7 +75,19 @@ export async function createAppRouter() {
   // A-397: Try again re-runs the loaders and rejects while any match is still in error.
   retry = async () => {
     await router.invalidate();
-    if (router.state.matches.some((m) => m.status === "error")) {
+    const failing = router.state.matches.some((m) => m.status === "error");
+    // A-456: after the remount, focus Try again (still failing) or the page's h1 (recovered).
+    setTimeout(() => {
+      if (failing) {
+        document.querySelector<HTMLElement>("main [data-fallback-retry]")?.focus();
+        return;
+      }
+      const h1 = document.querySelector<HTMLElement>("main h1");
+      if (h1 === null) return;
+      h1.focus();
+      announce(h1.textContent);
+    }, 0);
+    if (failing) {
       setRetryFailed(true);
       throw new Error("still failing");
     }

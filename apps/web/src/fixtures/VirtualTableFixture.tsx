@@ -5,6 +5,7 @@ import { setupWorker } from "msw/browser";
 import { createEffect, createSignal, type JSX } from "solid-js";
 import { createInfiniteList } from "../ui/table/infiniteList.js";
 import { VirtualTable, type VirtualTableColumn } from "../ui/table/VirtualTable.js";
+import { useFixtureTitle } from "./title.js";
 
 interface SyntheticRow {
   index: number;
@@ -57,6 +58,7 @@ const COLUMNS: readonly VirtualTableColumn<SyntheticRow>[] = [
 ];
 
 export function VirtualTableFixture(): JSX.Element {
+  useFixtureTitle("Virtual table");
   let firstResponse = true;
   const source = createInfiniteList<SyntheticRow>({
     pageSize: PAGE_SIZE,
