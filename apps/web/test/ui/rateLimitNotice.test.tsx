@@ -111,3 +111,23 @@ describe("TP-11.10: a rate-limited form (F-214)", () => {
     expect(submit().disabled).toBe(false);
   });
 });
+
+describe("TP-11.10 (A-461): a shorter block never shortens the wait", () => {
+  it("TP-11.10 (A-461): block(300), 10 s, block(60): blockedFor() is 290; then block(600): 600", async () => {
+    const m = await loadRateLimit();
+    await createRoot(async (dispose) => {
+      const gate = m.createRateLimitGate(() => Date.now());
+      gate.block(300);
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      gate.block(60);
+      const afterShorter = gate.blockedFor();
+      gate.block(600);
+      const afterLonger = gate.blockedFor();
+      dispose();
+
+      expect(afterShorter).toBe(290);
+      expect(afterLonger).toBe(600);
+    });
+  });
+});

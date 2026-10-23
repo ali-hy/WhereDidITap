@@ -109,3 +109,89 @@ describe("TP-11.7 (A-397, A-400): the still-failing state and its status element
     expect(plain(status.textContent)).toBe("Still not working.");
   });
 });
+
+describe("TP-11.7 (A-456): focus after a failed retry", () => {
+  it("TP-11.7 (A-456): with onRetry rejecting, after Try again the button has focus and is described by the status element: Still not working.", async () => {
+    const { ErrorFallback } = await loadErrorFallback();
+    let settle: Promise<void> = Promise.resolve();
+    const onRetry = () => {
+      settle = Promise.reject(new Error("still down"));
+      return settle;
+    };
+    renderWithI18n(() => <ErrorFallback error={{ kind: "unknown" }} onRetry={onRetry} />);
+    const button = await screen.findByRole("button", { name: /Try again/ });
+    expect(button.hasAttribute("data-fallback-retry")).toBe(true);
+
+    fireEvent.click(button);
+    await settle.catch(() => undefined);
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(button);
+    });
+    const status = screen.getByRole("status");
+    const describedBy = button.getAttribute("aria-describedby") ?? "";
+    expect(status.id).not.toBe("");
+    expect(describedBy.split(/\s+/)).toContain(status.id);
+    expect(plain(status.textContent)).toBe("Still not working.");
+  });
+});
+
+describe("TP-11.7 (A-457): the body without a reference", () => {
+  const BODY =
+    "Try again in a moment. If it keeps happening, share this reference with the person who invited you.";
+  const NO_REFERENCE =
+    "Try again in a moment. If it keeps happening, let the person who invited you know.";
+
+  it("TP-11.7 (A-457): without requestId: error.fallback.bodyNoReference, no error.fallback.body, no Reference line", async () => {
+    const { ErrorFallback } = await loadErrorFallback();
+    const { container } = renderWithI18n(() => (
+      <ErrorFallback error={{ kind: "unknown" }} onRetry={() => Promise.resolve()} />
+    ));
+    await screen.findByRole("heading", { level: 1 });
+
+    expect(plain(container.textContent)).toContain(NO_REFERENCE);
+    expect(plain(container.textContent)).not.toContain(BODY);
+    expect(plain(container.textContent)).not.toContain("Reference:");
+  });
+
+  it("TP-11.7 (A-457): with requestId: error.fallback.body and not bodyNoReference", async () => {
+    const { ErrorFallback } = await loadErrorFallback();
+    const { container } = renderWithI18n(() => (
+      <ErrorFallback
+        error={{ kind: "unknown" }}
+        requestId={REQUEST_ID}
+        onRetry={() => Promise.resolve()}
+      />
+    ));
+    await screen.findByRole("heading", { level: 1 });
+
+    expect(plain(container.textContent)).toContain(BODY);
+    expect(plain(container.textContent)).not.toContain(NO_REFERENCE);
+  });
+});
+
+describe("TP-11.7 (A-464): the document title", () => {
+  it("TP-11.7 (A-464): document.title is the h1 – Budmon, and it follows setLocale", async () => {
+    const { ErrorFallback } = await loadErrorFallback();
+    const { i18n } = renderWithI18n(() => (
+      <ErrorFallback error={{ kind: "unknown" }} onRetry={() => Promise.resolve()} />
+    ));
+    await screen.findByRole("heading", { level: 1 });
+    const english = "Something went wrong on our side – Budmon";
+
+    await waitFor(() => {
+      expect(document.title).toBe(english);
+    });
+
+    await i18n.setLocale("ar-XB");
+    await waitFor(() => {
+      expect(document.title).not.toBe(english);
+    });
+    expect(document.title).not.toMatch(/[⁦-⁩]/);
+
+    await i18n.setLocale("en");
+    await waitFor(() => {
+      expect(document.title).toBe(english);
+    });
+  });
+});

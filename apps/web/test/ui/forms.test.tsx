@@ -144,3 +144,112 @@ describe("TP-11.9: server validation issues on a form (F-213)", () => {
     expect(plain(container.querySelector("#without")?.textContent ?? "")).toBe("");
   });
 });
+
+// A-460: form-level issues, nested paths by whole-segment longest prefix, first issue wins.
+describe("TP-11.9 (A-460): applyServerIssues path rules", () => {
+  const issue = (path: (string | number)[], code: string): Issue => ({
+    code,
+    path,
+    message: "server text",
+  });
+  const plainSummary = (s: readonly { fieldId?: string; text: string }[]) =>
+    s.map((m) => ({ ...m, text: plain(m.text) }));
+
+  it("TP-11.9 (c): [[] invalid_type] adds error.validation.form + validation.invalid_type to the summary, no unknownField, focus on the summary", async () => {
+    const forms = await loadForms();
+    const h = harness(forms);
+    const { i18n } = renderWithI18n(() => <h.Form />);
+
+    const { summary, focus } = forms.applyServerIssues(
+      [issue([], "invalid_type")],
+      h.fields,
+      i18n.t,
+    );
+
+    expect(plainSummary(summary)).toEqual([
+      { text: "Some details need fixing." },
+      { text: "Enter a valid value." },
+    ]);
+    expect(summary.some((m) => plain(m.text).includes("isn't valid:"))).toBe(false);
+    expect(focus).toBe("summary");
+    expect(h.amountError()).toBeUndefined();
+  });
+
+  it("TP-11.9 (d): [amount.0 too_small] reaches amount; no summary; focus amount", async () => {
+    const forms = await loadForms();
+    const h = harness(forms);
+    const { i18n } = renderWithI18n(() => <h.Form />);
+
+    const { summary, focus } = forms.applyServerIssues(
+      [issue(["amount", 0], "too_small")],
+      h.fields,
+      i18n.t,
+    );
+
+    expect(h.amountError()).toBe("This is too short or too small.");
+    expect(summary).toEqual([]);
+    expect(focus).toEqual({ fieldId: "amount" });
+  });
+
+  it("TP-11.9 (e): [amount too_small], [amount.1 too_big]: only the first sets amount's error (setError once); no summary", async () => {
+    const forms = await loadForms();
+    const h = harness(forms);
+    const { i18n } = renderWithI18n(() => <h.Form />);
+    const spy = vi.spyOn(h.fields.amount as FormField, "setError");
+
+    const { summary } = forms.applyServerIssues(
+      [issue(["amount"], "too_small"), issue(["amount", 1], "too_big")],
+      h.fields,
+      i18n.t,
+    );
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(h.amountError()).toBe("This is too short or too small.");
+    expect(summary).toEqual([]);
+  });
+
+  it("TP-11.9 (f): fields amount and amount.currency, [amount.currency.code invalid_format]: amount.currency shows it, amount has none", async () => {
+    const forms = await loadForms();
+    const [amountError, setAmountError] = createSignal<string>();
+    const [currencyError, setCurrencyError] = createSignal<string>();
+    const fields: Record<string, FormField> = {
+      amount: { id: "amount", label: "Amount", setError: setAmountError },
+      "amount.currency": { id: "amount-currency", label: "Currency", setError: setCurrencyError },
+    };
+    const { i18n } = renderWithI18n(() => (
+      <form>
+        <input id="amount" />
+        <input id="amount-currency" />
+      </form>
+    ));
+
+    const { summary } = forms.applyServerIssues(
+      [issue(["amount", "currency", "code"], "invalid_format")],
+      fields,
+      i18n.t,
+    );
+
+    expect(currencyError()).toBe("Check the format.");
+    expect(amountError()).toBeUndefined();
+    expect(summary).toEqual([]);
+  });
+
+  it("TP-11.9 (g): [amounts too_small] matches no field (whole segments only): the summary names the path amounts", async () => {
+    const forms = await loadForms();
+    const h = harness(forms);
+    const { i18n } = renderWithI18n(() => <h.Form />);
+
+    const { summary, focus } = forms.applyServerIssues(
+      [issue(["amounts"], "too_small")],
+      h.fields,
+      i18n.t,
+    );
+
+    expect(h.amountError()).toBeUndefined();
+    expect(plainSummary(summary)).toEqual([
+      { text: "Some details need fixing." },
+      { text: "Something in this form isn't valid: amounts" },
+    ]);
+    expect(focus).toBe("summary");
+  });
+});

@@ -108,3 +108,19 @@ describe("F-312 isolateSimpleArguments (A-319)", () => {
     expect(isolateArgs(message, values)).toEqual(expected);
   });
 });
+
+// A-465: a pseudo-locale is chosen only when asked for exactly (any case); a real language never
+// resolves to its pseudo-locale.
+describe("F-312 resolveLocale with pseudo-locales (A-465)", () => {
+  const PSEUDO = ["en", "en-XA", "ar-XB"];
+
+  it.each([
+    ["ar-SA", PSEUDO, "en"],
+    ["ar-XB", PSEUDO, "ar-XB"],
+    ["AR-xb", PSEUDO, "ar-XB"],
+    ["en-GB", ["en-XA"], "en"],
+    ["ar-SA", ["en", "ar", "ar-XB"], "ar"],
+  ])("TP-1.13 (A-465): resolveLocale(%j, %j) is %j", (requested, supported, expected) => {
+    expect(resolveLocale(requested, supported)).toBe(expected);
+  });
+});

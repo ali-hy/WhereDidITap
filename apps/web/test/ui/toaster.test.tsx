@@ -1,9 +1,11 @@
 // F-212 toasts (Kobalte's Toast region). TP-11.29, with A-400 (announced through F-218's permanent
 // regions; the toasts themselves are aria-live="off") and B-4 (hover and focus pause independently).
-import { fireEvent, screen } from "@solidjs/testing-library";
+import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadToaster } from "../support/s11b.js";
 import { renderWithI18n } from "../support/render.js";
+import { Icon } from "../../src/ui/icons/Icon.js";
+import type { IconName } from "../../src/ui/icons/registry.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -162,4 +164,102 @@ describe("TP-11.29: toasts (F-212)", () => {
 
     expect(onClick).toHaveBeenCalledTimes(1);
   });
+});
+
+/** The path data of an svg, to tell icons apart. */
+const pathsOf = (svg: Element | null | undefined) =>
+  [...(svg?.querySelectorAll("path") ?? [])].map((p) => p.getAttribute("d")).join("|");
+function iconPaths(name: IconName): string {
+  const { container, unmount } = render(() => <Icon name={name} />);
+  const d = pathsOf(container.querySelector("svg"));
+  unmount();
+  return d;
+}
+/** The toast element (with data-tone) around `text`. */
+const toastOf = (text: string) => shown(text)?.closest("[data-tone]") ?? null;
+
+describe("TP-11.29 (A-463): at most 3 visible, the rest queued", () => {
+  it("TP-11.29 (A-463): 4 toasts at once: 3 shown, the 4th absent; after 6 s the first 3 close and the 4th shows; its timer starts when shown", async () => {
+    const { showToast } = await mount();
+
+    for (const n of [1, 2, 3, 4]) showToast({ message: `Queued toast ${String(n)}`, tone: "info" });
+    await vi.advanceTimersByTimeAsync(0);
+    for (const n of [1, 2, 3]) expect(shown(`Queued toast ${String(n)}`), String(n)).not.toBeNull();
+    expect(shown("Queued toast 4")).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(6_000);
+    await vi.advanceTimersByTimeAsync(500);
+    for (const n of [1, 2, 3]) expect(shown(`Queued toast ${String(n)}`), String(n)).toBeNull();
+    expect(shown("Queued toast 4")).not.toBeNull();
+
+    // Shown at about 6 s: still there 5 s later, gone by 6 s after it appeared.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(shown("Queued toast 4")).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(shown("Queued toast 4")).toBeNull();
+  });
+
+  it("TP-11.29 (A-463): a duplicate of a visible toast returns its id, adds no toast and announces nothing new", async () => {
+    const { showToast } = await mount();
+    const id = showToast({ message: "Couldn't save", tone: "error" });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() => {
+      expect(region("live-assertive")).toBe("Couldn't save");
+    });
+    const assertive = document.getElementById("live-assertive");
+    if (assertive !== null) assertive.textContent = "";
+
+    const again = showToast({ message: "Couldn't save", tone: "error" });
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(again).toBe(id);
+    expect(
+      screen
+        .queryAllByText("Couldn't save", { exact: false })
+        .filter((el) => el.closest("#live-polite, #live-assertive") === null),
+    ).toHaveLength(1);
+    expect(region("live-assertive") ?? "").toBe("");
+  });
+
+  it("TP-11.29 (A-463): a duplicate of a queued toast returns the queued one's id and adds nothing", async () => {
+    const { showToast } = await mount();
+    for (const n of [1, 2, 3]) showToast({ message: `Busy ${String(n)}`, tone: "info" });
+    const queued = showToast({ message: "Waiting in line", tone: "info" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(shown("Waiting in line")).toBeNull();
+
+    const again = showToast({ message: "Waiting in line", tone: "info" });
+    await vi.advanceTimersByTimeAsync(6_500);
+
+    expect(again).toBe(queued);
+    expect(
+      screen
+        .queryAllByText("Waiting in line", { exact: false })
+        .filter((el) => el.closest("#live-polite, #live-assertive") === null),
+    ).toHaveLength(1);
+  });
+});
+
+describe("TP-11.29 (A-462): tone icons", () => {
+  it.each([
+    ["info", "info"],
+    ["success", "check"],
+    ["error", "alert"],
+  ] as const)(
+    "TP-11.29 (A-462): a %s toast starts with the aria-hidden %s icon and has data-tone",
+    async (tone, icon) => {
+      const { showToast } = await mount();
+      const message = `Tone ${tone} toast`;
+
+      showToast({ message, tone });
+      await vi.advanceTimersByTimeAsync(0);
+      const toast = toastOf(message);
+
+      expect(toast?.getAttribute("data-tone")).toBe(tone);
+      const svg = toast?.querySelector("svg");
+      expect(svg?.getAttribute("aria-hidden")).toBe("true");
+      expect(pathsOf(svg)).toBe(iconPaths(icon));
+    },
+  );
 });
