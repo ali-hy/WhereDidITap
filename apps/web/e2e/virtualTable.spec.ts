@@ -243,7 +243,7 @@ test("TP-12.4 @perf: D-7 targets on 100,000 rows", async ({ page }) => {
 
 // A-459: PageDown/PageUp move by n = floor(div[data-scroll].clientHeight / rowHeight) rows,
 // clamped to the loaded rows, keep focus in the grid and the row in view.
-test("TP-12.3 (A-459): PageDown, PageDown, PageUp move by n rows in view; PageUp again clamps to row 2; End then PageDown clamps to the loaded rows; focus never on body", async ({
+test("TP-12.3 (A-459): PageDown, PageDown, PageUp move by n rows in view; PageUp again clamps to row 2; End, then PageDown into the next loaded page (A-470); focus never on body", async ({
   page,
 }, testInfo) => {
   test.skip(testInfo.project.name !== "chromium", "chromium project only");
@@ -275,14 +275,25 @@ test("TP-12.3 (A-459): PageDown, PageDown, PageUp move by n rows in view; PageUp
 
   const loadedAtEnd = await settledLoadedRows(page);
   await page.keyboard.press("End");
-  await expectFocus(page, { row: loadedAtEnd + 1, inView: true });
-  // Landing at the end loads the next page (A-340); PageDown is clamped to whatever is loaded then.
+  const endRow = loadedAtEnd + 1;
+  await expectFocus(page, { row: endRow, inView: true });
+  // A-470: End loads the next page (A-340); wait until a row past End's is rendered, then PageDown
+  // moves into it: aria-rowindex = min(rowCount() − 1, i + n) + 2, i = End's 0-based index and
+  // rowCount() the rows loaded when PageDown is pressed.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (end) =>
+          [...document.querySelectorAll('[role="row"][aria-rowindex]')].some(
+            (r) => Number(r.getAttribute("aria-rowindex")) > end,
+          ),
+        endRow,
+      ),
+    )
+    .toBe(true);
   const loadedNow = await settledLoadedRows(page);
+  const i = endRow - 2;
   await page.keyboard.press("PageDown");
-  // aria-rowindex = index + 2; End is index loadedAtEnd - 1.
-  await expectFocus(page, {
-    row: Math.min(loadedNow - 1, loadedAtEnd - 1 + n) + 2,
-    inView: true,
-  });
+  await expectFocus(page, { row: Math.min(loadedNow - 1, i + n) + 2, inView: true });
   await notOnBody();
 });

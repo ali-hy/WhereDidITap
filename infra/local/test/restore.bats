@@ -126,14 +126,13 @@ events() {
   awk -F'\t' '
     $1=="docker" && $3 ~ /pg_restore/ && $3 ~ /--list/ { print "list"; next }
     $1=="docker" && $3 ~ /pg_dump/ { print "safety-dump"; next }
-    $1=="sql" && $2 ~ /CREATE DATABASE budmon_restore/ { print "create-restore-db" }
+    $1=="sql" && $2 ~ /CREATE DATABASE "budmon_restore"/ { print "create-restore-db" }
     $1=="docker" && $3 ~ /pg_restore/ && $3 ~ /budmon_restore/ { print "pg_restore"; next }
     $1=="docker" && $3 ~ /migrate/ && $3 ~ /budmon_restore/ && $3 !~ /restore:verify/ { print "migrate"; next }
     $1=="docker" && $3 ~ /restore:verify/ { print "verify"; next }
     $1=="docker" && $3 ~ / stop / { print "stop"; next }
-    $1=="sql" && $2 ~ /RENAME TO budmon_old_/ { print "rename-old" }
-    $1=="sql" && $2 ~ /budmon_restore RENAME TO budmon[^_]/ { print "rename-new" }
-    $1=="sql" && $2 ~ /budmon_restore RENAME TO budmon$/ { print "rename-new" }
+    $1=="sql" && $2 ~ /RENAME TO "budmon_old_/ { print "rename-old" }
+    $1=="sql" && $2 ~ /"budmon_restore" RENAME TO "budmon"/ { print "rename-new" }
     $1=="docker" && $3 ~ / up -d/ { print "up" }
   ' "${CALLS}" | uniq
 }
@@ -168,7 +167,7 @@ events() {
   run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
   assert_success
   run bash -c "awk -F'\t' '\$1==\"sql\" { print \$2 }' '${CALLS}' | tr '\n' ' '"
-  [[ "${output}" == *"ALLOW_CONNECTIONS false"*"pg_terminate_backend"*"RENAME TO budmon_old_"*"ALLOW_CONNECTIONS true"* ]] || { echo "${output}"; return 1; }
+  [[ "${output}" == *"ALLOW_CONNECTIONS false"*"pg_terminate_backend"*'RENAME TO "budmon_old_'*"ALLOW_CONNECTIONS true"* ]] || { echo "${output}"; return 1; }
 }
 
 @test "TP-15.22 (g): restore:verify failing exits 6 with no rename, no maintenance, state unchanged, and prints the safety dump path" {
@@ -220,7 +219,7 @@ assert_step5_failure() {
   # A-387: the 1 s override bounds the wait.
   [ $((SECONDS - started)) -le 2 ] || { echo "took $((SECONDS - started)) s"; return 1; }
   run bash -c "awk -F'\t' '\$1==\"sql\"' '${CALLS}'"
-  assert_output --regexp "RENAME TO budmon_restore_failed_[0-9]{8}T[0-9]{6}Z"
+  assert_output --regexp 'RENAME TO "budmon_restore_failed_[0-9]{8}T[0-9]{6}Z"'
   run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ / up -d/' '${CALLS}' | tail -n 1"
   assert_output --partial "releases/v1.2.0/"
   assert [ -e "${BUDMON_HOME}/maintenance/on" ]
@@ -325,50 +324,50 @@ assert_step5_failure() {
   export RENAME_FAILS=2
   run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
   assert_success
-  [ "$(grep -c 'RENAME TO budmon_old_' "${CALLS}")" -eq 3 ]
+  [ "$(grep -c 'RENAME TO "budmon_old_' "${CALLS}")" -eq 3 ]
   [ "$(grep -c 'pg_terminate_backend' "${CALLS}")" -ge 3 ]
   run bash -c "awk -F'\t' '\$1==\"sql\" { print \$2 }' '${CALLS}' | tr '\n' ' '"
   [[ "${output}" == *"ALLOW_CONNECTIONS false"*"pg_terminate_backend"* ]] || { echo "${output}"; return 1; }
-  [[ "${output}" == *"ALTER DATABASE budmon WITH ALLOW_CONNECTIONS true"* ]] || { echo "${output}"; return 1; }
+  [[ "${output}" == *'ALTER DATABASE "budmon" WITH ALLOW_CONNECTIONS true'* ]] || { echo "${output}"; return 1; }
 }
 
 @test "TP-15.22 (h7): the rename failing 3 times exits 24 with names unchanged and ALLOW_CONNECTIONS true on budmon" {
   export RENAME_FAILS=99
   run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
   assert_failure 24
-  run grep -c "budmon_restore RENAME TO budmon" "${CALLS}"
+  run grep -c '"budmon_restore" RENAME TO "budmon"' "${CALLS}"
   assert_output "0"
   # A-426: exit 24 means the names are restored, so no marker stays.
   [ ! -e "${BUDMON_HOME}/restore.inprogress" ]
   run bash -c "awk -F'\t' '\$1==\"sql\" { print \$2 }' '${CALLS}' | tail -n 3 | tr '\n' ' '"
-  [[ "${output}" == *"ALTER DATABASE budmon WITH ALLOW_CONNECTIONS true"* ]] || { echo "${output}"; return 1; }
+  [[ "${output}" == *'ALTER DATABASE "budmon" WITH ALLOW_CONNECTIONS true'* ]] || { echo "${output}"; return 1; }
   run cat "${BUDMON_HOME}/state"
   assert_line "current=v1.2.0"
 }
 
 @test "TP-15.22 (h7): the second rename failing 3 times exits 24, renames budmon_old_<ts> back, re-opens budmon, no marker, state unchanged" {
-  export SQL_FAIL_PATTERN="budmon_restore RENAME TO budmon( |;|$)"
+  export SQL_FAIL_PATTERN='"budmon_restore" RENAME TO "budmon"'
   run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
   assert_failure 24
   assert_output --partial "budmon_restore is still in use; the names are restored"
-  run grep -c "budmon_restore RENAME TO budmon" "${CALLS}"
+  run grep -c '"budmon_restore" RENAME TO "budmon"' "${CALLS}"
   assert_output "3"
   run bash -c "awk -F'\t' '\$1==\"sql\" { print \$2 }' '${CALLS}' | tr '\n' ' '"
-  [[ "${output}" =~ budmon_old_[0-9]{8}T[0-9]{6}Z\ RENAME\ TO\ budmon ]] || { echo "${output}"; return 1; }
-  [[ "${output}" == *"budmon_restore RENAME TO budmon"*"RENAME TO budmon"*"ALTER DATABASE budmon WITH ALLOW_CONNECTIONS true"* ]] || { echo "${output}"; return 1; }
+  [[ "${output}" =~ \"budmon_old_[0-9]{8}T[0-9]{6}Z\"\ RENAME\ TO\ \"budmon\" ]] || { echo "${output}"; return 1; }
+  [[ "${output}" == *'"budmon_restore" RENAME TO "budmon"'*'RENAME TO "budmon"'*'ALTER DATABASE "budmon" WITH ALLOW_CONNECTIONS true'* ]] || { echo "${output}"; return 1; }
   [ ! -e "${BUDMON_HOME}/restore.inprogress" ]
   run cat "${BUDMON_HOME}/state"
   assert_line "current=v1.2.0"
 }
 
 @test "TP-15.22 (h8): dropping budmon_restore failing exits 29 after the safety dump's path; no migrate, maintenance, rename or state change" {
-  export SQL_FAIL_PATTERN="DROP DATABASE IF EXISTS budmon_restore"
+  export SQL_FAIL_PATTERN='DROP DATABASE IF EXISTS "budmon_restore"'
   BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.2.0/budmon-local" restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
   assert_step5_failure "dropping budmon_restore failed"
 }
 
 @test "TP-15.22 (h8): creating budmon_restore failing exits 29 after the safety dump's path; no migrate, maintenance, rename or state change" {
-  export SQL_FAIL_PATTERN="CREATE DATABASE budmon_restore"
+  export SQL_FAIL_PATTERN='CREATE DATABASE "budmon_restore"'
   BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.2.0/budmon-local" restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
   assert_step5_failure "creating budmon_restore failed"
 }
@@ -387,8 +386,8 @@ rollback_events() {
         else if (f[1]=="docker" && f[3] ~ / stop worker-capture$/ && f[3] ~ /releases\/v1\.1\.0\//) print "stop-capture"
         else if (f[1]=="docker" && f[3] ~ /pg_isready/) print "pg_isready"
         else if (f[1]=="sql" && f[2] ~ /ALLOW_CONNECTIONS false/) print "allow-false"
-        else if (f[1]=="sql" && f[2] ~ /budmon RENAME TO budmon_restore_failed_/) print "rename-failed"
-        else if (f[1]=="sql" && f[2] ~ /budmon_old_[0-9TZ]+ RENAME TO budmon( |;|$)/) print "rename-back"
+        else if (f[1]=="sql" && f[2] ~ /"budmon" RENAME TO "budmon_restore_failed_/) print "rename-failed"
+        else if (f[1]=="sql" && f[2] ~ /"budmon_old_[0-9TZ]+" RENAME TO "budmon"/) print "rename-back"
         else if (f[1]=="sql" && f[2] ~ /ALLOW_CONNECTIONS true/) print "allow-true"
         else if (f[1]=="docker" && f[3] ~ / up -d/ && f[3] ~ /releases\/v1\.2\.0\//) print "up-v1.2.0"
       }
@@ -436,7 +435,7 @@ assert_unfinished() {
 }
 
 @test "TP-15.36 (c): the rename budmon -> budmon_restore_failed_<ts> failing 3 times: exit 26, the same message" {
-  export READY_EXIT=1 BUDMON_READY_TIMEOUT=1 SQL_FAIL_PATTERN="RENAME TO budmon_restore_failed_"
+  export READY_EXIT=1 BUDMON_READY_TIMEOUT=1 SQL_FAIL_PATTERN='RENAME TO "budmon_restore_failed_'
   run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
   assert_failure 26
   assert_output --regexp "restore rollback incomplete: budmon holds the restored copy and the data from before the restore is in budmon_old_"
@@ -444,7 +443,7 @@ assert_unfinished() {
 }
 
 @test "TP-15.36 (d): the rename budmon_old_<ts> -> budmon failing 3 times: exit 26, budmon is missing" {
-  export READY_EXIT=1 BUDMON_READY_TIMEOUT=1 SQL_FAIL_PATTERN="budmon_old_[0-9TZ]+ RENAME TO budmon( |;|$)"
+  export READY_EXIT=1 BUDMON_READY_TIMEOUT=1 SQL_FAIL_PATTERN='"budmon_old_[0-9TZ]+" RENAME TO "budmon"'
   run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
   assert_failure 26
   assert_output --regexp "restore rollback incomplete: budmon is missing; the data from before the restore is in budmon_old_[0-9TZ]+ and the restored copy in budmon_restore_failed_[0-9TZ]+"
@@ -469,7 +468,7 @@ assert_unfinished() {
 }
 
 @test "TP-15.36 (g): step 7's second rename failing 3 times and the reverse rename failing too: exit 26 naming budmon_old_<ts> and budmon_restore" {
-  export SQL_FAIL_PATTERN="budmon_restore RENAME TO budmon( |;|$)|budmon_old_[0-9TZ]+ RENAME TO budmon( |;|$)"
+  export SQL_FAIL_PATTERN='"budmon_restore" RENAME TO "budmon"|"budmon_old_[0-9TZ]+" RENAME TO "budmon"'
   run_restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
   assert_failure 26
   assert_output --regexp "budmon_old_[0-9]{8}T[0-9]{6}Z"

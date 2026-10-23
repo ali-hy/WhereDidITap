@@ -68,7 +68,7 @@ stub_docker() {
       [ "${COUNT_FAIL:-0}" = 1 ] && return 1
       echo "${COUNT_OUTPUT:-1}"
     elif [[ "${sql}" == *"FROM pg_database"* ]]; then
-      printf '%s\n' budmon_old_20261001T120000Z budmon_restore_failed_20261001T120000Z
+      printf '%s\n' budmon_old_20261001T120000Z budmon_restore_failed_20261001T120000Z ${EXTRA_LISTED:-}
     fi
     return 0
   fi
@@ -287,8 +287,20 @@ write_marker() {
   run_phase_b
   assert_success
   run drops
-  assert_line --partial "DROP DATABASE IF EXISTS budmon_old_20261001T120000Z"
-  assert_line --partial "DROP DATABASE IF EXISTS budmon_restore_failed_20261001T120000Z"
+  assert_line --partial 'DROP DATABASE IF EXISTS "budmon_old_20261001T120000Z" WITH (FORCE)'
+  assert_line --partial 'DROP DATABASE IF EXISTS "budmon_restore_failed_20261001T120000Z" WITH (FORCE)'
+  # A-470: exactly these two, quoted.
+  run bash -c "awk -F'\t' '\$1==\"sql\" && \$2 ~ /DROP DATABASE/' '${CALLS}' | wc -l"
+  assert_output "2"
+}
+
+@test "TP-15.37 (a) (A-470): a listed lower-case name (budmon_old_20261001t120000z) gets no DROP" {
+  export EXTRA_LISTED=budmon_old_20261001t120000z
+  run_phase_b
+  assert_success
+  run drops
+  refute_output --partial "budmon_old_20261001t120000z"
+  assert_line --partial 'DROP DATABASE IF EXISTS "budmon_old_20261001T120000Z" WITH (FORCE)'
 }
 
 @test "TP-15.37 (b): restore.inprogress present: nothing dropped, exit 0, leftover databases kept (a restore didn't finish)" {

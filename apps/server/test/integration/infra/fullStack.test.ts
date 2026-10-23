@@ -768,6 +768,17 @@ describe.skipIf(!INFRA_INT)("TP-15.22 (I): install and restore on a real runner 
 
     expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
     expect(counts()).toBe(seeded);
+    // A-469: the kept database has exactly the printed, upper-case T/Z name in pg_database.
+    const kept = /kept as (budmon_old_[0-9]{8}T[0-9]{6}Z)\b/.exec(`${r.stdout}${r.stderr}`)?.[1];
+    expect(kept, `${r.stdout}${r.stderr}`).toBeDefined();
+    expect(
+      adminSql(
+        `SELECT count(*) FROM pg_database WHERE datname = '${kept ?? ""}'`,
+        "postgres",
+      ).stdout.trim(),
+      adminSql("SELECT string_agg(datname, ',' ORDER BY datname) FROM pg_database", "postgres")
+        .stdout,
+    ).toBe("1");
     expect(
       adminSql("SELECT has_database_privilege('public', 'budmon', 'CONNECT')").stdout.trim(),
     ).toBe("f");
