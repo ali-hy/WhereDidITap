@@ -79,12 +79,15 @@ android {
     }
 
     sourceSets {
-        // AGP 9 takes no Provider here; the generator's output directory, resolved once.
-        getByName("main").java.directories +=
+        // AGP 9 takes no Provider here: the generator's output directory, resolved once and created
+        // up front so the source set sees it before openApiGenerate has run.
+        val generatedApi =
             layout.buildDirectory
                 .dir("generated/openapi/src/main/kotlin")
                 .get()
-                .asFile.path
+                .asFile
+                .apply { mkdirs() }
+        getByName("main").kotlin.directories += generatedApi.path
         // TP-13.9: the shared money vectors (F-313).
         getByName("test").resources.directories += "$rootDir/../../packages/shared/test-vectors"
     }
