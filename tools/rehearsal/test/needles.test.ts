@@ -51,4 +51,19 @@ describe("TP-16.15: the rehearsal constants (F-193)", () => {
     expect(m.REHEARSAL_OWNER_EMAIL).toBe("rehearsal-owner.7f3a@example.invalid");
     expect(m.REHEARSAL_SIGNIN_CLIENT_ID).toBe("rehearsal-signin.apps.googleusercontent.com");
   });
+
+  it("TP-16.15: REHEARSAL_FX_FAIL_DATE, REHEARSAL_PORTS and REHEARSAL_HOSTS (A-443, A-445)", () => {
+    expect(m.REHEARSAL_FX_FAIL_DATE).toBe("2024-03-05");
+    expect(m.REHEARSAL_PORTS).toEqual({
+      googleTls: 443,
+      googleControl: 18081,
+      fxTls: 8444,
+      fxControl: 18082,
+      sentryTls: 8445,
+    });
+    expect(m.REHEARSAL_HOSTS).toEqual({
+      fx: "fx.rehearsal.invalid",
+      sentry: "sentry.rehearsal.invalid",
+    });
+  });
 });
