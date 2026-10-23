@@ -3,13 +3,16 @@
 // /opt/pw-browsers); nothing here installs them.
 //
 // Projects (§10.1): chromium and pseudo-rtl on every PR; firefox, webkit and perf on release
-// candidates (selected with --project).
+// candidates (selected with --project); smoke only in the rehearsal's step 14 (A-446), against
+// E2E_BASE_URL, and excluded from every other project.
 import { defineConfig, devices } from "@playwright/test";
 
 // A-329: F-222 serves vite preview on 127.0.0.1:4173; A-395: E2E_WEB_PORT overrides the port
 // (E2E_API_PORT the API's, read by F-222), so parallel runs don't collide.
 // Tests tagged @perf (TP-12.4) run only in the perf project (§10.1: release candidates).
 const PERF = /@perf/;
+// A-446: smoke.spec.ts runs only in the smoke project.
+const SMOKE = /smoke\.spec\.ts$/;
 
 const BASE_URL =
   process.env["E2E_BASE_URL"] ?? `http://127.0.0.1:${process.env["E2E_WEB_PORT"] ?? "4173"}`;
@@ -25,32 +28,55 @@ export default defineConfig({
     baseURL: BASE_URL,
     trace: "retain-on-failure",
   },
-  webServer: {
-    command: "pnpm --filter @budmon/server e2e:serve",
-    url: BASE_URL,
-    reuseExistingServer: process.env["CI"] === undefined,
-    timeout: 180_000,
-    stdout: "pipe",
-    stderr: "pipe",
-  },
+  // A-446: with E2E_BASE_URL set (the rehearsal's stack), nothing is started here.
+  ...(process.env["E2E_BASE_URL"] === undefined
+    ? {
+        webServer: {
+          command: "pnpm --filter @budmon/server e2e:serve",
+          url: BASE_URL,
+          reuseExistingServer: process.env["CI"] === undefined,
+          timeout: 180_000,
+          stdout: "pipe" as const,
+          stderr: "pipe" as const,
+        },
+      }
+    : {}),
   projects: [
     {
       name: "chromium",
       // A-337: a fixed locale and zone, so TP-11.28's date entry is deterministic.
       use: { ...devices["Desktop Chrome"], locale: "en-US", timezoneId: "UTC" },
       grepInvert: PERF,
+      testIgnore: SMOKE,
     },
     {
       name: "pseudo-rtl",
       use: { ...devices["Desktop Chrome"], locale: "ar-XB" },
       grepInvert: PERF,
+      testIgnore: SMOKE,
     },
-    { name: "firefox", use: { ...devices["Desktop Firefox"] }, grepInvert: PERF },
-    { name: "webkit", use: { ...devices["Desktop Safari"] }, grepInvert: PERF },
+    {
+      name: "firefox",
+      use: { ...devices["Desktop Firefox"] },
+      grepInvert: PERF,
+      testIgnore: SMOKE,
+    },
+    {
+      name: "webkit",
+      use: { ...devices["Desktop Safari"] },
+      grepInvert: PERF,
+      testIgnore: SMOKE,
+    },
     {
       name: "perf",
       use: { ...devices["Desktop Chrome"] },
       grep: PERF,
+      testIgnore: SMOKE,
+    },
+    {
+      name: "smoke",
+      use: { ...devices["Desktop Chrome"], locale: "en-US", timezoneId: "UTC" },
+      testMatch: SMOKE,
     },
   ],
 });
