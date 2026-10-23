@@ -107,9 +107,18 @@ export interface RehearsalOptions {
   previousTag: string | null;
   /** A-452: the candidate's version; selects apps/server/test/upgrade/<version>/. */
   version: string;
+  /** A-468 (test only): a doctored overlay for one project; absent or null for a normal run. */
+  doctor?: RehearsalDoctor | null;
   images: { server: string; web: string; postgres: string };
   workDir: string;
   repoRoot: string;
+}
+export interface RehearsalDoctor {
+  name: string;
+  project: "main" | "capture";
+  /** Absolute path of tools/rehearsal/test/doctored/<name>.<project>.yaml. */
+  file: string;
+  expectStep: StepName;
 }
 export interface RehearsalContext {
   readonly opts: RehearsalOptions;
@@ -158,10 +167,13 @@ const STAGE_WORDS = /\b(HOST_ROLE|DEPLOYMENT|INFRA_STAGE|STAGE)\b/;
 
 /** F-178's compose_for plus the overlay. */
 export function composeArgs(
-  ctx: Pick<RehearsalContext, "releaseDir">,
+  ctx: Pick<RehearsalContext, "releaseDir"> & {
+    readonly opts?: Pick<RehearsalOptions, "doctor">;
+  },
   project: "main" | "capture",
 ): string[] {
   const r = ctx.releaseDir;
+  const doctor = ctx.opts?.doctor;
   return [
     "compose",
     "--project-directory",
@@ -172,9 +184,39 @@ export function composeArgs(
     `${r}/compose.${project}.yaml`,
     "-f",
     `${r}/rehearsal/compose.rehearsal.${project}.yaml`,
+    // A-468: a doctored run adds its overlay to that project's every call.
+    ...(doctor !== undefined && doctor !== null && doctor.project === project
+      ? ["-f", doctor.file]
+      : []),
     "--env-file",
     `${r}/local.env`,
   ];
+}
+
+/**
+ * A-468: whether a doctored run failed where it should. `first` is the first failing record other
+ * than artifacts and cleanup, cut at "/" (a sub-step counts as its step).
+ */
+export function doctorVerdict(
+  steps: StepRecord[],
+  expectStep: StepName,
+): { ok: boolean; message: string } {
+  const failed = steps.find((s) => !s.ok && s.name !== "artifacts" && s.name !== "cleanup");
+  const first = failed?.name.split("/")[0];
+  const cleanupOk = steps.find((s) => s.name === "cleanup")?.ok ?? true;
+  if (first === undefined) {
+    return { ok: false, message: `doctored: expected ${expectStep} to fail, but no step failed` };
+  }
+  if (first !== expectStep) {
+    return {
+      ok: false,
+      message: `doctored: expected ${expectStep} to fail, but ${first} failed first`,
+    };
+  }
+  if (!cleanupOk) {
+    return { ok: false, message: `doctored: ${expectStep} failed as expected, but cleanup failed` };
+  }
+  return { ok: true, message: `doctored: ${expectStep} failed as expected` };
 }
 
 function caDir(ctx: RehearsalContext): string {
