@@ -67,7 +67,7 @@ drop_leftover_databases() {
   fi
   while IFS= read -r db; do
     [[ "${db}" =~ ^budmon_(old|restore_failed)_[0-9]{8}T[0-9]{6}Z$ ]] || continue
-    admin_sql "${tag}" "DROP DATABASE IF EXISTS ${db} WITH (FORCE)" >/dev/null || true
+    admin_sql "${tag}" "DROP DATABASE IF EXISTS \"${db}\" WITH (FORCE)" >/dev/null || true
   done < <(admin_sql "${tag}" \
     "SELECT datname FROM pg_database WHERE datname ~ '^budmon_(old|restore_failed)_'" 2>/dev/null || true)
 }
@@ -174,7 +174,7 @@ rename_db() {
   local tag="$1" from="$2" to="$3" attempt
   for attempt in 1 2 3; do
     admin_sql "${tag}" "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname IN ('budmon', 'budmon_restore') AND pid <> pg_backend_pid()" >/dev/null 2>&1 || true
-    if admin_sql "${tag}" "ALTER DATABASE ${from} RENAME TO ${to}" >/dev/null 2>&1; then
+    if admin_sql "${tag}" "ALTER DATABASE \"${from}\" RENAME TO \"${to}\"" >/dev/null 2>&1; then
       return 0
     fi
     [ "${attempt}" -lt 3 ] && sleep "${RENAME_RETRY_DELAY}"
@@ -265,9 +265,9 @@ cmd_restore() {
     echo "budmon-local: safety dump: ${RESTORE_SAFETY}" >&2
     die "$1" "$2"
   }
-  admin_sql "${current}" "DROP DATABASE IF EXISTS budmon_restore WITH (FORCE)" >/dev/null ||
+  admin_sql "${current}" "DROP DATABASE IF EXISTS \"budmon_restore\" WITH (FORCE)" >/dev/null ||
     restore_fail 29 "dropping budmon_restore failed"
-  admin_sql "${current}" "CREATE DATABASE budmon_restore OWNER budmon_migrator" >/dev/null ||
+  admin_sql "${current}" "CREATE DATABASE \"budmon_restore\" OWNER \"budmon_migrator\"" >/dev/null ||
     restore_fail 29 "creating budmon_restore failed"
   compose_for "${current}" main exec -T -u postgres postgres \
     pg_restore --exit-on-error -U budmon_admin -d budmon_restore <"${file}" >/dev/null ||
@@ -294,9 +294,9 @@ cmd_restore() {
   local incomplete="restore rollback incomplete:"
   local runbook="maintenance stays on; see the runbook (A restore didn't finish)"
   write_restore_marker "${tag}" "${current}" "${old}" "${failed}"
-  admin_sql "${current}" "ALTER DATABASE budmon WITH ALLOW_CONNECTIONS false" >/dev/null || true
+  admin_sql "${current}" "ALTER DATABASE \"budmon\" WITH ALLOW_CONNECTIONS false" >/dev/null || true
   if ! rename_db "${current}" budmon "${old}"; then
-    admin_sql "${current}" "ALTER DATABASE budmon WITH ALLOW_CONNECTIONS true" >/dev/null ||
+    admin_sql "${current}" "ALTER DATABASE \"budmon\" WITH ALLOW_CONNECTIONS true" >/dev/null ||
       restore_fail 26 "${incomplete} budmon holds the data from before the restore but refuses connections; ${runbook}"
     rm -f "$(restore_marker)"
     restore_fail 24 "budmon is still in use; nothing was renamed"
@@ -304,13 +304,13 @@ cmd_restore() {
   if ! rename_db "${current}" budmon_restore budmon; then
     rename_db "${current}" "${old}" budmon ||
       restore_fail 26 "${incomplete} budmon is missing; the data from before the restore is in ${old} and the restored copy in budmon_restore; ${runbook}"
-    admin_sql "${current}" "ALTER DATABASE budmon WITH ALLOW_CONNECTIONS true" >/dev/null ||
+    admin_sql "${current}" "ALTER DATABASE \"budmon\" WITH ALLOW_CONNECTIONS true" >/dev/null ||
       restore_fail 26 "${incomplete} budmon holds the data from before the restore but refuses connections; ${runbook}"
     rm -f "$(restore_marker)"
     restore_fail 24 "budmon_restore is still in use; the names are restored"
   fi
   # Not fatal by itself: the readiness wait then fails and the rollback runs.
-  admin_sql "${current}" "ALTER DATABASE budmon WITH ALLOW_CONNECTIONS true" >/dev/null || true
+  admin_sql "${current}" "ALTER DATABASE \"budmon\" WITH ALLOW_CONNECTIONS true" >/dev/null || true
 
   # 8. Start the dump's release.
   up_both "${tag}" || true
@@ -319,12 +319,12 @@ cmd_restore() {
     stop_app "${tag}" # r1
     wait_postgres "${current}" || # r2
       restore_fail 26 "${incomplete} budmon holds the restored copy and the data from before the restore is in ${old}; ${runbook}"
-    admin_sql "${current}" "ALTER DATABASE budmon WITH ALLOW_CONNECTIONS false" >/dev/null || true # r3
+    admin_sql "${current}" "ALTER DATABASE \"budmon\" WITH ALLOW_CONNECTIONS false" >/dev/null || true # r3
     rename_db "${current}" budmon "${failed}" || # r4
       restore_fail 26 "${incomplete} budmon holds the restored copy and the data from before the restore is in ${old}; ${runbook}"
     rename_db "${current}" "${old}" budmon || # r5
       restore_fail 26 "${incomplete} budmon is missing; the data from before the restore is in ${old} and the restored copy in ${failed}; ${runbook}"
-    admin_sql "${current}" "ALTER DATABASE budmon WITH ALLOW_CONNECTIONS true" >/dev/null || # r6
+    admin_sql "${current}" "ALTER DATABASE \"budmon\" WITH ALLOW_CONNECTIONS true" >/dev/null || # r6
       restore_fail 26 "${incomplete} budmon holds the data from before the restore but refuses connections; ${runbook}"
     rm -f "$(restore_marker)" # r7
     if up_both "${current}"; then # r8
