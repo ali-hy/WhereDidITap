@@ -354,6 +354,15 @@ importers:
         specifier: 4.23.15
         version: 4.23.15
 
+  tools/rehearsal:
+    devDependencies:
+      '@budmon/test-support':
+        specifier: workspace:*
+        version: link:../../packages/test-support
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
+
 packages:
 
   '@asamuzakjp/css-color@7.1.4':
