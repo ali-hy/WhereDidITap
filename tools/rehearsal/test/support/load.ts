@@ -168,6 +168,8 @@ export interface RehearsalDeps {
 }
 export interface RunModule {
   STEP_ORDER: readonly StepName[];
+  /** A-483: the work directory's three trees. */
+  rehearsalPaths: (workDir: string) => { stepLogs: string; artifacts: string; staging: string };
   defaultSteps: Readonly<Record<StepName, StepFn>>;
   composeArgs: (
     ctx: Pick<RehearsalContext, "releaseDir"> & { opts?: { doctor?: RehearsalDoctor | null } },
