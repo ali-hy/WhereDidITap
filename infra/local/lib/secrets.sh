@@ -153,7 +153,7 @@ site_valid() {
 # One answer per key: `KEY [default]: ` on stderr, read from stdin; blank → the default, or
 # __FILL_ME__ (an empty value for the optional Android ids); end of input answers blank.
 prompt_site_key() {
-  local key="$1" default answer
+  local key="$1" default answer rejected=0
   while :; do
     default="$(site_default "${key}")"
     printf '%s [%s]: ' "${key}" "${default}" >&2
@@ -162,7 +162,10 @@ prompt_site_key() {
       SITE_EOF=1
     fi
     if [ -z "${answer}" ]; then
-      if [ -n "${default}" ]; then
+      # A-496: a rejected answer followed by end of input is __FILL_ME__, never the default.
+      if [ "${SITE_EOF:-0}" = 1 ] && [ "${rejected}" = 1 ]; then
+        answer="${PLACEHOLDER}"
+      elif [ -n "${default}" ]; then
         answer="${default}"
       elif [ "${key}" = "GOOGLE_SIGNIN_ANDROID_CLIENT_IDS" ]; then
         answer=""
@@ -178,6 +181,7 @@ prompt_site_key() {
       return 0
     fi
     echo "invalid value for ${key}" >&2
+    rejected=1
     if [ "${SITE_EOF:-0}" = 1 ]; then
       SITE_ANSWER="${PLACEHOLDER}"
       return 0
