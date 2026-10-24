@@ -329,6 +329,9 @@ assert_step5_failure() {
   run bash -c "awk -F'\t' '\$1==\"sql\" { print \$2 }' '${CALLS}' | tr '\n' ' '"
   [[ "${output}" == *"ALLOW_CONNECTIONS false"*"pg_terminate_backend"* ]] || { echo "${output}"; return 1; }
   [[ "${output}" == *'ALTER DATABASE "budmon" WITH ALLOW_CONNECTIONS true'* ]] || { echo "${output}"; return 1; }
+  # A-484: each of the three attempts terminates budmon's sessions only.
+  [ "$(grep -c "WHERE datname = 'budmon' AND pid <> pg_backend_pid()" "${CALLS}")" -ge 3 ]
+  assert_per_rename_termination
 }
 
 @test "TP-15.22 (h7): the rename failing 3 times exits 24 with names unchanged and ALLOW_CONNECTIONS true on budmon" {
@@ -370,6 +373,26 @@ assert_step5_failure() {
   export SQL_FAIL_PATTERN='CREATE DATABASE "budmon_restore"'
   BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.2.0/budmon-local" restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
   assert_step5_failure "creating budmon_restore failed"
+}
+
+# A-484: every rename attempt is preceded by the termination of that rename's <from> only, and
+# no statement terminates a fixed pair (`datname IN`).
+assert_per_rename_termination() {
+  run bash -c "awk -F'\t' '\$1==\"sql\" { print \$2 }' '${CALLS}'"
+  refute_output --partial "datname IN"
+  local prev="" line from n=0
+  while IFS= read -r line; do
+    if [[ "${line}" =~ ALTER\ DATABASE\ \"([a-z0-9_TZ]+)\"\ RENAME\ TO ]]; then
+      from="${BASH_REMATCH[1]}"
+      n=$((n + 1))
+      [[ "${prev}" == *"pg_terminate_backend"*"WHERE datname = '${from}' AND pid <> pg_backend_pid()"* ]] || {
+        echo "rename of ${from} not preceded by its own termination; previous: ${prev}"
+        return 1
+      }
+    fi
+    prev="${line}"
+  done <<<"${output}"
+  [ "${n}" -gt 0 ] || { echo "no rename recorded"; return 1; }
 }
 
 # ---- TP-15.36 (A-426): the rollback stops only the app and checks every step ----
@@ -422,6 +445,11 @@ assert_unfinished() {
   refute_output --regexp " (stop|down)$"
   [ ! -e "${BUDMON_HOME}/restore.inprogress" ]
   [ -e "${BUDMON_HOME}/maintenance/on" ]
+  # A-484: datname = 'budmon' before the rename to budmon_restore_failed_<ts>, and
+  # datname = 'budmon_old_<ts>' before the reverse rename.
+  assert_per_rename_termination
+  run grep -cE "WHERE datname = 'budmon_old_[0-9]{8}T[0-9]{6}Z' AND pid <> pg_backend_pid\(\)" "${CALLS}"
+  [ "${output}" -ge 1 ]
 }
 
 @test "TP-15.36 (b): Postgres not coming back in the rollback: exit 26, no rename and no up -d after the readiness timeout" {
@@ -448,6 +476,10 @@ assert_unfinished() {
   assert_failure 26
   assert_output --regexp "restore rollback incomplete: budmon is missing; the data from before the restore is in budmon_old_[0-9TZ]+ and the restored copy in budmon_restore_failed_[0-9TZ]+"
   assert_unfinished
+  # A-484: all three attempts of the reverse rename terminate budmon_old_<ts>'s sessions.
+  run grep -cE "WHERE datname = 'budmon_old_[0-9]{8}T[0-9]{6}Z' AND pid <> pg_backend_pid\(\)" "${CALLS}"
+  [ "${output}" -ge 3 ]
+  assert_per_rename_termination
 }
 
 @test "TP-15.36 (e): ALLOW_CONNECTIONS true failing after the reverse renames: exit 26, refuses connections" {
