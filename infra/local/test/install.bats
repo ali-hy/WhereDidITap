@@ -498,6 +498,59 @@ MV
   done
 }
 
+# ---- TP-15.40 (i) (A-496): an unterminated last line is an answer; rejected then EOF is __FILL_ME__ ----
+
+S3_PROMPT='S3_ENDPOINT [https://s3.eu-central-003.backblazeb2.com]: '
+
+# The number of times the fixed text $1 occurs in $2.
+occurrences() {
+  grep -oF -- "$1" <<<"$2" | wc -l | tr -d ' '
+}
+
+# install on an empty home with stdin from printf "$1" directly (no $(…), so no newline is stripped).
+install_with_input() {
+  run --separate-stderr bash -c "printf '$1' | '${SCRIPT}' install v1.0.0"
+}
+
+assert_s3_rejected_then_eof() {
+  assert_failure 20
+  [ "$(occurrences 'invalid value for S3_ENDPOINT' "${stderr}")" -eq 1 ] || { echo "${stderr}"; return 1; }
+  [[ "${output}${stderr}" != *"http://x"* ]] || { echo "http://x echoed"; return 1; }
+  # Step 7's placeholder list goes to stderr.
+  [[ "${stderr}" == *"site.env S3_ENDPOINT"* ]] || { echo "${stderr}"; return 1; }
+  run cat "${BUDMON_HOME}/site.env"
+  assert_line "S3_ENDPOINT=__FILL_ME__"
+  assert_line "S3_REGION=eu-central-003"
+}
+
+@test "TP-15.40 (i1) (A-496): a rejected terminated last answer: S3_ENDPOINT=__FILL_ME__ (not the default), one invalid message, prompted twice, exit 20" {
+  install_with_input '\n\nhttp://x\n'
+  local err="${stderr}"
+  [ "$(occurrences "${S3_PROMPT}" "${err}")" -eq 2 ] || { echo "${err}"; return 1; }
+  assert_s3_rejected_then_eof
+}
+
+@test "TP-15.40 (i2) (A-496): a rejected unterminated last answer: S3_ENDPOINT=__FILL_ME__, one invalid message, prompted once, exit 20" {
+  install_with_input '\n\nhttp://x'
+  local err="${stderr}"
+  [ "$(occurrences "${S3_PROMPT}" "${err}")" -eq 1 ] || { echo "${err}"; return 1; }
+  assert_s3_rejected_then_eof
+}
+
+@test "TP-15.40 (i3) (A-496): a blank answer after a rejection, with input remaining, takes the default" {
+  install_with_input '\n\nhttp://x\n\n'
+  [ "$(occurrences 'invalid value for S3_ENDPOINT' "${stderr}")" -eq 1 ] || { echo "${stderr}"; return 1; }
+  run cat "${BUDMON_HOME}/site.env"
+  assert_line "S3_ENDPOINT=https://s3.eu-central-003.backblazeb2.com"
+}
+
+@test "TP-15.40 (i4) (A-496): a valid unterminated last answer is kept: PUBLIC_ORIGIN gets https://, and the app origins default from it" {
+  install_with_input 'laptop.tailnet.ts.net'
+  run cat "${BUDMON_HOME}/site.env"
+  assert_line "PUBLIC_ORIGIN=https://laptop.tailnet.ts.net"
+  assert_line "GOOGLE_SIGNIN_APP_ORIGINS=https://laptop.tailnet.ts.net,http://localhost:8080"
+}
+
 # ---- TP-15.43 (A-433): install step 11's Postgres wait is bounded ----
 
 @test "TP-15.43: install step 11 with a pg_isready taking 3 s and failing, BUDMON_PG_READY_TIMEOUT=2: at most 2 probes, within 6 s" {
