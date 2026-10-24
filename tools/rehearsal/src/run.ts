@@ -409,7 +409,7 @@ async function containers(ctx: RehearsalContext, step: string, project: "main" |
   const r = await ctx.exec(
     "docker",
     ["ps", "-aq", "--filter", `label=com.docker.compose.project=${REHEARSAL_PROJECTS[project]}`],
-    { step },
+    { step, sensitiveStdout: true },
   );
   return r.stdout.split("\n").filter((id) => id.trim() !== "");
 }
@@ -419,7 +419,7 @@ async function inspect(
   step: string,
   id: string,
 ): Promise<Record<string, unknown>> {
-  const r = await ctx.exec("docker", ["inspect", id], { step });
+  const r = await ctx.exec("docker", ["inspect", id], { step, sensitiveStdout: true });
   const parsed = json(r.stdout);
   return Array.isArray(parsed) && typeof parsed[0] === "object" && parsed[0] !== null
     ? (parsed[0] as Record<string, unknown>)
@@ -1788,9 +1788,14 @@ export const defaultSteps: Readonly<Record<StepName, StepFn>> = Object.freeze({
 const defaultCollectArtifacts: StepFn = async (ctx) => {
   const step = "artifacts";
   const dir = path.join(ctx.opts.workDir, "artifacts");
+  // A-476: every call here carries sensitiveStdout, so the artifacts step log holds no source.
   const save = (file: string, text: string) =>
-    ctx.exec("install", ["-D", "-m", "0644", "/dev/stdin", file], { step, input: text });
-  await ctx.exec("mkdir", ["-p", dir], { step });
+    ctx.exec("install", ["-D", "-m", "0644", "/dev/stdin", file], {
+      step,
+      input: text,
+      sensitiveStdout: true,
+    });
+  await ctx.exec("mkdir", ["-p", dir], { step, sensitiveStdout: true });
   const live = await scanSources(ctx, step).catch(() => []);
   const sources = [...live, ...stepLogSources(ctx)];
   const hits = new Map<string, Set<string>>();
