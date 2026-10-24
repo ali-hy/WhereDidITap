@@ -207,6 +207,7 @@ describe("TP-16.24x: the default cleanup touches only the rehearsal's projects, 
   it.each([
     ["the filesystem root", "/"],
     ["an empty string", ""],
+    ["relative", "w"],
   ])("TP-16.24x (e): a workDir of %s → cleanup: unsafe_path, and no sudo call", async (_l, dir) => {
     const { exec, calls } = recordingExec();
 
@@ -219,5 +220,16 @@ describe("TP-16.24x: the default cleanup touches only the rehearsal's projects, 
     });
     expect(calls.filter((c) => c.cmd === "sudo")).toEqual([]);
     expect(result.ok).toBe(false);
+  });
+
+  it("TP-16.24x (e): a workDir with a trailing slash is still the work directory: ok, one sudo rm -rf of home and capture-key", async () => {
+    const { exec, calls } = recordingExec();
+
+    const result = await run("/tmp/w/", exec, null, true);
+
+    expect(record(result.steps, "cleanup")).toEqual({ name: "cleanup", ok: true, detail: "" });
+    expect(calls.filter((c) => c.cmd === "sudo").map((c) => c.args)).toEqual([
+      ["rm", "-rf", "/tmp/w/home", "/tmp/w/capture-key"],
+    ]);
   });
 });
