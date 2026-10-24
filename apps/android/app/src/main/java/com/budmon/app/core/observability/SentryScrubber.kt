@@ -49,9 +49,19 @@ private fun validTag(key: String, value: String): String? = when (key) {
     else -> null
 }
 
+/**
+ * A-485: JVM frames carry a bare source-file name (`Worker.kt`); anything with `/`, `\` or `:`
+ * (a device path, a Windows path or a URL) becomes `<unknown>`. Idempotent.
+ */
+internal fun reduceFrameFilename(filename: String): String =
+    if (filename.any { it == '/' || it == '\\' || it == ':' }) "<unknown>" else filename
+
 private fun scrubFrame(frame: SentryStackFrame): SentryStackFrame? {
     val function = frame.function
-    val filename = frame.filename ?: return null
+    // A-485: no filename drops the frame; the reduced name is what A-110's pattern checks.
+    val raw = frame.filename
+    if (raw.isNullOrEmpty()) return null
+    val filename = reduceFrameFilename(raw)
     if (function != null && !FRAME_FUNCTION.matches(function)) return null
     if (!FRAME_FILENAME.matches(filename)) return null
     return SentryStackFrame().apply {

@@ -69,9 +69,33 @@ function isObject(v: unknown): v is Json {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** A URL without its query or fragment (kept relative when it was). */
-export function stripToPath(url: string): string {
+/** A URL without its query or fragment. */
+function stripQuery(url: string): string {
   return url.replace(/[?#].*$/s, "");
+}
+
+/**
+ * F-217: a URL "stripped to the path": no query or fragment, and no scheme, host or port (any
+ * leading `scheme:` parts and `//authority`), so the tailnet host never reaches Sentry.
+ */
+export function stripToPath(url: string): string {
+  const rest = stripQuery(url).replace(/^(?:[A-Za-z][A-Za-z0-9+.-]*:)*(?:\/\/[^/]*)?/, "");
+  return rest === "" ? "/" : rest;
+}
+
+const ASSET_PATH = /^assets\/[A-Za-z0-9_-][A-Za-z0-9_.-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$/;
+const ASSET_URL = /^https?:\/\/[^/]+\/(assets\/.*)$/s;
+
+/**
+ * A-485: a frame's filename as F-221's bundle path `assets/<path>` (scheme, host and port
+ * dropped), or `<unknown>`. Idempotent: `<unknown>` and `assets/…` are returned unchanged.
+ */
+export function reduceFrameFilename(filename: string): string {
+  // A-485 (2) matches the scheme and host below, so only the query and fragment go first.
+  const u = stripQuery(filename);
+  if (u === "<unknown>" || ASSET_PATH.test(u)) return u;
+  const asset = ASSET_URL.exec(u)?.[1];
+  return asset !== undefined && ASSET_PATH.test(asset) ? asset : "<unknown>";
 }
 
 function str(v: unknown): string | undefined {
@@ -81,12 +105,15 @@ function str(v: unknown): string | undefined {
 function scrubFrames(stacktrace: unknown): Json | undefined {
   if (!isObject(stacktrace) || !Array.isArray(stacktrace["frames"])) return undefined;
   const frames = (stacktrace["frames"] as unknown[]).filter(isObject).flatMap((f) => {
-    const filename = str(f["filename"]);
+    // A-485: no filename drops the frame; reduce it, then A-110's patterns; rebuild from the
+    // allowed fields only.
+    const raw = str(f["filename"]);
+    if (raw === undefined || raw === "") return [];
+    const filename = reduceFrameFilename(raw);
     const fn = str(f["function"]);
-    if (filename !== undefined && !FRAME_FILENAME.test(stripToPath(filename))) return [];
+    if (!FRAME_FILENAME.test(filename)) return [];
     if (fn !== undefined && !FRAME_FUNCTION.test(fn)) return [];
-    const out: Json = {};
-    if (filename !== undefined) out["filename"] = stripToPath(filename);
+    const out: Json = { filename };
     if (fn !== undefined) out["function"] = fn;
     for (const k of ["lineno", "colno"]) if (typeof f[k] === "number") out[k] = f[k];
     if (typeof f["in_app"] === "boolean") out["in_app"] = f["in_app"];
@@ -115,7 +142,7 @@ export function scrubWebBreadcrumb(b: Json): Json | null {
 }
 
 /**
- * F-35's allowlist, plus the request URL and transaction without their queries. An exception's
+ * F-35's allowlist, plus the request URL and transaction stripped to the path. An exception's
  * value is never its message: the error key of a defined oRPC error (from the hint's original
  * exception, B-5), else the class name.
  */
