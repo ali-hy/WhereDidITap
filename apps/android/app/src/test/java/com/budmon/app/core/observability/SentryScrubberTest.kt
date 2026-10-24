@@ -179,4 +179,92 @@ class SentryScrubberTest {
 
         assertNull(SentryScrubber.scrubBreadcrumb(crumb))
     }
+
+    // ---- Re-review 5636303270 B-2: frames, tags and user (A-110, F-30, F-35) ----
+
+    private fun frame(fn: String?, file: String?) = SentryStackFrame().apply {
+        function = fn
+        filename = file
+        lineno = 12
+        colno = 4
+        isInApp = true
+    }
+
+    @Test
+    fun `TP-13_8 (re-review B-2) exception frames - one valid kept with only function, filename, lineno, colno and in_app`() {
+        val valid = frame("run", "Worker.kt").apply {
+            vars = mapOf("note" to canary)
+            contextLine = "val note = \"$canary\""
+            module = "com.example.$canary"
+        }
+        val e = SentryEvent().apply {
+            exceptions = listOf(
+                SentryException().apply {
+                    type = "IllegalStateException"
+                    value = "bad"
+                    stacktrace = SentryStackTrace(
+                        listOf(
+                            valid,
+                            frame("x $canary", "Worker.kt"),
+                            frame("run", "/data/user/0/$canary/x.kt"),
+                            frame("run", null),
+                        ),
+                    )
+                },
+            )
+        }
+
+        val scrubbed = SentryScrubber().execute(e, Hint())!!
+        val frames = scrubbed.exceptions!!.single().stacktrace!!.frames!!
+
+        assertEquals(1, frames.size)
+        val kept = frames.single()
+        assertEquals("run", kept.function)
+        assertEquals("Worker.kt", kept.filename)
+        assertEquals(12, kept.lineno)
+        assertEquals(4, kept.colno)
+        assertEquals(true, kept.isInApp)
+        assertNull(kept.vars)
+        assertNull(kept.contextLine)
+        assertNull(kept.module)
+        assertFalse(serialized(scrubbed).contains(canary))
+    }
+
+    @Test
+    fun `TP-13_8 (re-review B-2) a frame with a null filename is dropped`() {
+        val e = SentryEvent().apply {
+            exceptions = listOf(
+                SentryException().apply {
+                    type = "IllegalStateException"
+                    stacktrace = SentryStackTrace(listOf(frame("run", null)))
+                },
+            )
+        }
+
+        val frames = SentryScrubber().execute(e, Hint())!!.exceptions!!.single().stacktrace?.frames ?: emptyList()
+
+        assertEquals(emptyList<SentryStackFrame>(), frames)
+    }
+
+    @Test
+    fun `TP-13_8 (re-review B-2) tags - route loses its query, http_status 503 kept and 600 dropped, a 32-hex request_id kept`() {
+        val requestId = "0123456789abcdef0123456789abcdef"
+        fun scrub(vararg tags: Pair<String, String>) =
+            SentryScrubber().execute(SentryEvent().apply { tags.forEach { (k, v) -> setTag(k, v) } }, Hint())!!
+
+        val kept = scrub("route" to "/things/{id}?q=$canary", "http_status" to "503", "request_id" to requestId)
+        assertEquals("/things/{id}", kept.getTag("route"))
+        assertEquals("503", kept.getTag("http_status"))
+        assertEquals(requestId, kept.getTag("request_id"))
+        assertFalse(serialized(kept).contains(canary))
+
+        assertNull(scrub("http_status" to "600").getTag("http_status"))
+    }
+
+    @Test
+    fun `TP-13_8 (re-review B-2) a non-UUID user id gives no user`() {
+        val e = SentryEvent().apply { user = User().apply { id = "user-$canary" } }
+
+        assertNull(SentryScrubber().execute(e, Hint())!!.user)
+    }
 }
