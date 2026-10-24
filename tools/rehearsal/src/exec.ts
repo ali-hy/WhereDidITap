@@ -32,12 +32,20 @@ export function createLoggingExec(logDir: string, deps: { spawn?: typeof nodeSpa
       };
       let child: ReturnType<typeof nodeSpawn>;
       try {
-        child = spawn(cmd, args, {
-          ...(o.cwd === undefined ? {} : { cwd: o.cwd }),
-          env: { ...process.env, ...o.env },
-          stdio: ["pipe", "pipe", "pipe"],
-          ...(o.timeoutMs === undefined ? {} : { timeout: o.timeoutMs }),
-        });
+        // A-491: Node's piped stdin is a socketpair, and open("/dev/stdin") on a socket fails
+        // (ENXIO), so a child that gets input reads it through `cat`, from a real pipe. The exit
+        // status is the command's; a missing command exits 127 from the shell.
+        const piped = o.input !== undefined;
+        child = spawn(
+          piped ? "/bin/sh" : cmd,
+          piped ? ["-c", 'cat | exec "$0" "$@"', cmd, ...args] : args,
+          {
+            ...(o.cwd === undefined ? {} : { cwd: o.cwd }),
+            env: { ...process.env, ...o.env },
+            stdio: ["pipe", "pipe", "pipe"],
+            ...(o.timeoutMs === undefined ? {} : { timeout: o.timeoutMs }),
+          },
+        );
       } catch {
         finish(127);
         return;

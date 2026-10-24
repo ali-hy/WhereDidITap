@@ -6,6 +6,7 @@
 services:
   worker-capture:
     environment:
+      BUDMON_RELEASE: ${REHEARSAL_RELEASE:?REHEARSAL_RELEASE is not set}
       APP_ENV: rehearsal
       KMS_PROVIDER: local
       SENTRY_DSN: https://rehearsal@sentry.rehearsal.invalid:8445/1

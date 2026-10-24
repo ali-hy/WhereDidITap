@@ -1,6 +1,8 @@
 # F-195 step 4 (A-449): the rehearsal overlay for budmon-main, added by the harness's composeArgs.
 # Nothing in it is used on the laptop. It points api, worker-general and migrate at the harness's
 # fakes (host-gateway, trusting the harness CA) and adds the S3 test image over TLS (A-450).
+# A-492: BUDMON_RELEASE is the release the images are (REHEARSAL_RELEASE, set by the harness);
+# the image tag stays `rehearsal`.
 # REHEARSAL_CA_DIR is <workDir>/ca, so ${REHEARSAL_CA_DIR}/.. is <workDir>.
 
 x-rehearsal-env: &rehearsal-env
@@ -19,6 +21,7 @@ services:
   api:
     environment:
       <<: *rehearsal-env
+      BUDMON_RELEASE: ${REHEARSAL_RELEASE:?REHEARSAL_RELEASE is not set}
     extra_hosts:
       - "oauth2.googleapis.com:host-gateway"
       - "www.googleapis.com:host-gateway"
@@ -31,6 +34,7 @@ services:
   worker-general:
     environment:
       <<: *rehearsal-env
+      BUDMON_RELEASE: ${REHEARSAL_RELEASE:?REHEARSAL_RELEASE is not set}
       FX_PROVIDER: live
       FX_PRIMARY_BASE_URL: https://fx.rehearsal.invalid:8444/oxr
       FX_FALLBACK_BASE_URL: https://fx.rehearsal.invalid:8444/fawaz/{date}
@@ -44,6 +48,7 @@ services:
   migrate:
     environment:
       <<: *rehearsal-env
+      BUDMON_RELEASE: ${REHEARSAL_RELEASE:?REHEARSAL_RELEASE is not set}
     extra_hosts:
       - "sentry.rehearsal.invalid:host-gateway"
     volumes:

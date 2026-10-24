@@ -261,8 +261,14 @@ function upgradeCaseDir(ctx: RehearsalContext): string {
   return path.join(ctx.opts.repoRoot, "apps/server/test/upgrade", ctx.opts.version);
 }
 
+/** A-492: the images' tag, and the release they run as (the candidate is opts.version). */
 function stackEnv(ctx: RehearsalContext, tag = "rehearsal"): Record<string, string> {
-  return { BUDMON_HOME: ctx.budmonHome, BUDMON_TAG: tag, REHEARSAL_CA_DIR: caDir(ctx) };
+  return {
+    BUDMON_HOME: ctx.budmonHome,
+    BUDMON_TAG: tag,
+    REHEARSAL_RELEASE: tag === "rehearsal" ? ctx.opts.version : tag,
+    REHEARSAL_CA_DIR: caDir(ctx),
+  };
 }
 
 /** `docker compose … <args>` for one project. */
@@ -603,11 +609,7 @@ const secretsStep: StepFn = (ctx) =>
     const ca = caDir(ctx);
     const x = (cmd: string, args: string[], what: string, o: Partial<ExecOptions> = {}) =>
       must(ctx.exec(cmd, args, { step, ...o }), what);
-    await x(
-      "mkdir",
-      ["-p", "-m", "0700", home, ca, path.join(ctx.opts.workDir, "artifacts")],
-      "mkdir",
-    );
+    await x("mkdir", ["-p", "-m", "0700", home, ca], "mkdir");
     await x("chmod", ["0700", home], "mkdir");
     // The candidate's infra/local, copied as F-178 does (the overlay included; tests excluded).
     await x("mkdir", ["-p", path.dirname(ctx.releaseDir)], "release_copy");
