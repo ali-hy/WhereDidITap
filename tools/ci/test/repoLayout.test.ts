@@ -4,7 +4,7 @@
 // (A-318).
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
@@ -80,7 +80,8 @@ describe("TP-0.13x: root workspace files (§2.2)", () => {
     const pkg = rootPackageJson();
 
     expect(pkg.private).toBe(true);
-    expect(pkg.packageManager).toMatch(/^pnpm@10\.\d+\.\d+(\+sha\d+\.[0-9a-f]+)?$/);
+    // TP-0.35 (A-490): corepack's sha512 hash is required.
+    expect(pkg.packageManager).toMatch(/^pnpm@10\.\d+\.\d+\+sha512\.[0-9a-f]{128}$/);
     expect(pkg.engines?.node).toBe(">=24 <25");
   });
 
@@ -236,6 +237,39 @@ describe("TP-0.30: root ignores cover .claude (A-318)", () => {
   });
 });
 
+// TP-0.35 (A-490): pnpm comes from packageManager (with corepack's hash, checked in TP-0.13x),
+// never from a second version input.
+describe("TP-0.35: pnpm's version has one source (A-490)", () => {
+  it("TP-0.35: package.json's packageManager carries a sha512 hash", () => {
+    const pkg = JSON.parse(readRootFile("package.json")) as { packageManager?: unknown };
+
+    expect(pkg.packageManager).toMatch(/^pnpm@10\.\d+\.\d+\+sha512\.[0-9a-f]{128}$/);
+  });
+
+  it("TP-0.35: no pnpm/action-setup step in any workflow has with.version", () => {
+    const dir = path.join(ROOT, ".github/workflows");
+    const offending: string[] = [];
+    let seen = 0;
+    for (const file of readdirSync(dir).filter((f) => /\.ya?ml$/.test(f))) {
+      const wf = parse(readFileSync(path.join(dir, file), "utf8")) as {
+        jobs?: Record<string, { steps?: { uses?: unknown; with?: Record<string, unknown> }[] }>;
+      };
+      for (const [job, j] of Object.entries(wf.jobs ?? {})) {
+        for (const step of j.steps ?? []) {
+          if (typeof step.uses === "string" && step.uses.startsWith("pnpm/action-setup@")) {
+            seen += 1;
+            if (step.with !== undefined && "version" in step.with)
+              offending.push(`${file}: ${job}`);
+          }
+        }
+      }
+    }
+
+    expect(seen).toBeGreaterThan(0);
+    expect(offending).toEqual([]);
+  });
+});
+
 // TP-0.33 (A-360): build outputs stay ignored, but a source package named `build` doesn't.
 describe("TP-0.33: .gitignore keeps source packages named build (A-360)", () => {
   const TESTKIT = "apps/android/app/src/test/java/com/budmon/app/build";
@@ -250,6 +284,13 @@ describe("TP-0.33: .gitignore keeps source packages named build (A-360)", () => 
       expect(isIgnored(relative)).toBe(true);
     },
   );
+
+  const SCHEMA = "apps/android/app/schemas/com.budmon.app.core.db.BudmonDatabase/1.json";
+
+  it("TP-0.33 (A-486): the Room schema export isn't ignored and is tracked", () => {
+    expect(isIgnored(SCHEMA)).toBe(false);
+    expect(git("ls-files", "--", SCHEMA).split("\n")).toContain(SCHEMA);
+  });
 
   it("TP-0.33: git ls-files lists AgpPaths.kt and BuildPropertiesTest.kt", () => {
     const tracked = git("ls-files", "--", `${TESTKIT}/`).split("\n");

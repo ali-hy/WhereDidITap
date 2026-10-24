@@ -286,4 +286,29 @@ describe("TP-0.32: ci.yml android job (A-351)", () => {
       }
     }
   });
+
+  // TP-0.34 (A-486): the Room schema is uploaded, then compared with the committed export.
+  it("TP-0.34 (A-486): directly after the unit-test step, the room-schemas upload then the committed-export check", () => {
+    const steps = (jobsOf()["android"]?.steps ?? []) as (AStep & { name?: unknown })[];
+    const unit = steps.findIndex((s) => text(s.run).includes("./gradlew testDebugUnitTest"));
+    expect(unit).toBeGreaterThanOrEqual(0);
+    const upload = steps[unit + 1];
+    const check = steps[unit + 2];
+
+    expect(upload?.name).toBe("Room schema artifact (A-486)");
+    expect(upload?.if).toBe("always()");
+    expect(text(upload?.uses)).toMatch(/^actions\/upload-artifact@[0-9a-f]{40}$/);
+    expect(upload?.with?.["name"]).toBe("room-schemas");
+    expect(upload?.with?.["path"]).toBe("apps/android/app/schemas/");
+    expect(upload?.with?.["if-no-files-found"]).toBe("warn");
+
+    expect(check?.name).toBe("Room schema matches the committed export (A-486)");
+    expect(check?.["working-directory"]).toBe("apps/android");
+    expect(text(check?.run)).toContain(
+      "git status --porcelain --untracked-files=all -- app/schemas",
+    );
+    expect(text(check?.run)).toContain("::error::");
+    expect(text(check?.run)).toContain("exit 1");
+    expect(check !== undefined && "if" in check).toBe(false);
+  });
 });
