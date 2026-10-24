@@ -222,6 +222,7 @@ dependencies {
     ksp(libs.androidx.hilt.compiler)
 
     implementation(libs.okhttp)
+    implementation(libs.okhttp.logging)
     implementation(libs.retrofit)
     implementation(libs.retrofit.kotlinx.serialization)
     implementation(libs.retrofit.scalars)
