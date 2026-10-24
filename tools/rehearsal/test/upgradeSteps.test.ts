@@ -149,6 +149,30 @@ function labels(calls: Call[]): string[] {
 }
 
 describe("TP-16.22: previous-db's fixtures and upgrade-assertions (F-195, A-452)", () => {
+  // A-492's TP-16.22 text says v1.0.0 for the previous release, but the case's previousTag is
+  // v1.1.0 and A-492 (2) sets both variables to opts.previousTag, so v1.1.0 is expected here.
+  it("TP-16.22 (a) (A-492): the previous migrate runs with BUDMON_TAG and REHEARSAL_RELEASE v1.1.0; the candidate's Compose calls with rehearsal and v1.2.0", async () => {
+    writeCase({ "fixtures.sql": "SELECT 1;", "b.test.ts": "", "a.test.ts": "" });
+
+    const { calls } = await run();
+
+    const prev = calls.filter((c) => c.o.step === "previous-db");
+    const migrate = prev.find((c) => joined(c).includes(" migrate"));
+    expect(migrate?.o.env?.["BUDMON_TAG"]).toBe("v1.1.0");
+    expect(migrate?.o.env?.["REHEARSAL_RELEASE"]).toBe("v1.1.0");
+
+    const candidate = prev.filter(
+      (c) =>
+        (c.args.includes("up") && c.args.includes("-d") && c.args.includes("postgres")) ||
+        c.o.input === "SELECT 1;",
+    );
+    expect(candidate).toHaveLength(2);
+    for (const c of candidate) {
+      expect(c.o.env?.["BUDMON_TAG"], joined(c)).toBe("rehearsal");
+      expect(c.o.env?.["REHEARSAL_RELEASE"], joined(c)).toBe("v1.2.0");
+    }
+  });
+
   it("TP-16.22 (a): fixtures load right after the previous migrate; the upgrade sequence runs in order and passes", async () => {
     writeCase({ "fixtures.sql": "SELECT 1;", "b.test.ts": "", "a.test.ts": "" });
 

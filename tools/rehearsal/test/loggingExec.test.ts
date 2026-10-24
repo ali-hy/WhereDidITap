@@ -1,6 +1,9 @@
 // A-476 createLoggingExec: each child's output goes to <logDir>/<tag>.log, never to the job log;
-// arguments, env and input are never written. TP-16.25.
+// arguments, env and input are never written; a child given input reads it from a real pipe
+// (A-491). TP-16.25.
+import { EventEmitter } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -78,5 +81,73 @@ describe("TP-16.25: createLoggingExec (A-476)", () => {
 
     expect(r.code).toBe(127);
     expect(captured.join("")).toBe("");
+  });
+});
+
+describe("TP-16.25: a child given input reads /dev/stdin from a real pipe (A-491)", () => {
+  it("TP-16.25: e: install -m 0600 /dev/stdin writes the input to the file; the log has no input", async () => {
+    const target = path.join(base, "f");
+
+    const r = await exec("install", ["-m", "0600", "/dev/stdin", target], {
+      step: "e",
+      input: "SECRETIN2",
+    });
+    const captured = [...written];
+    vi.restoreAllMocks();
+
+    expect(r.code).toBe(0);
+    expect(readFileSync(target, "utf8")).toBe("SECRETIN2");
+    expect(mode(target)).toBe("600");
+    const log = readFileSync(path.join(logDir, "e.log"), "utf8");
+    expect(log.startsWith("### install (step e)")).toBe(true);
+    expect(log).not.toContain("SECRETIN2");
+    expect(captured.join("")).toBe("");
+  });
+
+  it("TP-16.25: f: /dev/stdin is a FIFO and carries the input; the command's exit status is the result", async () => {
+    const r = await exec("sh", ["-c", "test -p /dev/stdin && cat /dev/stdin; exit 4"], {
+      step: "f",
+      input: "x",
+    });
+    vi.restoreAllMocks();
+
+    expect(r).toEqual({ code: 4, stdout: "x" });
+  });
+
+  it("TP-16.25: g: a missing command given input exits 127, and the log header names it", async () => {
+    const r = await exec("/no/such/cmd", [], { step: "g", input: "x" });
+    vi.restoreAllMocks();
+
+    expect(r.code).toBe(127);
+    expect(readFileSync(path.join(logDir, "g.log"), "utf8").startsWith("### cmd (step g)")).toBe(
+      true,
+    );
+  });
+
+  it('TP-16.25: with a fake spawn, an input call is /bin/sh -c \'cat | exec "$0" "$@"\' cmd args; a call without input is cmd, args', async () => {
+    const spawned: { cmd: string; args: readonly string[] }[] = [];
+    const fakeSpawn = ((cmd: string, args: readonly string[]) => {
+      spawned.push({ cmd, args });
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        stdin: new PassThrough(),
+      });
+      setImmediate(() => child.emit("close", 0));
+      return child;
+    }) as unknown as typeof import("node:child_process").spawn;
+    const fake = (await loadExec()).createLoggingExec(logDir, { spawn: fakeSpawn });
+
+    await fake("install", ["-m", "0600", "/dev/stdin", "/x/f"], { step: "h", input: "in" });
+    await fake("docker", ["ps", "-aq"], { step: "h" });
+    vi.restoreAllMocks();
+
+    expect(spawned).toEqual([
+      {
+        cmd: "/bin/sh",
+        args: ["-c", 'cat | exec "$0" "$@"', "install", "-m", "0600", "/dev/stdin", "/x/f"],
+      },
+      { cmd: "docker", args: ["ps", "-aq"] },
+    ]);
   });
 });

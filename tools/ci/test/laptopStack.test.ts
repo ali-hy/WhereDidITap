@@ -166,7 +166,12 @@ describe("TP-16.17: the rehearsal overlays' compose config (A-392, A-449 to A-45
     logging?: { driver?: string };
   }
   const CA = "/w/ca";
-  const rehearsalConfig = (project: "main" | "capture", doctored?: string) => {
+  const rehearsalConfig = (
+    project: "main" | "capture",
+    doctored?: string,
+    // A-492: the release the images are; null leaves the variable unset.
+    release: string | null = "v1.2.0",
+  ) => {
     const args = [
       "compose",
       "--project-directory",
@@ -191,7 +196,15 @@ describe("TP-16.17: the rehearsal overlays' compose config (A-392, A-449 to A-45
     ];
     const result = spawnSync("docker", args, {
       encoding: "utf8",
-      env: { ...process.env, BUDMON_HOME: home, BUDMON_TAG: "rehearsal", REHEARSAL_CA_DIR: CA },
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter(([k]) => k !== "REHEARSAL_RELEASE"),
+        ),
+        BUDMON_HOME: home,
+        BUDMON_TAG: "rehearsal",
+        REHEARSAL_CA_DIR: CA,
+        ...(release === null ? {} : { REHEARSAL_RELEASE: release }),
+      },
     });
     return {
       status: result.status,
@@ -312,6 +325,28 @@ describe("TP-16.17: the rehearsal overlays' compose config (A-392, A-449 to A-45
       });
       expect(Object.values(c.networks).map((n) => n.name)).not.toContain("budmon_capture_db");
     }
+  });
+
+  it.each([
+    ["main", "api"],
+    ["main", "worker-general"],
+    ["main", "migrate"],
+    ["capture", "worker-capture"],
+  ] as const)(
+    "TP-16.17 (A-492): %s/%s has BUDMON_RELEASE=v1.2.0 and a budmon/<image>:rehearsal image",
+    (project, name) => {
+      const sv = (project === "main" ? main : capture).services[name];
+
+      expect(sv?.environment?.["BUDMON_RELEASE"]).toBe("v1.2.0");
+      expect(sv?.image).toMatch(/^budmon\/[a-z]+:rehearsal$/);
+    },
+  );
+
+  it("TP-16.17 (d) (A-492): main's config without REHEARSAL_RELEASE fails naming it", () => {
+    const r = rehearsalConfig("main", undefined, null);
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("REHEARSAL_RELEASE is not set");
   });
 
   it("TP-16.17 (c): rehearsal/ holds exactly the two overlays", () => {

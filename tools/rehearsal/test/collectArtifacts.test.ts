@@ -282,6 +282,52 @@ describe("TP-16.28: collectArtifacts fails closed, and rehearsalPaths (A-483)", 
     }
   });
 
+  it("TP-16.28 (h) (A-493): the default secrets step never names <workDir>/artifacts, and it doesn't exist when collectArtifacts is called", async () => {
+    const calls: Call[] = [];
+    const exec: Exec = (cmd, args, o) => {
+      calls.push({ cmd, args, o });
+      if (cmd === "git" && args.includes("rev-parse")) {
+        return Promise.resolve({ code: 0, stdout: `${"a".repeat(40)}\n` });
+      }
+      return Promise.resolve({ code: 0, stdout: "" });
+    };
+    let existedAtCollect: boolean | undefined;
+    const okStep: StepFn = () => Promise.resolve({ ok: true, detail: "" });
+    const steps = Object.fromEntries(
+      m.STEP_ORDER.filter((n) => n !== "secrets").map((n) => [n, okStep]),
+    ) as Partial<Record<StepName, StepFn>>;
+
+    const result = await m.runRehearsal(
+      {
+        previousTag: null,
+        version: "v1.0.0",
+        images: { server: "s", web: "w", postgres: "p" },
+        workDir,
+        repoRoot: workDir,
+      },
+      {
+        exec,
+        http: () => Promise.reject(new Error("no http")),
+        steps,
+        sleep: () => Promise.resolve(),
+        collectArtifacts: () => {
+          existedAtCollect = existsSync(uploaded());
+          return Promise.resolve({ ok: true, detail: "" });
+        },
+        cleanup: okStep,
+      },
+    );
+
+    expect(result.steps.find((s) => s.name === "secrets")).toBeDefined();
+    const secrets = calls.filter((c) => c.o.step === "secrets");
+    expect(secrets.length).toBeGreaterThan(0);
+    const naming = secrets.filter((c) =>
+      c.args.some((a) => path.resolve(a) === uploaded() || a.startsWith(`${uploaded()}/`)),
+    );
+    expect(naming.map((c) => [c.cmd, ...c.args].join(" "))).toEqual([]);
+    expect(existedAtCollect).toBe(false);
+  });
+
   it("TP-16.28 (g): cli.ts passes rehearsalPaths(…).stepLogs to createLoggingExec and has no artifacts/steps literal", () => {
     const cli = readFileSync(path.join(HERE, "../src/cli.ts"), "utf8");
 
