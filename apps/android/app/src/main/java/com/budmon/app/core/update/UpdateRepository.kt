@@ -45,8 +45,13 @@ constructor(
     /** The APK download URL from the last client-config, if any. */
     val downloadUrl: StateFlow<String?> = download.asStateFlow()
 
-    /** Fetches client-config, stores it, and recomputes [state]; a failed fetch keeps what's stored. */
+    /**
+     * A-471: recomputes from what's stored first (so a stored Required shows before the network
+     * answers), then fetches client-config, stores it as returned, and recomputes again; a failed
+     * fetch keeps what's stored.
+     */
     suspend fun refresh() {
+        recompute()
         try {
             val response = api.metaClientConfig()
             val body = response.body()
@@ -66,9 +71,21 @@ constructor(
         recompute()
     }
 
-    /** The error path saw CLIENT_UPDATE_REQUIRED. */
-    fun markRequired(min: Int) {
-        current.value = UpdateState.Required(min)
+    /** A-471: the state from DataStore, emitted to [state] and returned. */
+    suspend fun current(): UpdateState {
+        recompute()
+        return current.value
+    }
+
+    /**
+     * A-471: the server refused this build (CLIENT_UPDATE_REQUIRED), so Required holds even without a
+     * usable minimum: stores max(stored, max(min ?: 0, versionCode + 1)).
+     */
+    suspend fun markRequired(min: Int?) {
+        val above = (versionCode.toLong() + 1).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        val effective = maxOf(min ?: 0, above)
+        dataStore.edit { it[MINIMUM] = maxOf(it[MINIMUM] ?: 0, effective) }
+        recompute()
     }
 
     /** "Later" hides Available for three days. */

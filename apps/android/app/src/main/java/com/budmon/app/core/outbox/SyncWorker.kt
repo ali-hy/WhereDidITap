@@ -7,6 +7,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.budmon.app.core.network.ApiError
 import com.budmon.app.core.network.ApiErrorParser
+import com.budmon.app.core.network.apiRoot
 import com.budmon.app.core.update.UpdateRepository
 import com.budmon.app.core.update.UpdateState
 import dagger.assisted.Assisted
@@ -14,7 +15,6 @@ import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.intOrNull
 import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
@@ -43,6 +43,9 @@ constructor(
     override suspend fun doWork(): Result {
         // A process that died mid-send left entries in SENDING; the key is unchanged, so resending is safe.
         dao.resetSending()
+        // A-471, A-481: the stored minimum decides before anything is sent (also in a cold process).
+        if (updates.current() is UpdateState.Required) return Result.success()
+        val root = apiRoot(baseUrl)
         while (true) {
             if (updates.state.value is UpdateState.Required) return Result.success()
             val batch = dao.pendingOldestFirst(BATCH)
@@ -53,7 +56,7 @@ constructor(
                     dao.markStatus(entry.id, OutboxEntry.NEEDS_CONFIRMATION, entry.lastErrorKey)
                     continue
                 }
-                when (send(entry)) {
+                when (send(entry, root)) {
                     Next.Continue -> Unit
                     Next.StopSuccess -> return Result.success()
                     Next.StopRetry -> return Result.retry()
@@ -62,10 +65,11 @@ constructor(
         }
     }
 
-    private suspend fun send(entry: OutboxEntry): Next {
+    private suspend fun send(entry: OutboxEntry, root: HttpUrl): Next {
+        // A-474: checked before SENDING and the attempt count, so a bad path is never sent.
+        val url = resolveOutboxPath(root, entry.path) ?: return fail(entry, "INVALID_PATH")
         dao.markStatus(entry.id, OutboxEntry.SENDING, entry.lastErrorKey)
         dao.incrementAttempts(entry.id)
-        val url = baseUrl.resolve(entry.path) ?: return fail(entry, "INVALID_PATH")
         val request =
             Request
                 .Builder()
@@ -89,9 +93,10 @@ constructor(
         val error = ApiErrorParser.parse(code, body)
         val key = (error as? ApiError.Defined)?.key
         return when {
+            // A-481: the entry waits (its attempt counted), nothing else is sent, and the stored
+            // minimum keeps later runs from sending until the app is updated.
             key == "CLIENT_UPDATE_REQUIRED" -> {
-                val min = ((error as ApiError.Defined).data?.get("minimumVersion") as? JsonPrimitive)?.intOrNull
-                updates.markRequired(min ?: Int.MAX_VALUE)
+                updates.markRequired(minimumVersionOf(error as ApiError.Defined))
                 pending(entry, Next.StopSuccess)
             }
 
@@ -112,6 +117,14 @@ constructor(
                 fail(entry, key ?: "UNKNOWN")
             }
         }
+    }
+
+    /** A JSON integer in 1..Int.MAX_VALUE, else null (A-481). */
+    private fun minimumVersionOf(error: ApiError.Defined): Int? {
+        val value = error.data?.get("minimumVersion") as? JsonPrimitive ?: return null
+        if (value.isString) return null
+        val n = value.content.toLongOrNull() ?: return null
+        return if (n in 1..Int.MAX_VALUE.toLong()) n.toInt() else null
     }
 
     private suspend fun pending(entry: OutboxEntry, next: Next): Next {

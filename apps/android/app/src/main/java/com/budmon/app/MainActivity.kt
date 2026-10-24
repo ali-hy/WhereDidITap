@@ -50,7 +50,7 @@ class MainActivity : ComponentActivity() {
                         else -> {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 OfflineBanner(isOnline = status.isOnline, pending = status.counts.pending)
-                                SyncIndicator(pending = status.counts.pending, syncing = false, failed = status.counts.failed)
+                                SyncIndicator(pending = status.counts.pending, syncing = status.syncing, failed = status.counts.failed)
                                 if (update is UpdateState.Available) {
                                     UpdateCard(
                                         onUpdate = { status.downloadUrl?.let(::openDownload) },

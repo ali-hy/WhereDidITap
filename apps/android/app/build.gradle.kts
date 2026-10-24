@@ -20,8 +20,11 @@ val laptopProperties =
 
 fun buildProperty(name: String): String? = providers.gradleProperty(name).orNull ?: laptopProperties.getProperty(name)
 
-/** F-264: debug builds reach only the development stack through the emulator's alias (checked below). */
-val debugApiBaseUrl: String = buildProperty("budmon.apiBaseUrl") ?: "http://10.0.2.2:5173/"
+/**
+ * F-264: debug builds reach only the development stack through the emulator's alias (checked below).
+ * Only a Gradle property changes it, never the laptop file, which holds the release URL (review B-1).
+ */
+val debugApiBaseUrl: String = providers.gradleProperty("budmon.apiBaseUrl").orNull ?: "http://10.0.2.2:5173/"
 
 /** F-264: release builds need an https:// URL ending in `/` (checked when a release is built). */
 val releaseApiBaseUrl: String? = buildProperty("budmon.apiBaseUrl")

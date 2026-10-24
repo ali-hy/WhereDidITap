@@ -9,13 +9,12 @@
     <string name="update_required_title">Update Budmon to continue</string>
     <string name="update_required_body">This version is no longer supported. Updating takes about a minute.</string>
     <plurals name="update_required_pending">
-        <item quantity="one">%1$s entries you saved offline are kept and will sync after you update.</item>
+        <item quantity="one">%1$s entry you saved offline is kept and will sync after you update.</item>
         <item quantity="other">%1$s entries you saved offline are kept and will sync after you update.</item>
     </plurals>
     <string name="update_required_button">Update Budmon</string>
     <string name="update_required_offline">Record an entry offline</string>
     <string name="update_download_failed">Couldn\'t open the download. Ask the person who invited you for the latest version.</string>
-    <string name="update_required_icon">Update required</string>
 
     <!-- C-4 UpdateCard -->
     <string name="update_available">A new version of Budmon is available.</string>
@@ -25,6 +24,7 @@
     <!-- S-2 ErrorFallbackScreen -->
     <string name="error_fallback_title">Something went wrong on our side</string>
     <string name="error_fallback_body">Try again in a moment. If it keeps happening, share this reference with the person who invited you.</string>
+    <string name="error_fallback_body_no_reference">Try again in a moment. If it keeps happening, let the person who invited you know.</string>
     <string name="error_fallback_retry">Try again</string>
     <string name="error_fallback_home">Go to home</string>
     <string name="error_fallback_still_failing">Still not working.</string>
@@ -35,8 +35,8 @@
     <string name="offline_nothing_loaded">You\'re offline. Connect to see this.</string>
     <string name="offline_last_updated">Offline: last updated %1$s</string>
     <plurals name="back_online_syncing">
-        <item quantity="one">Back online. Syncing %d entry…</item>
-        <item quantity="other">Back online. Syncing %d entries…</item>
+        <item quantity="one">Back online. Syncing %1$s entry…</item>
+        <item quantity="other">Back online. Syncing %1$s entries…</item>
     </plurals>
     <string name="back_online">Back online.</string>
 

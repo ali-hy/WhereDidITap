@@ -13,6 +13,7 @@ import com.budmon.app.core.db.BudmonDatabase
 import com.budmon.app.core.network.ClientHeaderInterceptor
 import com.budmon.app.core.network.IdempotencyKeyInterceptor
 import com.budmon.app.core.network.TraceparentInterceptor
+import com.budmon.app.core.network.apiRoot
 import com.budmon.app.core.outbox.OutboxDao
 import dagger.Module
 import dagger.Provides
@@ -57,7 +58,7 @@ object AppModule {
     @Singleton
     fun retrofit(client: OkHttpClient, @Named("apiBaseUrl") baseUrl: HttpUrl): Retrofit = Retrofit
         .Builder()
-        .baseUrl(baseUrl.resolve("api/v1/") ?: baseUrl)
+        .baseUrl(apiRoot(baseUrl))
         .client(client)
         .addConverterFactory(Json { ignoreUnknownKeys = true }.asConverterFactory("application/json".toMediaType()))
         .build()

@@ -30,23 +30,33 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.text.BidiFormatter
 import com.budmon.app.R
 import kotlinx.coroutines.delay
 import java.text.NumberFormat
+import java.util.Locale
 
-/** A count as text, capped: "<cap>+" above the cap ("99+", "999+"), formatted for the locale. */
-private fun capped(count: Int, cap: Int): String {
-    val format = NumberFormat.getIntegerInstance()
+/** A count as text, capped: "<cap>+" above the cap ("99+", "999+"), formatted for [locale]. */
+private fun capped(count: Int, cap: Int, locale: Locale): String {
+    val format = NumberFormat.getIntegerInstance(locale)
     return if (count > cap) "${format.format(cap.toLong())}+" else format.format(count.toLong())
 }
+
+/** The Compose configuration's first locale (follows per-app language changes). */
+@Composable
+private fun currentLocale(): Locale = LocalConfiguration.current.locales[0]
 
 /** S-1: the full screen while this version is no longer supported. */
 @Composable
@@ -68,7 +78,7 @@ fun UpdateRequiredScreen(
         Text(stringResource(R.string.update_required_body), textAlign = TextAlign.Center)
         if (pending > 0) {
             // A-467: the real count picks the plural form; the text shows "999+" above 999.
-            val text = capped(pending, 999)
+            val text = capped(pending, 999, currentLocale())
             Text(
                 pluralStringResource(R.plurals.update_required_pending, pending, text),
                 textAlign = TextAlign.Center,
@@ -109,7 +119,11 @@ fun UpdateCard(onUpdate: () -> Unit, onLater: () -> Unit, modifier: Modifier = M
     }
 }
 
-/** S-2: something went wrong; the same behaviour as the web's fallback. */
+/**
+ * S-2: something went wrong (A-472). The body asks to share the reference only when there is one;
+ * Try again is described by "Still not working." while failing and takes focus when a retry ends
+ * in failure (never on first composition; on success the caller replaces the screen).
+ */
 @Composable
 fun ErrorFallbackScreen(
     requestId: String?,
@@ -119,19 +133,39 @@ fun ErrorFallbackScreen(
     onHome: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val retryFocus = remember { FocusRequester() }
+    var previousBusy by remember { mutableStateOf(busy) }
+    LaunchedEffect(busy, stillFailing) {
+        if (previousBusy && !busy && stillFailing) retryFocus.requestFocus()
+        previousBusy = busy
+    }
+    val stillFailingText = stringResource(R.string.error_fallback_still_failing)
     Column(modifier = modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text(stringResource(R.string.error_fallback_title), style = MaterialTheme.typography.headlineSmall)
-        Text(stringResource(R.string.error_fallback_body))
+        Text(
+            stringResource(R.string.error_fallback_title),
+            style = MaterialTheme.typography.headlineSmall,
+            modifier = Modifier.semantics { heading() },
+        )
         if (requestId != null) {
+            Text(stringResource(R.string.error_fallback_body))
             // The reference reads left to right inside any sentence direction.
             Text(stringResource(R.string.error_reference, BidiFormatter.getInstance().unicodeWrap(requestId.take(8))))
+        } else {
+            Text(stringResource(R.string.error_fallback_body_no_reference))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onRetry, enabled = !busy) { Text(stringResource(R.string.error_fallback_retry)) }
+            Button(
+                onClick = onRetry,
+                enabled = !busy,
+                modifier =
+                Modifier.focusRequester(retryFocus).semantics {
+                    if (stillFailing) stateDescription = stillFailingText
+                },
+            ) { Text(stringResource(R.string.error_fallback_retry)) }
             TextButton(onClick = onHome) { Text(stringResource(R.string.error_fallback_home)) }
         }
         Text(
-            if (stillFailing) stringResource(R.string.error_fallback_still_failing) else "",
+            if (stillFailing) stillFailingText else "",
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         )
     }
@@ -156,8 +190,12 @@ fun OfflineBanner(isOnline: Boolean, pending: Int, modifier: Modifier = Modifier
     val text =
         when {
             !isOnline -> stringResource(R.string.offline_banner)
-            showBack && pending > 0 -> pluralStringResource(R.plurals.back_online_syncing, pending, pending)
+
+            // A-475: the capped text, the plural from the uncapped count (as SyncIndicator).
+            showBack && pending > 0 -> pluralStringResource(R.plurals.back_online_syncing, pending, capped(pending, 99, currentLocale()))
+
             showBack -> stringResource(R.string.back_online)
+
             else -> null
         }
     if (text != null) {
@@ -175,11 +213,12 @@ fun OfflineBanner(isOnline: Boolean, pending: Int, modifier: Modifier = Modifier
 /** C-2: the app-bar chip: failed first, then syncing, then waiting; hidden when all are 0. */
 @Composable
 fun SyncIndicator(pending: Int, syncing: Boolean, failed: Int, modifier: Modifier = Modifier) {
+    val locale = currentLocale()
     val text =
         when {
-            failed > 0 -> pluralStringResource(R.plurals.sync_attention, failed, capped(failed, 99))
-            syncing && pending > 0 -> pluralStringResource(R.plurals.sync_in_progress, pending, capped(pending, 99))
-            pending > 0 -> pluralStringResource(R.plurals.sync_waiting, pending, capped(pending, 99))
+            failed > 0 -> pluralStringResource(R.plurals.sync_attention, failed, capped(failed, 99, locale))
+            syncing && pending > 0 -> pluralStringResource(R.plurals.sync_in_progress, pending, capped(pending, 99, locale))
+            pending > 0 -> pluralStringResource(R.plurals.sync_waiting, pending, capped(pending, 99, locale))
             else -> return
         }
     AssistChip(
