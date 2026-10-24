@@ -72,12 +72,36 @@ describe("TP-11.25: web Sentry scrubbing (F-217)", () => {
     const url = (scrubbed?.["request"] as { url?: string } | undefined)?.url ?? "";
     expect(url).not.toContain("?");
     expect(url).toMatch(/\/api\/v1\/things$/);
-    // F-217: stripped to the path, so no host.
-    expect(url).toBe("/api/v1/things");
+    // F-217, A-495: stripped to the path, so no host.
+    expect(scrubbed?.["request"]).toEqual({ url: "/api/v1/things" });
     expect(text).not.toContain("budmon.example");
     const values = (scrubbed?.["exception"] as { values?: { value?: string }[] } | undefined)
       ?.values;
     expect(values?.[0]?.value).toBe("TypeError");
+  });
+
+  it.each([
+    [`/things?q=${CANARY}`, "/things"],
+    ["https://budmon.example/things?q=x", "/things"],
+  ])("TP-11.25 (A-495): transaction %s → %s", async (transaction, expected) => {
+    const { scrubWebEvent } = await loadSentry();
+
+    const scrubbed = scrubWebEvent({ transaction });
+
+    expect(scrubbed?.["transaction"]).toBe(expected);
+    expect(JSON.stringify(scrubbed)).not.toContain("budmon.example");
+    expect(JSON.stringify(scrubbed)).not.toContain(CANARY);
+  });
+
+  it.each([
+    ["https://laptop.tail1234.ts.net:8443", "/"],
+    ["//h/x", "/x"],
+    ["blob:https://h/x", "/x"],
+    ["/b?q=x#f", "/b"],
+  ])("TP-11.25 (A-495): stripToPath(%s) → %s", async (url, expected) => {
+    const { stripToPath } = await loadSentry();
+
+    expect(stripToPath(url)).toBe(expected);
   });
 
   it("TP-11.32x: the transaction name loses its query", async () => {
@@ -223,7 +247,9 @@ describe("TP-11.25: web Sentry scrubbing (F-217)", () => {
     expect(Object.keys(scrubbed["user"] ?? {})).not.toContain("ip_address");
     expect(Object.keys(scrubbed["tags"] ?? {})).not.toContain("custom");
     expect(Object.keys(scrubbed["contexts"] ?? {})).not.toContain("device");
-    expect(scrubbed["request"]).toEqual({ url: "https://budmon.example/api/v1/things" });
+    // A-495: the path only, no scheme or host.
+    expect(scrubbed["request"]).toEqual({ url: "/api/v1/things" });
+    expect(JSON.stringify(scrubbed)).not.toContain("budmon.example");
   });
 
   it("TP-11.25: F-35's allowlist keeps a UUID user.id, an allowed tag and contexts.trace's ids", async () => {
