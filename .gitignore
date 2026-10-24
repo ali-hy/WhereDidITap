@@ -1,2 +1,17 @@
 node_modules/
+node_modules
 dist/
+build/
+!**/src/**/build/
+.data/
+.env*
+!.env.example
+coverage/
+playwright-report/
+test-results/
+# Android
+.gradle/
+local.properties
+# Local tooling clones (bats, S-15)
+.tools/
+apps/web/src/i18n/generated/

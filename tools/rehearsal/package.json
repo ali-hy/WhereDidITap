@@ -1,0 +1,13 @@
+{
+  "name": "@budmon/tools-rehearsal",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "rehearse": "tsx src/cli.ts"
+  },
+  "devDependencies": {
+    "@budmon/test-support": "workspace:*",
+    "tsx": "4.23.15"
+  }
+}

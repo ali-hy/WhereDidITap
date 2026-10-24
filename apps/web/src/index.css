@@ -1,0 +1,9 @@
+/* The web app's styles: Tailwind (D-38: logical properties only, F-2 and F-4). */
+@import "tailwindcss";
+
+/* F-215: mirrored icons flip with a transform in RTL. Tailwind 4's -scale-x-100 sets the `scale`
+   property, which leaves `transform` as none; the flip is moved to `transform` instead. */
+[dir="rtl"] .rtl\:-scale-x-100 {
+  scale: none;
+  transform: scaleX(-1);
+}

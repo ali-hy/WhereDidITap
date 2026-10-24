@@ -1,0 +1,9 @@
+# Copy to %UserProfile%\.wslconfig on the Windows laptop (stage 0, infra/runbooks/stage0-laptop.md
+# step 3), then run `wsl --shutdown` once.
+[wsl2]
+memory=6GB
+
+# NAT networking (the default) is what Budmon is tested with. Docker Desktop has had problems with
+# mirrored mode, including publishing ports to Windows' localhost; verify on the pinned Docker
+# Desktop version before enabling it.
+# networkingMode=mirrored

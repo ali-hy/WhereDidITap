@@ -1,0 +1,340 @@
+#!/usr/bin/env bash
+# shellcheck source-path=SCRIPTDIR
+# budmon-local (F-178): installs, upgrades, runs and restores Budmon on the stage-0 laptop (WSL2).
+# Every command but install, upgrade (phase A) and _upgrade-continue runs from the current
+# release's copy, ${BUDMON_HOME}/releases/<current>/budmon-local; run elsewhere, it re-executes
+# that copy. See infra/runbooks/stage0-laptop.md.
+set -euo pipefail
+
+SELF="$(realpath "$0")"
+LIB="$(dirname "${SELF}")/lib"
+# shellcheck source=lib/common.sh
+. "${LIB}/common.sh"
+# shellcheck source=lib/secrets.sh
+. "${LIB}/secrets.sh"
+# shellcheck source=lib/release.sh
+. "${LIB}/release.sh"
+# shellcheck source=lib/stack.sh
+. "${LIB}/stack.sh"
+
+# ---- the re-execution rule ----
+
+reexec_if_needed() {
+  local command="$1"
+  shift
+  case "${command}" in install | upgrade | _upgrade-continue) return 0 ;; esac
+  [ -f "${BUDMON_HOME}/state" ] || return 0
+  local current target
+  current="$(state_get current)"
+  [ -n "${current}" ] || return 0
+  target="$(release_dir "${current}")/budmon-local"
+  if [ "$(realpath -m "${target}")" = "${SELF}" ]; then
+    return 0
+  fi
+  if [ "${BUDMON_REEXEC:-}" = "1" ]; then
+    die 3 "release copy mismatch: this is ${SELF}, the current release is ${target}"
+  fi
+  [ -x "${target}" ] || die 3 "release copy mismatch: ${target} is missing"
+  BUDMON_REEXEC=1 exec "${target}" "${command}" "$@"
+}
+
+require_current() {
+  local current
+  current="$(state_get current)"
+  [ -n "${current}" ] || die 2 "not installed: run budmon-local install <tag>"
+  echo "${current}"
+}
+
+# ---- install ----
+
+pg_has_version() {
+  local f="${BUDMON_HOME}/pg/pgdata/PG_VERSION"
+  if [ -d "${BUDMON_HOME}/pg" ] && [ -r "${BUDMON_HOME}/pg" ] && [ -x "${BUDMON_HOME}/pg" ]; then
+    [ -e "${f}" ]
+  else
+    sudo test -e "${f}"
+  fi
+}
+
+pg_not_empty() {
+  [ -d "${BUDMON_HOME}/pg" ] || return 1
+  if [ -r "${BUDMON_HOME}/pg" ]; then
+    [ -n "$(ls -A "${BUDMON_HOME}/pg")" ]
+  else
+    [ -n "$(sudo ls -A "${BUDMON_HOME}/pg")" ]
+  fi
+}
+
+# Step 5 (A-428): everything is built in a temporary directory under BUDMON_HOME; the TLS secrets
+# are written first, then ca.crt and, last, ca.key (the done-marker) are moved into ca/, so an
+# interrupted run leaves no ca/ca.key and runs again in full.
+make_ca_and_tls() {
+  local ca="${BUDMON_HOME}/ca" tmp
+  [ -f "${ca}/ca.key" ] && return 0
+  rm -rf "${BUDMON_HOME}"/.ca-tmp.*
+  tmp="$(mktemp -d "${BUDMON_HOME}/.ca-tmp.XXXXXX")"
+  chmod 0700 "${tmp}"
+  # shellcheck disable=SC2064 # expand now
+  trap "rm -rf '${tmp}'" EXIT
+  (
+    umask 077
+    openssl req -x509 -newkey rsa:3072 -nodes -days 825 -subj "/CN=Budmon local CA" \
+      -keyout "${tmp}/ca.key" -out "${tmp}/ca.crt" >/dev/null 2>&1
+    openssl req -new -newkey rsa:3072 -nodes -subj "/CN=db.budmon.internal" \
+      -keyout "${tmp}/tls.key" -out "${tmp}/tls.csr" >/dev/null 2>&1
+    printf 'subjectAltName=DNS:db.budmon.internal\n' >"${tmp}/ext"
+    openssl x509 -req -in "${tmp}/tls.csr" -CA "${tmp}/ca.crt" -CAkey "${tmp}/ca.key" \
+      -CAserial "${tmp}/ca.srl" -CAcreateserial -days 825 -extfile "${tmp}/ext" \
+      -out "${tmp}/tls.crt" >/dev/null 2>&1
+  ) || die 1 "creating the private CA and the Postgres certificate failed"
+  write_secret main/postgres/TLS_KEY <"${tmp}/tls.key"
+  write_secret main/postgres/TLS_CERT <"${tmp}/tls.crt"
+  write_secret capture/worker-capture/DB_CA_CERT <"${tmp}/ca.crt"
+  install -d -m 0700 "${ca}"
+  chmod 0444 "${tmp}/ca.crt"
+  chmod 0400 "${tmp}/ca.key"
+  mv -f "${tmp}/ca.crt" "${ca}/ca.crt"
+  mv -f "${tmp}/ca.key" "${ca}/ca.key"
+  rm -rf "${tmp}"
+  trap - EXIT
+}
+
+permission_probe() {
+  local dir uid
+  for dir in "${SERVICE_DIRS[@]}"; do
+    uid="$(service_uid "${dir}")"
+    # shellcheck disable=SC2016 # expanded inside the probe container
+    if ! docker run --rm --user "${uid}" -v "${BUDMON_HOME}/secrets/${dir}:/s:ro" \
+      "${SERVER_BASE_IMAGE}" sh -c 'cat /s/* >/dev/null' >/dev/null 2>&1 </dev/null; then
+      die 21 "uid ${uid} can't read secrets/${dir}"
+    fi
+  done
+}
+
+cmd_install() {
+  [ "$#" -eq 1 ] || usage
+  local tag="$1" marker="${BUDMON_HOME}/install.inprogress"
+  mkdir -p "${BUDMON_HOME}"
+  chmod 0700 "${BUDMON_HOME}"
+  # 1. Never over an installation.
+  [ -f "${BUDMON_HOME}/state" ] && die 2 "already installed (state exists); use upgrade"
+  if [ -f "${marker}" ]; then
+    local marked
+    marked="$(sed -n 's/^tag=//p' "${marker}")"
+    [ "${marked}" = "${tag}" ] || die 2 "an install of ${marked} is in progress; resume it with that tag"
+  elif pg_not_empty; then
+    die 2 "data exists without state: use restore"
+  fi
+  # 2. The tag.
+  check_tag_format "${tag}"
+  check_tag_ancestry "${tag}"
+  # 3. The worktree and budmonctl.
+  make_worktree "${tag}"
+  local build
+  build="$(build_dir "${tag}")"
+  (cd "${build}" && pnpm install --frozen-lockfile --filter "@budmon/budmonctl..." >/dev/null) ||
+    die 1 "pnpm install in build/${tag} failed"
+  # 4. Secrets (F-191), then their owners.
+  if [ ! -f "${BUDMON_HOME}/secrets/.initialised" ]; then
+    (cd "${build}" && pnpm --filter @budmon/budmonctl exec tsx src/cli.ts secrets init-local \
+      --home "${BUDMON_HOME}" >/dev/null) || die 1 "budmonctl secrets init-local failed"
+  fi
+  apply_secret_ownership # A-428: every install
+  # 5. The private CA and Postgres's certificate.
+  make_ca_and_tls
+  # 6. site.env.
+  if [ ! -f "${BUDMON_HOME}/site.env" ]; then
+    rm -f "${BUDMON_HOME}"/.site.env.*
+    write_site_env
+  fi
+  # 7. Placeholders.
+  local unfilled here
+  unfilled_placeholders # A-429: exits 28 when it can't tell
+  unfilled="${UNFILLED}"
+  if [ -n "${unfilled}" ]; then
+    here="$(dirname -- "${SELF}")"
+    {
+      echo "budmon-local: these still hold ${PLACEHOLDER}:"
+      while IFS= read -r line; do echo "  ${line}"; done <<<"${unfilled}"
+      echo "Next: run ${here}/gcp-bootstrap.sh --project <project>, then"
+      echo "  ${here}/budmon-local secret set <role>/<service>/<KEY> for each file above, set the"
+      echo "  site.env keys in ${BUDMON_HOME}/site.env, and run ${here}/budmon-local install ${tag} again."
+    } >&2
+    exit 20
+  fi
+  # 8. Every container UID can read its secrets.
+  permission_probe
+  # 9. The capture network and the data folders.
+  local subnet
+  if [ -z "$(docker network ls --filter name=^budmon_capture_db\$ --format '{{.Name}}' 2>/dev/null)" ]; then
+    subnet="$(sed -n 's/^CAPTURE_DB_SUBNET=//p' "${build}/infra/local/local.env" 2>/dev/null || true)"
+    docker network create --internal --subnet "${subnet:-172.30.42.0/29}" budmon_capture_db \
+      >/dev/null || die 1 "creating the budmon_capture_db network failed"
+  fi
+  [ -d "${BUDMON_HOME}/pg" ] || sudo install -d -o 999 -g 999 -m 0700 "${BUDMON_HOME}/pg"
+  mkdir -p "${BUDMON_HOME}/maintenance" "${BUDMON_HOME}/dumps"
+  chmod 0755 "${BUDMON_HOME}/maintenance"
+  chmod 0700 "${BUDMON_HOME}/dumps"
+  # 10. The release copy and the images.
+  copy_release "${tag}"
+  build_images "${tag}"
+  # 11. First setup of Postgres (skipped when a resumed install already has a cluster).
+  if [ ! -f "${marker}" ]; then
+    (umask 077 && printf 'tag=%s\n' "${tag}" >"${marker}")
+    chmod 0600 "${marker}"
+  fi
+  if ! pg_has_version; then
+    BUDMON_FIRST_SETUP=1 compose_for "${tag}" main up -d postgres </dev/null ||
+      die 1 "starting Postgres for first setup failed"
+    wait_postgres "${tag}" || die 18 "Postgres not ready after ${PG_READY_TIMEOUT}s"
+  fi
+  # 12. Phase B of the new release.
+  local code=0
+  BUDMON_REEXEC=1 "$(release_dir "${tag}")/budmon-local" _upgrade-continue "${tag}" --no-dump --first ||
+    code=$?
+  [ "${code}" = 0 ] || exit "${code}"
+  [ "$(state_get current)" = "${tag}" ] || state_write "${tag}" ""
+  link_bin "${tag}"
+  rm -f "${marker}"
+  # 13. TLS for the tailnet is Tailscale Serve's, on Windows.
+  say "installed ${tag}. In Windows (PowerShell), run:"
+  echo "  tailscale serve --bg --https=443 http://127.0.0.1:8080"
+}
+
+# ---- upgrade, phase A ----
+
+cmd_upgrade() {
+  refuse_unfinished_restore # 0. A-426
+  if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then usage; fi
+  local tag="$1" no_dump=()
+  if [ "$#" -eq 2 ]; then
+    [ "$2" = "--no-dump" ] || usage
+    no_dump=(--no-dump)
+  fi
+  check_tag_format "${tag}"
+  check_tag_ancestry "${tag}"
+  make_worktree "${tag}"
+  copy_release "${tag}"
+  BUDMON_REEXEC=1 exec "$(release_dir "${tag}")/budmon-local" _upgrade-continue "${tag}" "${no_dump[@]}"
+}
+
+# ---- everyday commands ----
+
+cmd_start() {
+  local current
+  current="$(require_current)"
+  up_both "${current}"
+}
+
+cmd_stop() {
+  local current
+  current="$(require_current)"
+  compose_for "${current}" capture stop </dev/null
+  compose_for "${current}" main stop </dev/null
+}
+
+cmd_status() {
+  local current
+  current="$(require_current)"
+  cat "${BUDMON_HOME}/state"
+  compose_for "${current}" main ps </dev/null || true
+  compose_for "${current}" capture ps </dev/null || true
+  if compose_for "${current}" main exec -T api node dist/main/healthcheck.js --ready \
+    >/dev/null 2>&1 </dev/null; then
+    echo "ready: yes"
+  else
+    echo "ready: no"
+  fi
+  if [ -e "${BUDMON_HOME}/maintenance/on" ]; then echo "maintenance: on"; fi
+  if [ -e "$(restore_marker)" ]; then # A-426
+    echo "restore unfinished: see the runbook (A restore didn't finish)"
+    cat "$(restore_marker)"
+  fi
+  local leftovers
+  leftovers="$(admin_sql "${current}" "SELECT datname FROM pg_database WHERE datname ~ '^budmon_(old|restore_failed)_'" 2>/dev/null || true)"
+  if [ -n "${leftovers}" ]; then
+    printf 'kept databases (dropped by the next upgrade):\n%s\n' "${leftovers}"
+  fi
+  return 0
+}
+
+cmd_logs() {
+  local current follow=() service=()
+  current="$(require_current)"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -f) follow=(-f) ;;
+      -*) usage ;;
+      *) service=("$1") ;;
+    esac
+    shift
+  done
+  if [ "${service[0]:-}" = "worker-capture" ]; then
+    compose_for "${current}" capture logs --tail 200 "${follow[@]}" "${service[@]}"
+  else
+    compose_for "${current}" main logs --tail 200 "${follow[@]}" "${service[@]}"
+  fi
+}
+
+cmd_maintenance() {
+  [ "$#" -eq 1 ] || usage
+  case "$1" in
+    on) maintenance_on && echo "maintenance: on" ;;
+    off) maintenance_off && echo "maintenance: off" ;;
+    status) if [ -e "${BUDMON_HOME}/maintenance/on" ]; then echo "maintenance: on"; else echo "maintenance: off"; fi ;;
+    *) usage ;;
+  esac
+}
+
+cmd_bootstrap_owner() {
+  local email="" replace=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --email)
+        [ "$#" -ge 2 ] || usage
+        email="$2"
+        shift
+        ;;
+      --replace) replace=(--replace) ;;
+      *) usage ;;
+    esac
+    shift
+  done
+  [ -n "${email}" ] || usage
+  local current running
+  current="$(require_current)"
+  running="$(compose_for "${current}" main ps --status running --services api 2>/dev/null </dev/null)" ||
+    die 25 "stack not running"
+  [[ "${running}" == *api* ]] || die 25 "stack not running"
+  # Inside the running api container, never `compose run` (its output would reach the logs).
+  local code=0
+  compose_for "${current}" main exec -T api node dist/main/cli.js identity:bootstrap-owner \
+    --email "${email}" "${replace[@]}" </dev/null || code=$?
+  exit "${code}"
+}
+
+main() {
+  [ "$#" -ge 1 ] || usage
+  check_settings
+  local command="$1"
+  shift
+  reexec_if_needed "${command}" "$@"
+  case "${command}" in
+    install) cmd_install "$@" ;;
+    upgrade) cmd_upgrade "$@" ;;
+    _upgrade-continue) cmd_upgrade_continue "$@" ;;
+    secret) cmd_secret "$@" ;;
+    start) cmd_start ;;
+    stop) cmd_stop ;;
+    restart) cmd_stop && cmd_start ;;
+    status) cmd_status ;;
+    logs) cmd_logs "$@" ;;
+    maintenance) cmd_maintenance "$@" ;;
+    restore) cmd_restore "$@" ;;
+    bootstrap-owner) cmd_bootstrap_owner "$@" ;;
+    *) usage ;;
+  esac
+}
+
+main "$@"
+exit $?

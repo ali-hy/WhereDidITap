@@ -1,0 +1,126 @@
+name: Rehearsal
+
+# The release rehearsal, stage-0 shape (LLD F-195, D-41): the laptop's two Compose projects with the
+# rehearsal overlay, run by tools/rehearsal against fakes for Google, FX and Sentry. Called by
+# ci.yml for release/* and hotfix/* pull requests. The previous release is the newest release or
+# hotfix tag reachable from the head (F-183's rule); with none, the upgrade and rollback steps are
+# skipped. With `doctored: true` (A-468, test only) it runs instead the five doctored cases, each
+# of which must fail at its expected step.
+
+on:
+  workflow_call:
+    inputs:
+      doctored:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  rehearsal:
+    name: rehearsal
+    if: ${{ !inputs.doctored }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # tags, for the previous release
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Playwright's Chromium (A-446)
+        run: pnpm --filter @budmon/web exec playwright install --with-deps chromium
+      - name: The candidate's images
+        run: |
+          docker build -f images/server/Dockerfile -t budmon/server:rehearsal .
+          docker build -f images/web/Dockerfile -t budmon/web:rehearsal .
+          docker build --build-context sql=apps/server/src/platform/db/sql -t budmon/postgres:rehearsal images/postgres
+      - name: The previous release and its images
+        id: previous
+        run: |
+          # The newest release or hotfix tag reachable from the head (F-183's rule), not the nearest.
+          previous="$(git tag --merged HEAD --list 'v[0-9]*' --sort=-v:refname | head -n 1)"
+          if [ -n "$previous" ]; then
+            git worktree add --detach "$RUNNER_TEMP/previous" "$previous"
+            docker build -f "$RUNNER_TEMP/previous/images/server/Dockerfile" -t "budmon/server:$previous" "$RUNNER_TEMP/previous"
+            docker build -f "$RUNNER_TEMP/previous/images/web/Dockerfile" -t "budmon/web:$previous" "$RUNNER_TEMP/previous"
+            echo "tag=$previous" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=none" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Rehearse (F-195)
+        id: rehearse
+        env:
+          PREVIOUS: ${{ steps.previous.outputs.tag }}
+          HEAD_REF: ${{ github.head_ref }}
+          TMPDIR: ${{ runner.temp }}
+        # A-452: the candidate's version is the head branch's suffix, as A-411 does for F-183.
+        run: pnpm --filter @budmon/tools-rehearsal rehearse --previous "$PREVIOUS" --version "${HEAD_REF#*/}"
+      - name: Scan finished (A-483)
+        id: scanned
+        if: always()
+        # A-483: upload only when exactly one finished scan left a scan-report.json in artifacts/;
+        # an unfinished, killed or throwing scan uploads nothing. Exits 0 either way.
+        run: |
+          shopt -s nullglob; reports=("$RUNNER_TEMP"/budmon-rehearsal-*/artifacts/scan-report.json); if [ "${#reports[@]}" -eq 1 ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else echo "ok=false" >> "$GITHUB_OUTPUT"; echo "::warning::rehearsal scan did not finish; no artifacts uploaded"; fi
+      - name: Rehearsal artifacts
+        if: always() && steps.scanned.outputs.ok == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rehearsal-artifacts
+          path: ${{ runner.temp }}/budmon-rehearsal-*/artifacts/
+          retention-days: 14
+          if-no-files-found: error
+
+  doctored:
+    name: doctored
+    if: ${{ inputs.doctored }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        doctor:
+          [api-stage-env, api-capture-secret, api-capture-key, capture-on-data, mailpit-logged]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: The candidate's images
+        run: |
+          docker build -f images/server/Dockerfile -t budmon/server:rehearsal .
+          docker build -f images/web/Dockerfile -t budmon/web:rehearsal .
+          docker build --build-context sql=apps/server/src/platform/db/sql -t budmon/postgres:rehearsal images/postgres
+      - name: Doctored rehearsal (A-468)
+        id: rehearse
+        env:
+          DOCTOR: ${{ matrix.doctor }}
+          TMPDIR: ${{ runner.temp }}
+        run: pnpm --filter @budmon/tools-rehearsal rehearse --previous none --version v0.0.0 --doctor "$DOCTOR"
+      - name: Scan finished (A-483)
+        id: scanned
+        if: always()
+        # A-483: upload only when exactly one finished scan left a scan-report.json in artifacts/;
+        # an unfinished, killed or throwing scan uploads nothing. Exits 0 either way.
+        run: |
+          shopt -s nullglob; reports=("$RUNNER_TEMP"/budmon-rehearsal-*/artifacts/scan-report.json); if [ "${#reports[@]}" -eq 1 ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else echo "ok=false" >> "$GITHUB_OUTPUT"; echo "::warning::rehearsal scan did not finish; no artifacts uploaded"; fi
+      - name: Doctored rehearsal artifacts
+        if: always() && steps.scanned.outputs.ok == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rehearsal-doctored-${{ matrix.doctor }}-artifacts
+          path: ${{ runner.temp }}/budmon-rehearsal-*/artifacts/
+          retention-days: 14
+          if-no-files-found: error

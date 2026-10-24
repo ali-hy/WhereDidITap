@@ -1,0 +1,40 @@
+{
+  "name": "@budmon/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@formatjs/intl": "6.1.2",
+    "@kobalte/core": "0.13.14",
+    "@orpc/client": "1.15.4",
+    "@orpc/contract": "1.15.4",
+    "@orpc/openapi-client": "1.15.4",
+    "@sentry/solid": "11.4.0",
+    "@tanstack/solid-query": "5.104.1",
+    "@tanstack/solid-router": "1.170.38",
+    "@tanstack/solid-table": "9.2.8",
+    "@tanstack/solid-virtual": "3.13.41",
+    "solid-js": "1.9.16"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@budmon/config": "workspace:*",
+    "@budmon/contract": "workspace:*",
+    "@budmon/shared": "workspace:*",
+    "@formatjs/icu-messageformat-parser": "3.5.20",
+    "@playwright/test": "1.63.0",
+    "@solidjs/testing-library": "0.8.10",
+    "@tailwindcss/vite": "4.3.3",
+    "jsdom": "30.1.2",
+    "msw": "3.0.2",
+    "tailwindcss": "4.3.3",
+    "vite": "8.3.2",
+    "vite-plugin-solid": "2.11.14"
+  }
+}
