@@ -60,9 +60,9 @@ class UpdateRepositoryTest {
 
     private fun TestScope.repository(
         versionCode: Int,
-        clock: () -> Clock,
         api: MetaApi = api(min = 5, latest = 7),
         store: DataStore<Preferences> = newStore(),
+        clock: () -> Clock,
     ): UpdateRepository = UpdateRepository(
         api,
         store,
@@ -128,7 +128,7 @@ class UpdateRepositoryTest {
     fun `TP-13_6 (A-471) markRequired(6) over stored 3 is Required(6) and stores 6, and an offline refresh keeps it`() = runTest {
         val store = newStore()
         store.storeMinimum(3)
-        val repo = repository(4, fixedClock, api = offline(), store = store)
+        val repo = repository(4, clock = fixedClock, api = offline(), store = store)
 
         repo.markRequired(6)
         assertEquals(UpdateState.Required(6), repo.state.value)
@@ -141,9 +141,9 @@ class UpdateRepositoryTest {
     @Test
     fun `TP-13_6 (A-471) a second repository on the same store starts None and current() reads Required(6)`() = runTest {
         val store = newStore()
-        repository(4, fixedClock, api = offline(), store = store).markRequired(6)
+        repository(4, clock = fixedClock, api = offline(), store = store).markRequired(6)
 
-        val cold = repository(4, fixedClock, api = offline(), store = store)
+        val cold = repository(4, clock = fixedClock, api = offline(), store = store)
         assertEquals(UpdateState.None, cold.state.value)
         assertEquals(UpdateState.Required(6), cold.current())
         assertEquals(UpdateState.Required(6), cold.state.value)
@@ -153,7 +153,7 @@ class UpdateRepositoryTest {
     fun `TP-13_6 (A-471) markRequired(null) and markRequired(2) on an empty store are Required(versionCode + 1) and store 5`() = runTest {
         for (min in listOf<Int?>(null, 2)) {
             val store = newStore()
-            val repo = repository(4, fixedClock, api = offline(), store = store)
+            val repo = repository(4, clock = fixedClock, api = offline(), store = store)
 
             repo.markRequired(min)
 
@@ -164,7 +164,7 @@ class UpdateRepositoryTest {
 
     @Test
     fun `TP-13_6 (A-471) markRequired(6) then a refresh returning min 3 is None (the server lowered it)`() = runTest {
-        val repo = repository(4, fixedClock, api = api(min = 3, latest = 4))
+        val repo = repository(4, clock = fixedClock, api = api(min = 3, latest = 4))
 
         repo.markRequired(6)
         repo.refresh()
@@ -176,7 +176,7 @@ class UpdateRepositoryTest {
     fun `TP-13_6 (A-471) markRequired(7) after stored 9 keeps 9`() = runTest {
         val store = newStore()
         store.storeMinimum(9)
-        val repo = repository(4, fixedClock, api = offline(), store = store)
+        val repo = repository(4, clock = fixedClock, api = offline(), store = store)
 
         repo.markRequired(7)
 
@@ -201,7 +201,7 @@ class UpdateRepositoryTest {
                 )
             }
         }
-        val repo = repository(4, fixedClock, api = slow, store = store)
+        val repo = repository(4, clock = fixedClock, api = slow, store = store)
 
         val pending = async { repo.refresh() }
         runCurrent()
@@ -224,7 +224,7 @@ class UpdateRepositoryTest {
             val store = newStore()
             store.storeMinimum(5)
             val api: MetaApi = mockk { coEvery { metaClientConfig() } returns answer }
-            val repo = repository(4, fixedClock, api = api, store = store)
+            val repo = repository(4, clock = fixedClock, api = api, store = store)
 
             repo.refresh()
 
@@ -238,7 +238,7 @@ class UpdateRepositoryTest {
         val store = newStore()
         store.storeMinimum(9)
 
-        val repo = repository(4, fixedClock, api = offline(), store = store)
+        val repo = repository(4, clock = fixedClock, api = offline(), store = store)
 
         assertEquals(UpdateState.None, repo.state.value)
     }
