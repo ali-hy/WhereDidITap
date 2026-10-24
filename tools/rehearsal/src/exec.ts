@@ -1,6 +1,7 @@
 // A-476: the rehearsal's child processes. Each child's stdout and stderr go to its step's log
-// file under <workDir>/artifacts/steps (scanned and withheld on a hit by collectArtifacts), never
-// to the job log; arguments, environment and stdin are never written anywhere.
+// file under <workDir>/steps (A-483: outside the upload; collectArtifacts copies it, scanned and
+// withheld on a hit, into the uploaded tree), never to the job log; arguments, environment and
+// stdin are never written anywhere.
 import { spawn as nodeSpawn } from "node:child_process";
 import { appendFileSync, chmodSync, mkdirSync } from "node:fs";
 import path from "node:path";

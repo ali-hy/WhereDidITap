@@ -5,6 +5,7 @@
 // with the record name it belongs to, so a unit run can replace any of them.
 import { generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import path from "node:path";
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
@@ -1351,16 +1352,29 @@ async function scanSources(
   return sources;
 }
 
-function stepLogDir(ctx: RehearsalContext): string {
-  return path.join(ctx.opts.workDir, "artifacts", "steps");
+/**
+ * A-483: the work directory's three trees. Raw step logs live in `stepLogs`, outside the uploaded
+ * tree; only collectArtifacts writes `artifacts`, by renaming `staging` after a complete scan.
+ */
+export function rehearsalPaths(workDir: string): {
+  stepLogs: string;
+  artifacts: string;
+  staging: string;
+} {
+  return {
+    stepLogs: path.join(workDir, "steps"),
+    artifacts: path.join(workDir, "artifacts"),
+    staging: path.join(workDir, ".scan-staging"),
+  };
 }
 
-/** A-476: the step logs written so far, as sources `steps/<file>`. */
+/** A-476, A-483: step 8 reads the step logs written so far, as sources `steps/<file>`. */
 function stepLogSources(ctx: RehearsalContext): { name: string; text: string }[] {
-  const dir = stepLogDir(ctx);
+  const dir = rehearsalPaths(ctx.opts.workDir).stepLogs;
   if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".log"))
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isFile() && e.name.endsWith(".log"))
+    .map((e) => e.name)
     .sort()
     .map((f) => ({ name: `steps/${f}`, text: readFileSync(path.join(dir, f), "utf8") }));
 }
@@ -1780,53 +1794,74 @@ export const defaultSteps: Readonly<Record<StepName, StepFn>> = Object.freeze({
 
 // ---- artifacts and cleanup ----
 
+/** A-483: the scan's own logs and the later cleanup's are never copied into the upload. */
+function isOwnOrCleanupLog(file: string): boolean {
+  return (
+    file === "artifacts.log" ||
+    file === "cleanup.log" ||
+    file.startsWith("artifacts--") ||
+    file.startsWith("cleanup--")
+  );
+}
+
 /**
- * A-476: gathers step 8's sources again, then (last) every step log, rescans all of them, and
- * writes each one, except that a source with any hit is replaced by the hit's names. The report
- * holds names only.
+ * A-476, A-483: builds the upload in `.scan-staging`. It gathers step 8's sources again, then
+ * (last) the step logs, rescans all of them, and writes each one through node:fs/promises, a source
+ * with any hit replaced by the hit's names. scan-report.json (names only) is written last, then the
+ * staging tree is renamed to `artifacts`. The raw step logs stay where they are; any throw removes
+ * the staging tree and rethrows, so `artifacts` doesn't exist.
  */
 const defaultCollectArtifacts: StepFn = async (ctx) => {
   const step = "artifacts";
-  const dir = path.join(ctx.opts.workDir, "artifacts");
-  // A-476: every call here carries sensitiveStdout, so the artifacts step log holds no source.
-  const save = (file: string, text: string) =>
-    ctx.exec("install", ["-D", "-m", "0644", "/dev/stdin", file], {
-      step,
-      input: text,
-      sensitiveStdout: true,
-    });
-  await ctx.exec("mkdir", ["-p", dir], { step, sensitiveStdout: true });
-  const live = await scanSources(ctx, step).catch(() => []);
-  const sources = [...live, ...stepLogSources(ctx)];
-  const hits = new Map<string, Set<string>>();
-  const record = (source: string, name: string) => {
-    const set = hits.get(source) ?? new Set<string>();
-    set.add(name);
-    hits.set(source, set);
-  };
-  for (const h of scanForCanaries(sources, CANARIES)) record(h.source, h.canary);
-  for (const h of scanForNeedles(sources, ctx.needles)) record(h.source, h.needle);
-  for (const source of sources) {
-    const found = hits.get(source.name);
-    const text =
-      found === undefined
-        ? source.text
-        : `withheld: ${String(found.size)} hit(s): ${[...found].sort().join(", ")}\n`;
-    const isStepLog = source.name.startsWith("steps/");
-    // A step log is already on disk; it's rewritten only when it must be withheld.
-    if (isStepLog && found === undefined) continue;
-    const file = isStepLog
-      ? path.join(dir, source.name)
-      : path.join(dir, `${source.name.replaceAll(/[^A-Za-z0-9._-]/g, "_")}.log`);
-    await save(file, text);
+  const { stepLogs, artifacts, staging } = rehearsalPaths(ctx.opts.workDir);
+  try {
+    await rm(artifacts, { recursive: true, force: true });
+    await rm(staging, { recursive: true, force: true });
+    await mkdir(staging, { mode: 0o700 });
+    const sources = await scanSources(ctx, step);
+    const logs = existsSync(stepLogs) ? await readdir(stepLogs, { withFileTypes: true }) : [];
+    for (const e of logs
+      .filter((e) => e.isFile() && e.name.endsWith(".log") && !isOwnOrCleanupLog(e.name))
+      .map((e) => e.name)
+      .sort()) {
+      sources.push({ name: `steps/${e}`, text: await readFile(path.join(stepLogs, e), "utf8") });
+    }
+    const hits = new Map<string, Set<string>>();
+    const record = (source: string, name: string) => {
+      const set = hits.get(source) ?? new Set<string>();
+      set.add(name);
+      hits.set(source, set);
+    };
+    for (const h of scanForCanaries(sources, CANARIES)) record(h.source, h.canary);
+    for (const h of scanForNeedles(sources, ctx.needles)) record(h.source, h.needle);
+    await mkdir(path.join(staging, "steps"), { mode: 0o700 });
+    for (const source of sources) {
+      const found = hits.get(source.name);
+      const text =
+        found === undefined
+          ? source.text
+          : `withheld: ${String(found.size)} hit(s): ${[...found].sort().join(", ")}\n`;
+      const file = source.name.startsWith("steps/")
+        ? path.join(staging, source.name)
+        : path.join(staging, `${source.name.replaceAll(/[^A-Za-z0-9._-]/g, "_")}.log`);
+      await writeFile(file, text, { mode: 0o600 });
+    }
+    const final = [...hits.entries()].flatMap(([source, names]) =>
+      [...names].map((name) => ({ source, name })),
+    );
+    await writeFile(
+      path.join(staging, "scan-report.json"),
+      `${JSON.stringify({ final }, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+    await rename(staging, artifacts);
+    if (final.length === 0) return ok();
+    const leaks = [...new Set(final.map((h) => `${h.source}:${h.name}`))].sort();
+    return fail(`leak: ${leaks.join(", ")}`);
+  } catch (error) {
+    await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+    throw error;
   }
-  const final = [...hits.entries()].flatMap(([source, names]) =>
-    [...names].map((name) => ({ source, name })),
-  );
-  await save(path.join(dir, "scan-report.json"), `${JSON.stringify({ final }, null, 2)}\n`);
-  if (final.length === 0) return ok();
-  const leaks = [...new Set(final.map((h) => `${h.source}:${h.name}`))].sort();
-  return fail(`leak: ${leaks.join(", ")}`);
 };
 
 const defaultCleanup: StepFn = async (ctx) => {
@@ -1852,10 +1887,13 @@ const defaultCleanup: StepFn = async (ctx) => {
     if (r.code !== 0) failures.push(`down_${project}`);
   }
   await ctx.exec("docker", ["network", "rm", REHEARSAL_CAPTURE_DB_NETWORK], { step });
-  // A-478: rm -rf only inside the work directory.
-  const root = `${ctx.opts.workDir}/`;
+  // A-478: rm -rf only inside the work directory, and only when that is an absolute path other
+  // than the filesystem root.
+  const workDir = ctx.opts.workDir;
+  const validWorkDir = path.isAbsolute(workDir) && path.resolve(workDir) !== "/";
+  const root = `${path.resolve(workDir)}/`;
   const paths = [ctx.budmonHome, captureKeyDir(ctx)];
-  const safe = paths.filter((p) => path.posix.normalize(p).startsWith(root));
+  const safe = validWorkDir ? paths.filter((p) => path.resolve(p).startsWith(root)) : [];
   if (safe.length !== paths.length) failures.push("unsafe_path");
   if (safe.length > 0) {
     const rm = await ctx.exec("sudo", ["rm", "-rf", ...safe], { step });

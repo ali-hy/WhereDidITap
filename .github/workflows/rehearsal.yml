@@ -55,20 +55,28 @@ jobs:
             echo "tag=none" >> "$GITHUB_OUTPUT"
           fi
       - name: Rehearse (F-195)
+        id: rehearse
         env:
           PREVIOUS: ${{ steps.previous.outputs.tag }}
           HEAD_REF: ${{ github.head_ref }}
           TMPDIR: ${{ runner.temp }}
         # A-452: the candidate's version is the head branch's suffix, as A-411 does for F-183.
         run: pnpm --filter @budmon/tools-rehearsal rehearse --previous "$PREVIOUS" --version "${HEAD_REF#*/}"
-      - name: Rehearsal artifacts
+      - name: Scan finished (A-483)
+        id: scanned
         if: always()
+        # A-483: upload only when exactly one finished scan left a scan-report.json in artifacts/;
+        # an unfinished, killed or throwing scan uploads nothing. Exits 0 either way.
+        run: |
+          shopt -s nullglob; reports=("$RUNNER_TEMP"/budmon-rehearsal-*/artifacts/scan-report.json); if [ "${#reports[@]}" -eq 1 ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else echo "ok=false" >> "$GITHUB_OUTPUT"; echo "::warning::rehearsal scan did not finish; no artifacts uploaded"; fi
+      - name: Rehearsal artifacts
+        if: always() && steps.scanned.outputs.ok == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: rehearsal-artifacts
           path: ${{ runner.temp }}/budmon-rehearsal-*/artifacts/
           retention-days: 14
-          if-no-files-found: warn
+          if-no-files-found: error
 
   doctored:
     name: doctored
@@ -96,15 +104,23 @@ jobs:
           docker build -f images/web/Dockerfile -t budmon/web:rehearsal .
           docker build --build-context sql=apps/server/src/platform/db/sql -t budmon/postgres:rehearsal images/postgres
       - name: Doctored rehearsal (A-468)
+        id: rehearse
         env:
           DOCTOR: ${{ matrix.doctor }}
           TMPDIR: ${{ runner.temp }}
         run: pnpm --filter @budmon/tools-rehearsal rehearse --previous none --version v0.0.0 --doctor "$DOCTOR"
-      - name: Doctored rehearsal artifacts
+      - name: Scan finished (A-483)
+        id: scanned
         if: always()
+        # A-483: upload only when exactly one finished scan left a scan-report.json in artifacts/;
+        # an unfinished, killed or throwing scan uploads nothing. Exits 0 either way.
+        run: |
+          shopt -s nullglob; reports=("$RUNNER_TEMP"/budmon-rehearsal-*/artifacts/scan-report.json); if [ "${#reports[@]}" -eq 1 ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else echo "ok=false" >> "$GITHUB_OUTPUT"; echo "::warning::rehearsal scan did not finish; no artifacts uploaded"; fi
+      - name: Doctored rehearsal artifacts
+        if: always() && steps.scanned.outputs.ok == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: rehearsal-doctored-${{ matrix.doctor }}-artifacts
           path: ${{ runner.temp }}/budmon-rehearsal-*/artifacts/
           retention-days: 14
-          if-no-files-found: warn
+          if-no-files-found: error
