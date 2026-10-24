@@ -3,24 +3,35 @@
 // Construction per A-344 (a @HiltWorker, built directly here):
 // SyncWorker(context, params, dao: OutboxDao, http: OkHttpClient, baseUrl: HttpUrl,
 // updates: UpdateRepository, clock: java.time.Clock), built here through TestListenableWorkerBuilder
-// with a WorkerFactory; UpdateRepository exposes state: StateFlow<UpdateState> and markRequired(min).
+// with a WorkerFactory; UpdateRepository exposes state: StateFlow<UpdateState>, suspend current()
+// and suspend markRequired(min: Int?) (A-471). Stored paths are relative to api/v1/ (A-474).
 package com.budmon.app.core.outbox
 
 import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.ListenableWorker
 import androidx.work.WorkerFactory
 import androidx.work.WorkerParameters
 import androidx.work.testing.TestListenableWorkerBuilder
+import com.budmon.api.apis.MetaApi
 import com.budmon.app.core.db.BudmonDatabase
 import com.budmon.app.core.update.UpdateRepository
 import com.budmon.app.core.update.UpdateState
+import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
-import io.mockk.verify
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -29,10 +40,12 @@ import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.io.File
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -60,6 +73,7 @@ class SyncWorkerTest {
         dao = db.outboxDao()
         updates = mockk(relaxed = true)
         every { updates.state } returns updateState
+        coEvery { updates.current() } coAnswers { updateState.value }
     }
 
     @After
@@ -73,12 +87,13 @@ class SyncWorkerTest {
         ageMs: Long = 0,
         status: String = "PENDING",
         body: ByteArray = """{"k":"$key"}""".toByteArray(),
+        path: String = "things",
     ): Long = dao.insert(
         OutboxEntry(
             id = 0,
             idempotencyKey = key,
             method = "POST",
-            path = "/api/v1/things",
+            path = path,
             body = body,
             contentType = "application/json",
             createdAtEpochMs = now.toEpochMilli() - ageMs,
@@ -88,11 +103,15 @@ class SyncWorkerTest {
         ),
     )
 
-    private suspend fun run(client: OkHttpClient = OkHttpClient()): ListenableWorker.Result {
+    private suspend fun run(
+        client: OkHttpClient = OkHttpClient(),
+        baseUrl: HttpUrl = server.url("/"),
+        repository: UpdateRepository = updates,
+    ): ListenableWorker.Result {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val factory = object : WorkerFactory() {
             override fun createWorker(appContext: Context, workerClassName: String, workerParameters: WorkerParameters) =
-                SyncWorker(appContext, workerParameters, dao, client, server.url("/"), updates, clock)
+                SyncWorker(appContext, workerParameters, dao, client, baseUrl, repository, clock)
         }
         return TestListenableWorkerBuilder<SyncWorker>(context).setWorkerFactory(factory).build().doWork()
     }
@@ -166,7 +185,7 @@ class SyncWorkerTest {
 
         run()
 
-        verify { updates.markRequired(9) }
+        coVerify { updates.markRequired(9) }
         assertEquals(1, server.requestCount)
         assertEquals("PENDING", statusOf("first"))
         assertEquals("PENDING", statusOf("second"))
@@ -289,5 +308,116 @@ class SyncWorkerTest {
         assertNull(statusOf("second-ok"))
         server.takeRequest()
         assertEquals("second-ok", server.takeRequest().getHeader("Idempotency-Key"))
+    }
+
+    // ---- A-474: paths relative to api/v1/, resolved under the base URL's own path ----
+
+    private fun column(key: String, name: String): String? =
+        db.query("SELECT $name FROM outbox WHERE idempotencyKey = ?", arrayOf(key)).use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        }
+
+    @Test
+    fun `TP-13_5 (A-474) a stored path things is sent to api-v1-things`() = runTest {
+        add("rel")
+        server.enqueue(MockResponse().setResponseCode(201).setBody("{}"))
+
+        run()
+
+        assertEquals("/api/v1/things", server.takeRequest().path)
+    }
+
+    @Test
+    fun `TP-13_5 (A-474) with base URL prefix-slash, things is sent to prefix-api-v1-things`() = runTest {
+        add("prefixed")
+        server.enqueue(MockResponse().setResponseCode(201).setBody("{}"))
+
+        run(baseUrl = server.url("/prefix/"))
+
+        assertEquals("/prefix/api/v1/things", server.takeRequest().path)
+    }
+
+    @Test
+    fun `TP-13_5 (A-474) each invalid stored path is FAILED with INVALID_PATH, attempts 0, not sent, and the next entry is still sent`() =
+        runTest {
+            for ((n, bad) in listOf("/api/v1/things", "https://evil.example/x", "../x", "a/../../x", "x#f").withIndex()) {
+                val before = server.requestCount
+                add("bad-$n", ageMs = 2_000, path = bad)
+                add("next-$n", ageMs = 1_000)
+                server.enqueue(MockResponse().setResponseCode(201).setBody("{}"))
+
+                run()
+
+                assertEquals(bad, "FAILED", statusOf("bad-$n"))
+                assertEquals(bad, "INVALID_PATH", column("bad-$n", "lastErrorKey"))
+                assertEquals(bad, "0", column("bad-$n", "attempts"))
+                assertEquals(bad, before + 1, server.requestCount)
+                assertEquals(bad, "next-$n", server.takeRequest().getHeader("Idempotency-Key"))
+                assertNull(bad, statusOf("next-$n"))
+            }
+        }
+
+    // ---- A-471, A-481: a real UpdateRepository over DataStore (versionCode 4) ----
+
+    private val minimumKey = intPreferencesKey("minimumVersionCode")
+
+    private fun TestScope.realUpdates(store: DataStore<Preferences>): UpdateRepository = UpdateRepository(
+        mockk<MetaApi>(relaxed = true),
+        store,
+        4,
+        clock,
+    )
+
+    private fun TestScope.store(): DataStore<Preferences> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val file = File(context.filesDir, "sync-update-${System.nanoTime()}.preferences_pb")
+        return PreferenceDataStoreFactory.create(scope = backgroundScope) { file }
+    }
+
+    @Test
+    fun `TP-13_5 (A-471) a cold repository whose store holds versionCode + 1 sends nothing - success, entry PENDING`() = runTest {
+        val store = store()
+        store.edit { it[minimumKey] = 5 }
+        add("cold")
+
+        val result = run(repository = realUpdates(store))
+
+        assertEquals(0, server.requestCount)
+        assertEquals(ListenableWorker.Result.success(), result)
+        assertEquals("PENDING", statusOf("cold"))
+    }
+
+    @Test
+    fun `TP-13_5 (A-481) CLIENT_UPDATE_REQUIRED with minimum 9, missing, a string or 0`() = runTest {
+        val cases = listOf(
+            """{"minimumVersion":9}""" to 9,
+            null to 5,
+            """{"minimumVersion":"9"}""" to 5,
+            """{"minimumVersion":0}""" to 5,
+        )
+        for ((n, case) in cases.withIndex()) {
+            val (data, stored) = case
+            val store = store()
+            val repo = realUpdates(store)
+            add("sent-$n", ageMs = 2_000)
+            add("held-$n", ageMs = 1_000)
+            val before = server.requestCount
+            server.enqueue(envelope("CLIENT_UPDATE_REQUIRED", 400, data))
+
+            val result = run(repository = repo)
+
+            val label = data ?: "no data"
+            assertEquals(label, ListenableWorker.Result.success(), result)
+            assertEquals(label, before + 1, server.requestCount)
+            assertEquals(label, "sent-$n", server.takeRequest().getHeader("Idempotency-Key"))
+            assertEquals(label, "PENDING", statusOf("sent-$n"))
+            assertEquals(label, "1", column("sent-$n", "attempts"))
+            assertNull(label, column("sent-$n", "lastErrorKey"))
+            assertEquals(label, "PENDING", statusOf("held-$n"))
+            assertEquals(label, "0", column("held-$n", "attempts"))
+            assertTrue(label, repo.state.value is UpdateState.Required)
+            assertEquals(label, stored, store.data.first()[minimumKey])
+            dao.deleteAll()
+        }
     }
 }
