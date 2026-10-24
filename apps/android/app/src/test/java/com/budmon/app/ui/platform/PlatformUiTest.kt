@@ -15,7 +15,11 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -24,6 +28,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -59,9 +64,9 @@ class PlatformUiTest {
     }
 
     @Test
-    fun `TP-13_7 UpdateRequiredScreen with pending 1 shows the pending note`() {
+    fun `TP-13_7 UpdateRequiredScreen with pending 1 shows the singular note (A-475)`() {
         set { UpdateRequiredScreen(pending = 1, downloadUrl = "https://x/app.apk", onOpenDownload = { true }) }
-        compose.onNodeWithText("1 entries you saved offline", substring = true).assertExists()
+        compose.onNodeWithText("1 entry you saved offline is kept and will sync after you update.").assertExists()
     }
 
     @Test
@@ -203,5 +208,108 @@ class PlatformUiTest {
         val root = compose.onRoot().fetchSemanticsNode().boundsInRoot
         // In RTL content starts at the right edge.
         assertTrue(text.right >= root.right - (root.width / 2))
+    }
+
+    // ---- A-475: the back-online text uses the capped count ----
+
+    @Test
+    fun `TP-13_7 (A-475) OfflineBanner back online with 1 pending is singular`() {
+        var online by mutableStateOf(false)
+        compose.mainClock.autoAdvance = false
+        set { OfflineBanner(isOnline = online, pending = 1) }
+        compose.mainClock.advanceTimeByFrame()
+
+        online = true
+        compose.mainClock.advanceTimeBy(100)
+
+        compose.onNodeWithText("Back online. Syncing 1 entry…").assertIsDisplayed()
+    }
+
+    @Test
+    fun `TP-13_7 (A-475) OfflineBanner back online with 120 pending shows the capped count`() {
+        var online by mutableStateOf(false)
+        compose.mainClock.autoAdvance = false
+        set { OfflineBanner(isOnline = online, pending = 120) }
+        compose.mainClock.advanceTimeByFrame()
+
+        online = true
+        compose.mainClock.advanceTimeBy(100)
+
+        compose.onNodeWithText("Back online. Syncing 99+ entries…").assertIsDisplayed()
+    }
+
+    // ---- A-472: ErrorFallbackScreen ----
+
+    private val bidi = Regex("[\u200E\u200F\u202A-\u202E\u2066-\u2069]")
+
+    private fun textOf(node: SemanticsNodeInteraction): String =
+        node.fetchSemanticsNode().config.getOrNull(SemanticsProperties.Text)?.joinToString("") { it.text } ?: ""
+
+    @Test
+    fun `TP-13_7 (A-472) ErrorFallbackScreen with a request id shows error_fallback_body and Reference 4bf92f35`() {
+        set {
+            ErrorFallbackScreen(
+                requestId = "4bf92f35ab0cd1e2f3a4b5c6d7e8f901",
+                stillFailing = false,
+                busy = false,
+                onRetry = {},
+                onHome = {},
+            )
+        }
+
+        compose
+            .onNodeWithText("Try again in a moment. If it keeps happening, share this reference with the person who invited you.")
+            .assertExists()
+        val reference = compose.onNodeWithText("4bf92f35", substring = true)
+        assertEquals("Reference: 4bf92f35", textOf(reference).replace(bidi, ""))
+    }
+
+    @Test
+    fun `TP-13_7 (A-472) ErrorFallbackScreen without a request id shows the no-reference body and no Reference line`() {
+        set { ErrorFallbackScreen(requestId = null, stillFailing = false, busy = false, onRetry = {}, onHome = {}) }
+
+        compose.onNodeWithText("Try again in a moment. If it keeps happening, let the person who invited you know.").assertExists()
+        val references = compose
+            .onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text))
+            .fetchSemanticsNodes()
+            .map { n -> n.config.getOrNull(SemanticsProperties.Text)?.joinToString("") { it.text } ?: "" }
+            .filter { it.replace(bidi, "").startsWith("Reference") }
+        assertEquals(emptyList<String>(), references)
+    }
+
+    @Test
+    fun `TP-13_7 (A-472) busy true then false while still failing focuses Try again, described Still not working, title a heading`() {
+        var busy by mutableStateOf(true)
+        set { ErrorFallbackScreen(requestId = null, stillFailing = true, busy = busy, onRetry = {}, onHome = {}) }
+        compose.waitForIdle()
+
+        busy = false
+        compose.waitForIdle()
+
+        val retry = compose.onNodeWithText("Try again")
+        retry.assertIsFocused()
+        retry.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Still not working."))
+        compose.onNodeWithText("Still not working.").assertExists()
+        compose.onNodeWithText("Something went wrong on our side").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
+    }
+
+    @Test
+    fun `TP-13_7 (A-472) on first composition with stillFailing true and busy false, Try again isn't focused`() {
+        set { ErrorFallbackScreen(requestId = null, stillFailing = true, busy = false, onRetry = {}, onHome = {}) }
+        compose.waitForIdle()
+
+        compose.onNodeWithText("Try again").assertIsNotFocused()
+    }
+
+    @Test
+    fun `TP-13_7 (A-472) busy true then false while not still failing doesn't focus Try again`() {
+        var busy by mutableStateOf(true)
+        set { ErrorFallbackScreen(requestId = null, stillFailing = false, busy = busy, onRetry = {}, onHome = {}) }
+        compose.waitForIdle()
+
+        busy = false
+        compose.waitForIdle()
+
+        compose.onNodeWithText("Try again").assertIsNotFocused()
     }
 }
