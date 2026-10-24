@@ -9,6 +9,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -177,7 +178,13 @@ class PlatformUiTest {
         compose.mainClock.advanceTimeByFrame()
         compose.onNodeWithText("You're offline", substring = true).assertExists()
 
-        online = true
+        compose.runOnUiThread {
+            online = true
+            Snapshot.sendApplyNotifications()
+        }
+        // One frame recomposes and restarts the effect; the next shows the text it set.
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeByFrame()
         compose.mainClock.advanceTimeBy(100)
         compose.onNodeWithText("Back online. Syncing 2 entries…").assertIsDisplayed()
 
