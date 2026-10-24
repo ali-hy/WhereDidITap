@@ -36,5 +36,7 @@ export type Translate = (d: MessageDescriptor, v?: Record<string, unknown>) => s
  */
 export function setDocumentTitle(page: string | null, t: Translate): void {
   document.title =
-    page === null ? APP_NAME : t(messages.appDocumentTitle, { page }).replace(/[⁦-⁩]/g, "");
+    page === null
+      ? APP_NAME
+      : t(messages.appDocumentTitle, { page }).replace(/[\u2066-\u2069]/g, "");
 }

@@ -48,7 +48,9 @@ export function ErrorFallback(props: {
    * in JSX, so they follow the catalog and setLocale like the other strings (Q-D1).
    */
   const referenceParts = (): string[] =>
-    t(messages.errorReference, { ref: SLOT }).replace(/[⁨⁩]/g, "").split(SLOT);
+    t(messages.errorReference, { ref: SLOT })
+      .replace(/[\u2068\u2069]/g, "")
+      .split(SLOT);
   const reference = (requestId: () => string) => (
     <p>
       {referenceParts()[0] ?? ""}

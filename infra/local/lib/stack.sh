@@ -173,7 +173,7 @@ mb_up() {
 rename_db() {
   local tag="$1" from="$2" to="$3" attempt
   for attempt in 1 2 3; do
-    admin_sql "${tag}" "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname IN ('budmon', 'budmon_restore') AND pid <> pg_backend_pid()" >/dev/null 2>&1 || true
+    admin_sql "${tag}" "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${from}' AND pid <> pg_backend_pid()" >/dev/null 2>&1 || true
     if admin_sql "${tag}" "ALTER DATABASE \"${from}\" RENAME TO \"${to}\"" >/dev/null 2>&1; then
       return 0
     fi

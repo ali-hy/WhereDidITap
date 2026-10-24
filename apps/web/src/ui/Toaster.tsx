@@ -137,7 +137,7 @@ export function showToast(t: ToastOptions): string {
         persistent
         aria-live="off"
         data-tone={t.tone}
-        class={`flex max-w-[min(24rem,calc(100vw-2rem))] items-center gap-3 rounded border-s-4 bg-white p-3 text-gray-900 shadow ${tone.border}`}
+        class={`flex [max-inline-size:min(24rem,calc(100vw-2rem))] items-center gap-3 rounded border-s-4 bg-white p-3 text-gray-900 shadow ${tone.border}`}
       >
         <Icon name={tone.icon} class="shrink-0" />
         <Toast.Description>{t.message}</Toast.Description>
