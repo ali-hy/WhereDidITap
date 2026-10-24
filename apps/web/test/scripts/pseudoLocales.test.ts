@@ -149,3 +149,16 @@ describe("TP-11.24: more ICU syntax survives (F-207, review B-4)", () => {
     expect(toAccented("abcdef")).toBe("[áƀçðéƒ~~]");
   });
 });
+
+// A-480: floor(len / 3) tildes in space-separated groups of at most 3, straight after the text.
+describe("TP-11.24 (A-480): toAccented's padding", () => {
+  it.each([
+    ["12345678", "[12345678~~]"],
+    ["123456789", "[123456789~~~]"],
+    ["123456789012", "[123456789012~~~ ~]"],
+    ["12", "[12]"],
+    ["123456789012345678901234567890", "[123456789012345678901234567890~~~ ~~~ ~~~ ~]"],
+  ])("TP-11.24 (A-480): toAccented(%j) is exactly %j", (literal, expected) => {
+    expect(toAccented(literal)).toBe(expected);
+  });
+});
