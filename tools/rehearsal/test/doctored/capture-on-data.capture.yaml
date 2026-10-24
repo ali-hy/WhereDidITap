@@ -1,5 +1,6 @@
-# A-468, TP-16.7: worker-capture attached to budmon-main's data network; step 10
-# (cross-role-secrets) must fail, because it can then reach Postgres's data address.
+# A-468, TP-16.7: worker-capture attached to the main project's data network; step 10
+# (cross-role-secrets) must fail, because it can then reach Postgres's data address. The rehearsal
+# project is budmon-rehearsal-main (A-478), so its data network is budmon-rehearsal-main_data.
 services:
   worker-capture:
     networks:
@@ -8,4 +9,4 @@ services:
 networks:
   data:
     external: true
-    name: budmon-main_data
+    name: budmon-rehearsal-main_data

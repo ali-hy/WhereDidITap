@@ -21,6 +21,8 @@ export interface NeedlesModule {
   };
   REHEARSAL_HOSTS: { fx: string; sentry: string; s3: string };
   REHEARSAL_PUBLIC_ORIGIN: string;
+  REHEARSAL_PROJECTS: { main: string; capture: string };
+  REHEARSAL_CAPTURE_DB_NETWORK: string;
   scanForNeedles: (
     sources: readonly { name: string; text: string }[],
     needles: readonly Needle[],
@@ -95,6 +97,7 @@ export interface StepOutcome {
 }
 export interface ExecOptions {
   step: string;
+  sensitiveStdout?: boolean;
   cwd?: string;
   env?: Record<string, string>;
   input?: string;
@@ -171,10 +174,52 @@ export interface RunModule {
     project: "main" | "capture",
   ) => string[];
   doctorVerdict: (steps: StepRecord[], expectStep: StepName) => { ok: boolean; message: string };
+  stageSettingMentions: (info: {
+    Env: readonly string[] | null;
+    Mounts: readonly { Source: string; Destination: string }[] | null;
+  }) => string[];
   runRehearsal: (
     opts: RehearsalOptions,
     deps: RehearsalDeps,
   ) => Promise<{ ok: boolean; steps: StepRecord[] }>;
+}
+
+// A-479: the CLI's side-effect-free argument parsing.
+export interface ParsedArgs {
+  previousTag: string | null;
+  version: string;
+  doctor: string | null;
+  confirmNotLaptop: boolean;
+}
+export interface ArgsModule {
+  USAGE: string;
+  parseArgs: (argv: readonly string[]) => { ok: true; args: ParsedArgs } | { ok: false };
+  resolveDoctor: (
+    repoRoot: string,
+    name: string,
+    fs?: { exists(p: string): boolean; readFile(p: string): string },
+  ) => { ok: true; doctor: RehearsalDoctor } | { ok: false; message: string };
+}
+
+// A-478: the laptop-safety guard.
+export interface GuardModule {
+  LAPTOP_PROJECTS: readonly string[];
+  LAPTOP_CAPTURE_DB_NETWORK: string;
+  checkRehearsalHost: (f: {
+    env: Readonly<Record<string, string | undefined>>;
+    homeDir: string;
+    confirmNotLaptop: boolean;
+    exists(path: string): boolean;
+  }) => { ok: true } | { ok: false; reason: string };
+  checkNoLaptopStack: (exec: Exec) => Promise<{ ok: true } | { ok: false; reason: string }>;
+}
+
+// A-476: the per-step logging exec.
+export interface ExecModule {
+  createLoggingExec: (
+    logDir: string,
+    deps?: { spawn?: typeof import("node:child_process").spawn },
+  ) => Exec;
 }
 
 async function load<T>(spec: string): Promise<T> {
@@ -185,3 +230,6 @@ export const loadNeedles = () => load<NeedlesModule>("../../src/needles.ts");
 export const loadFakeGoogle = () => load<FakeGoogleModule>("../../src/fakeGoogle.ts");
 export const loadFakeFx = () => load<FakeFxModule>("../../src/fakeFx.ts");
 export const loadRun = () => load<RunModule>("../../src/run.ts");
+export const loadArgs = () => load<ArgsModule>("../../src/args.ts");
+export const loadGuard = () => load<GuardModule>("../../src/guard.ts");
+export const loadExec = () => load<ExecModule>("../../src/exec.ts");

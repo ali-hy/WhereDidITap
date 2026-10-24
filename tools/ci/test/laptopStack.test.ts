@@ -172,7 +172,8 @@ describe("TP-16.17: the rehearsal overlays' compose config (A-392, A-449 to A-45
       "--project-directory",
       LOCAL,
       "-p",
-      `budmon-${project}`,
+      // A-478: the rehearsal's own project names, never the laptop's.
+      `budmon-rehearsal-${project}`,
       "-f",
       path.join(LOCAL, `compose.${project}.yaml`),
       "-f",
@@ -303,6 +304,16 @@ describe("TP-16.17: the rehearsal overlays' compose config (A-392, A-449 to A-45
     );
   });
 
+  it("TP-16.17 (A-478): in both projects capture-db is external budmon_rehearsal_capture_db, and no network is named budmon_capture_db", () => {
+    for (const c of [main, capture]) {
+      expect(c.networks["capture-db"]).toMatchObject({
+        external: true,
+        name: "budmon_rehearsal_capture_db",
+      });
+      expect(Object.values(c.networks).map((n) => n.name)).not.toContain("budmon_capture_db");
+    }
+  });
+
   it("TP-16.17 (c): rehearsal/ holds exactly the two overlays", () => {
     expect(readdirSync(path.join(LOCAL, "rehearsal")).sort()).toEqual([
       "compose.rehearsal.capture.yaml",
@@ -374,12 +385,15 @@ describe("TP-16.17: the rehearsal overlays' compose config (A-392, A-449 to A-45
       );
     });
 
-    it("TP-16.17x: capture-on-data attaches worker-capture to data, external budmon-main_data", () => {
+    it("TP-16.17x: capture-on-data attaches worker-capture to data, external budmon-rehearsal-main_data", () => {
       const c = config("capture-on-data");
 
       expect(c.status, c.stderr).toBe(0);
       expect(Object.keys(c.services["worker-capture"]?.networks ?? {})).toContain("data");
-      expect(c.networks["data"]).toMatchObject({ external: true, name: "budmon-main_data" });
+      expect(c.networks["data"]).toMatchObject({
+        external: true,
+        name: "budmon-rehearsal-main_data",
+      });
     });
 
     it("TP-16.17x: mailpit-logged leaves mailpit without the none logging driver", () => {
