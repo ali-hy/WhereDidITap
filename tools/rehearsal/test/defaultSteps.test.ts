@@ -202,10 +202,15 @@ describe("TP-16.24x: the default cleanup touches only the rehearsal's projects, 
     expect(offending).toEqual([]);
   });
 
-  it("TP-16.24x (e): a workDir with a trailing slash → cleanup: unsafe_path, and no sudo call", async () => {
+  // The review's example, "/tmp/w/", becomes safe once root is built from path.resolve(workDir)
+  // (its optional point); "/" and "" give paths outside any work directory either way.
+  it.each([
+    ["the filesystem root", "/"],
+    ["an empty string", ""],
+  ])("TP-16.24x (e): a workDir of %s → cleanup: unsafe_path, and no sudo call", async (_l, dir) => {
     const { exec, calls } = recordingExec();
 
-    const result = await run("/tmp/w/", exec, null, true);
+    const result = await run(dir, exec, null, true);
 
     expect(record(result.steps, "cleanup")).toEqual({
       name: "cleanup",
