@@ -101,6 +101,8 @@ build_images() {
   if [ -z "${web_dsn}" ] || [ "${web_dsn}" = "${PLACEHOLDER}" ]; then
     die 13 "site.env: WEB_SENTRY_DSN not set"
   fi
+  # A-488: F-10's pattern; the value is never printed.
+  [[ "${web_dsn}" =~ ${SENTRY_DSN_ERE} ]] || die 13 "site.env: WEB_SENTRY_DSN is not a valid Sentry DSN"
   count="$(git -C "${dir}" rev-list --count "${tag}")"
   docker build -f "${dir}/images/server/Dockerfile" -t "budmon/server:${tag}" "${dir}" ||
     die 13 "docker build of the server image failed"

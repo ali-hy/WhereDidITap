@@ -82,6 +82,24 @@ safety dump (`…_pre-restore.dump`, never pruned) and switches databases only o
 has been migrated and verified; the previous database is kept as `budmon_old_<timestamp>` until the
 next upgrade.
 
+## Switching e-mail between Mailpit and a relay
+
+To a relay:
+
+1. Edit `~/.budmon/site.env`: `SMTP_URL=smtp://<user>@<host>:587` (or `smtps://<user>@<host>`)
+   and `EMAIL_FROM`.
+2. `budmon-local secret set main/worker-general/SMTP_PASSWORD` (prompted, hidden).
+3. `budmon-local restart`.
+
+Back to Mailpit:
+
+1. Set `SMTP_URL=smtp://mailpit:1025` in `~/.budmon/site.env`.
+2. `budmon-local secret set main/worker-general/SMTP_PASSWORD --empty`.
+3. `budmon-local restart`, then read mail at `http://127.0.0.1:8025`.
+
+Either way, `site.env` stays mode 0600, and an invalid `SMTP_URL` stops worker-general at start-up
+with the configuration problem in its log.
+
 ## Android
 
 Android Studio and `adb` run on Windows, from a Windows-side clone used only for Android work. The

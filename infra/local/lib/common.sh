@@ -8,6 +8,8 @@
 SERVER_BASE_IMAGE="node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20"
 # shellcheck disable=SC2034 # used by the other libraries
 PLACEHOLDER="__FILL_ME__"
+# A-488: F-10's production Sentry DSN pattern, in POSIX ERE, for SENTRY_DSN and WEB_SENTRY_DSN.
+SENTRY_DSN_ERE='^https://[A-Za-z0-9]{1,64}@[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?/[0-9]{1,20}$'
 # shellcheck disable=SC2034 # used by the other libraries
 TAG_PATTERN='^v[0-9]+\.[0-9]+\.[0-9]+(-hotfix\.[0-9]+)?$'
 

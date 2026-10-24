@@ -63,13 +63,36 @@ write_secret() {
   value=""
 }
 
+# A-487: the one path that may be written empty ("no SMTP authentication", Mailpit).
+EMPTY_SECRET_PATH="main/worker-general/SMTP_PASSWORD"
+
 cmd_secret() {
-  if [ "${1:-}" != "set" ] || [ "$#" -ne 2 ]; then usage; fi
-  local rel="$2"
+  [ "${1:-}" = "set" ] || usage
+  shift
+  local rel="" empty=0 arg
+  # The path and an optional --empty, in either order; anything else is the usage.
+  for arg in "$@"; do
+    if [ "${arg}" = "--empty" ] && [ "${empty}" = 0 ]; then
+      empty=1
+    elif [ -z "${rel}" ] && [ "${arg}" != "--empty" ]; then
+      rel="${arg}"
+    else
+      usage
+    fi
+  done
+  [ -n "${rel}" ] || usage
   [[ "${rel}" =~ ^(main|capture)/[a-z-]+/[A-Z0-9_]+$ ]] || die 64 "not a secret path: ${rel}"
   allowed_secret "${rel%/*}" "${rel##*/}" || die 64 "not a secret path: ${rel}"
-  write_secret "${rel}"
-  echo "written ${rel}"
+  if [ "${empty}" = 1 ]; then
+    [ "${rel}" = "${EMPTY_SECRET_PATH}" ] ||
+      die 64 "--empty is only allowed for ${EMPTY_SECRET_PATH}"
+    # stdin isn't read; the file is written empty, as its owner, mode 0400.
+    sudo install -o 10002 -g 10002 -m 0400 /dev/null "${BUDMON_HOME}/secrets/${rel}"
+    echo "written ${rel} (empty: no SMTP authentication)"
+  else
+    write_secret "${rel}"
+    echo "written ${rel}"
+  fi
   local current
   current="$(state_get current)"
   if [ -n "${current}" ] && [ -n "$(compose_for "${current}" main ps -q 2>/dev/null </dev/null)" ]; then
@@ -108,7 +131,8 @@ site_valid() {
   case "${key}" in
     PUBLIC_ORIGIN) [[ "${v}" =~ ^[a-z0-9-]+\.[a-z0-9-]+\.ts\.net$ ]] ;;
     GOOGLE_OAUTH_CLIENT_ID | GOOGLE_SIGNIN_CLIENT_ID) [[ "${v}" == *.apps.googleusercontent.com ]] ;;
-    S3_ENDPOINT | SENTRY_DSN | WEB_SENTRY_DSN) [[ "${v}" =~ ^https://[^[:space:]]+$ ]] ;;
+    S3_ENDPOINT) [[ "${v}" =~ ^https://[^[:space:]]+$ ]] ;;
+    SENTRY_DSN | WEB_SENTRY_DSN) [[ "${v}" =~ ${SENTRY_DSN_ERE} ]] ;;
     S3_REGION) [ -n "${v}" ] ;;
     S3_BUCKET_EXPORTS | S3_BUCKET_ERASURE_LOG) [[ "${v}" =~ ^[A-Za-z0-9-]{6,50}$ ]] ;;
     GOOGLE_SIGNIN_ANDROID_CLIENT_IDS)
