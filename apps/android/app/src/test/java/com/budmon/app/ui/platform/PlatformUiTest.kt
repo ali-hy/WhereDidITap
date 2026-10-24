@@ -183,14 +183,7 @@ class PlatformUiTest {
         compose.mainClock.advanceTimeByFrame()
         compose.onNodeWithText("You're offline", substring = true).assertExists()
 
-        compose.runOnUiThread {
-            online = true
-            Snapshot.sendApplyNotifications()
-        }
-        // One frame recomposes and restarts the effect; the next shows the text it set.
-        compose.mainClock.advanceTimeByFrame()
-        compose.mainClock.advanceTimeByFrame()
-        compose.mainClock.advanceTimeBy(100)
+        goOnline { online = true }
         compose.onNodeWithText("Back online. Syncing 2 entries…").assertIsDisplayed()
 
         compose.mainClock.advanceTimeBy(2_500)
@@ -210,6 +203,20 @@ class PlatformUiTest {
         assertTrue(text.right >= root.right - (root.width / 2))
     }
 
+    /**
+     * Flips the banner online with the main clock paused: flushes the snapshot change, then one
+     * frame recomposes and restarts the effect, the next shows the text it set, plus 100 ms.
+     */
+    private fun goOnline(flip: () -> Unit) {
+        compose.runOnUiThread {
+            flip()
+            Snapshot.sendApplyNotifications()
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeBy(100)
+    }
+
     // ---- A-475: the back-online text uses the capped count ----
 
     @Test
@@ -219,8 +226,7 @@ class PlatformUiTest {
         set { OfflineBanner(isOnline = online, pending = 1) }
         compose.mainClock.advanceTimeByFrame()
 
-        online = true
-        compose.mainClock.advanceTimeBy(100)
+        goOnline { online = true }
 
         compose.onNodeWithText("Back online. Syncing 1 entry…").assertIsDisplayed()
     }
@@ -232,8 +238,7 @@ class PlatformUiTest {
         set { OfflineBanner(isOnline = online, pending = 120) }
         compose.mainClock.advanceTimeByFrame()
 
-        online = true
-        compose.mainClock.advanceTimeBy(100)
+        goOnline { online = true }
 
         compose.onNodeWithText("Back online. Syncing 99+ entries…").assertIsDisplayed()
     }
