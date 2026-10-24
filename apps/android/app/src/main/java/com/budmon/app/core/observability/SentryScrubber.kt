@@ -98,9 +98,10 @@ class SentryScrubber : SentryOptions.BeforeSendCallback {
         }
         val userId = event.user?.id
         if (userId != null && UUID.matches(userId)) scrubbed.user = User().apply { id = userId }
-        // contexts.trace.{trace_id, span_id} only.
+        // contexts.trace.{trace_id, span_id} only. SpanContext needs a non-null operation; it is
+        // left empty so nothing from the original span's op is sent.
         event.contexts.trace?.let { trace ->
-            scrubbed.contexts.setTrace(SpanContext(trace.traceId, trace.spanId, "default", null, null))
+            scrubbed.contexts.setTrace(SpanContext(trace.traceId, trace.spanId, "", null, null))
         }
         scrubbed.breadcrumbs = event.breadcrumbs?.mapNotNull { scrubBreadcrumb(it) }
         return scrubbed

@@ -123,6 +123,10 @@ fun UpdateCard(onUpdate: () -> Unit, onLater: () -> Unit, modifier: Modifier = M
  * S-2: something went wrong (A-472). The body asks to share the reference only when there is one;
  * Try again is described by "Still not working." while failing and takes focus when a retry ends
  * in failure (never on first composition; on success the caller replaces the screen).
+ *
+ * The focus move runs when [busy] goes from true to false while [stillFailing] is true, so the
+ * caller must set [stillFailing] no later than it clears [busy] (in the same state update, or
+ * before it); set after, the failed retry is missed and focus stays where it was.
  */
 @Composable
 fun ErrorFallbackScreen(
