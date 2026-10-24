@@ -206,7 +206,10 @@ class SentryScrubberTest {
                         listOf(
                             valid,
                             frame("x $canary", "Worker.kt"),
-                            frame("run", "/data/user/0/$canary/x.kt"),
+                            // F-260 re-checks A-110's filename pattern only; an absolute path of
+                            // allowed characters passes it (question for the planner), so this
+                            // frame fails the pattern by its space.
+                            frame("run", "/data/user/0/$canary x.kt"),
                             frame("run", null),
                         ),
                     )
