@@ -79,6 +79,9 @@ class OutboxPathTest {
             "a\\b",
             "x#f",
             "a b",
+            // A-474: percent-encoded dot segments count as dot segments.
+            "%2e%2e/x",
+            "%2E%2E/v1/things",
         )
 
         for (path in invalid) assertNull(path, resolveOutboxPath(root, path))
