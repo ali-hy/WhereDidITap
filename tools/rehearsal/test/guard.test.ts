@@ -182,6 +182,100 @@ describe("TP-16.24: the CLI refuses before any docker or sudo call (A-478)", () 
   });
 });
 
+describe("TP-16.24x: the CLI's later refusals come before mkdtemp and any other docker or sudo call (A-478 (3))", () => {
+  // Safety: every case here must be refused by the guard. The docker stub answers "abc" for the
+  // budmon-main listing and fails everything else, so even a broken guard can't go on with a run.
+  let base: string;
+  const calls = () => {
+    try {
+      return readFileSync(path.join(base, "calls"), "utf8");
+    } catch {
+      return "";
+    }
+  };
+  const rehearsalDirs = () =>
+    readdirSync(path.join(base, "tmp")).filter((n) => n.startsWith("budmon-rehearsal-"));
+  beforeAll(() => {
+    base = mkdtempSync(path.join(tmpdir(), "budmon-tp16-24x-"));
+    const bin = path.join(base, "bin");
+    mkdirSync(bin);
+    const log = path.join(base, "calls");
+    writeFileSync(
+      path.join(bin, "docker"),
+      [
+        "#!/bin/sh",
+        `echo "docker $*" >> "${log}"`,
+        'case "$*" in',
+        '  *"label=com.docker.compose.project=budmon-main"*) echo abc; exit 0 ;;',
+        "esac",
+        "exit 1",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(path.join(bin, "sudo"), `#!/bin/sh\necho "sudo $*" >> "${log}"\nexit 1\n`);
+    chmodSync(path.join(bin, "docker"), 0o755);
+    chmodSync(path.join(bin, "sudo"), 0o755);
+    mkdirSync(path.join(base, "home"));
+    mkdirSync(path.join(base, "tmp"));
+  });
+  afterAll(() => {
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  function cli(extra: string[] = []) {
+    rmSync(path.join(base, "calls"), { force: true });
+    const env: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (v !== undefined && k !== "BUDMON_HOME") env[k] = v;
+    }
+    env["CI"] = "true";
+    env["PATH"] = `${path.join(base, "bin")}:${process.env["PATH"] ?? ""}`;
+    env["HOME"] = path.join(base, "home");
+    env["TMPDIR"] = path.join(base, "tmp");
+    // cwd inside the repository, so `git rev-parse --show-toplevel` succeeds and the CLI reaches
+    // the laptop-stack check.
+    return spawnSync(
+      path.join(HERE, "../node_modules/.bin/tsx"),
+      [path.join(SRC, "cli.ts"), "--previous", "none", "--version", "v1.0.0", ...extra],
+      { encoding: "utf8", env, cwd: HERE, timeout: 60_000 },
+    );
+  }
+
+  it("TP-16.24x: CI=true with a budmon-main container: exit 2, laptop stack present: budmon-main; calls holds only that docker ps; no work directory", () => {
+    const r = cli();
+
+    expect(r.error, String(r.error)).toBeUndefined();
+    expect(r.status, r.stderr).toBe(2);
+    expect(r.stderr).toContain("refusing to run: laptop stack present: budmon-main");
+    expect(calls()).toBe("docker ps -a -q --filter label=com.docker.compose.project=budmon-main\n");
+    expect(calls()).not.toContain("sudo");
+    expect(calls()).not.toContain("network create");
+    expect(rehearsalDirs()).toEqual([]);
+  });
+
+  it.each([
+    ["CI=true", []],
+    ["CI=true and --i-know-this-is-not-my-laptop", ["--i-know-this-is-not-my-laptop"]],
+  ])(
+    "TP-16.24x: %s with <HOME>/.budmon/state: exit 2, a Budmon install exists, and no docker call",
+    (_label, extra) => {
+      const state = path.join(base, "home", ".budmon", "state");
+      mkdirSync(state, { recursive: true });
+      try {
+        const r = cli(extra);
+
+        expect(r.error, String(r.error)).toBeUndefined();
+        expect(r.status, r.stderr).toBe(2);
+        expect(r.stderr).toContain("refusing to run: a Budmon install exists: ~/.budmon/state");
+        expect(calls()).toBe("");
+        expect(rehearsalDirs()).toEqual([]);
+      } finally {
+        rmSync(path.join(base, "home", ".budmon"), { recursive: true, force: true });
+      }
+    },
+  );
+});
+
 describe("TP-16.24: the laptop names appear only in guard.ts (A-478)", () => {
   it("TP-16.24: no file under tools/rehearsal/src but guard.ts contains budmon-main, budmon-capture or budmon_capture_db", () => {
     const offenders: string[] = [];
