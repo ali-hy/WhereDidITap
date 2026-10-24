@@ -41,7 +41,7 @@ class OutboxDaoTest {
         id = 0,
         idempotencyKey = key,
         method = "POST",
-        path = "things",
+        path = "/api/v1/things",
         body = byteArrayOf(1, 2, 3),
         contentType = "application/json",
         createdAtEpochMs = createdAt,

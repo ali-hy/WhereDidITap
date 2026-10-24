@@ -89,7 +89,7 @@ class ErrorMessagesTest {
     fun `TP-13_3 (A-346) CLIENT_UPDATE_REQUIRED is UiText(update_required_body)`() {
         assertEquals(
             UiText(R.string.update_required_body),
-            ErrorMessages.forError(ApiError.Defined("CLIENT_UPDATE_REQUIRED", 400, null), Operation.Read),
+            ErrorMessages.forError(ApiError.Defined("CLIENT_UPDATE_REQUIRED", 426, null), Operation.Read),
         )
     }
 }
