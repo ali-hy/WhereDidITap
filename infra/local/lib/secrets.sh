@@ -125,6 +125,11 @@ site_default() {
   esac
 }
 
+# A-488: F-10's production Sentry DSN pattern, in POSIX ERE, for SENTRY_DSN and WEB_SENTRY_DSN
+# (also phase B's WEB_SENTRY_DSN check). Defined here, beside site_valid, so the check never runs
+# with an empty pattern, which [[ =~ ]] would match against anything.
+SENTRY_DSN_ERE='^https://[A-Za-z0-9]{1,64}@[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?/[0-9]{1,20}$'
+
 site_valid() {
   local key="$1" v="$2"
   local origin='(https://[A-Za-z0-9.-]+(:[0-9]+)?|http://localhost:[0-9]+)'
@@ -152,8 +157,8 @@ prompt_site_key() {
   while :; do
     default="$(site_default "${key}")"
     printf '%s [%s]: ' "${key}" "${default}" >&2
+    # End of input answers blank; a last line without a newline is still an answer.
     if ! IFS= read -r answer; then
-      answer=""
       SITE_EOF=1
     fi
     if [ -z "${answer}" ]; then
