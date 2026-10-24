@@ -80,3 +80,9 @@ services:
         source: ${REHEARSAL_CA_DIR}/s3.key
         target: /run/rehearsal/s3.key
         read_only: true
+
+# A-478: the rehearsal's own capture network, never the laptop's budmon_capture_db.
+networks:
+  capture-db:
+    external: true
+    name: budmon_rehearsal_capture_db

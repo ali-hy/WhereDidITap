@@ -1,120 +1,65 @@
 // F-195's CLI: `pnpm --filter @budmon/tools-rehearsal rehearse --previous <tag|none> --version <v>
-// [--doctor <name>]`. It runs the rehearsal with the real child processes against the images tagged
-// `rehearsal` (and the previous release's, tagged with its name), prints one line per record and
-// exits 0 only when every record is ok. The work directory (artifacts in <workDir>/artifacts) is
-// printed first. With --doctor (A-468, test only) it exits 0 only when the expected step failed
-// first and cleanup succeeded.
-import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+// [--doctor <name>] [--i-know-this-is-not-my-laptop]`. Order (A-478, A-479): parse, host check,
+// repository root, doctored overlay, laptop-stack check, work directory, run; a refusal exits 2
+// before any docker, sudo or sysctl call and before a work directory exists. Every child's output
+// goes to <workDir>/artifacts/steps (A-476), so the job log shows only these lines. With --doctor
+// (A-468, test only) the exit code is doctorVerdict's.
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
-import {
-  doctorVerdict,
-  runRehearsal,
-  STEP_ORDER,
-  type Exec,
-  type RehearsalDoctor,
-  type StepName,
-} from "./run.js";
+import { parseArgs, resolveDoctor, USAGE } from "./args.js";
+import { createLoggingExec } from "./exec.js";
+import { checkNoLaptopStack, checkRehearsalHost, type GuardResult } from "./guard.js";
+import { doctorVerdict, runRehearsal } from "./run.js";
 
-const TAG = /^v[0-9]+\.[0-9]+\.[0-9]+(-hotfix\.[0-9]+)?$/;
-const DOCTOR_NAME = /^[a-z0-9-]+$/;
-
-function usage(): never {
-  process.stderr.write(
-    "usage: rehearse --previous <tag|none> --version <vX.Y.Z[-hotfix.N]> [--doctor <name>]\n",
-  );
-  process.exit(64);
-}
-
-function refuse(message: string): never {
+function exit(code: number, message: string): never {
   process.stderr.write(`${message}\n`);
-  process.exit(64);
+  process.exit(code);
 }
 
-const exec: Exec = (cmd, args, o) =>
-  new Promise((resolve) => {
-    const child = spawn(cmd, args, {
-      cwd: o.cwd,
-      env: { ...process.env, ...o.env },
-      stdio: ["pipe", "pipe", "inherit"],
-      ...(o.timeoutMs === undefined ? {} : { timeout: o.timeoutMs }),
-    });
-    let stdout = "";
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => (stdout += chunk));
-    child.on("error", () => {
-      resolve({ code: 127, stdout });
-    });
-    child.on("close", (code) => {
-      resolve({ code: code ?? 1, stdout });
-    });
-    child.stdin.end(o.input);
-  });
-
-/** A-452, A-468: --previous and --version once each, --doctor at most once, in any order. */
-function parseArgs(argv: readonly string[]): {
-  previous: string;
-  version: string;
-  doctor: string | undefined;
-} {
-  if (argv.length % 2 !== 0) usage();
-  const values = new Map<string, string>();
-  for (let i = 0; i < argv.length; i += 2) {
-    const flag = argv[i] ?? "";
-    if (!["--previous", "--version", "--doctor"].includes(flag) || values.has(flag)) usage();
-    values.set(flag, argv[i + 1] ?? "");
-  }
-  const previous = values.get("--previous");
-  const version = values.get("--version");
-  const doctor = values.get("--doctor");
-  if (previous === undefined || version === undefined) usage();
-  if ((previous !== "none" && !TAG.test(previous)) || !TAG.test(version)) usage();
-  if (doctor !== undefined && !DOCTOR_NAME.test(doctor)) usage();
-  return { previous, version, doctor };
+function refuseUnless(result: GuardResult): void {
+  if (!result.ok) exit(2, `refusing to run: ${result.reason}`);
 }
 
-/** A-468: the doctored overlay and its expected step, resolved before anything runs. */
-function resolveDoctor(repoRoot: string, name: string): RehearsalDoctor {
-  const dir = path.join(repoRoot, "tools/rehearsal/test/doctored");
-  const found = (["main", "capture"] as const).filter((p) =>
-    existsSync(path.join(dir, `${name}.${p}.yaml`)),
-  );
-  if (found.length === 0) refuse(`doctored overlay not found: ${name}`);
-  if (found.length > 1) refuse(`doctored overlay ambiguous: ${name}`);
-  const project = found[0] ?? "main";
-  let expectations: unknown;
-  try {
-    expectations = JSON.parse(readFileSync(path.join(dir, "expectations.json"), "utf8"));
-  } catch {
-    expectations = undefined;
-  }
-  const expectStep =
-    typeof expectations === "object" && expectations !== null
-      ? (expectations as Record<string, unknown>)[name]
-      : undefined;
-  if (typeof expectStep !== "string" || !STEP_ORDER.includes(expectStep as StepName)) {
-    refuse(`doctored expectation missing: ${name}`);
-  }
-  return {
-    name,
-    project,
-    file: path.join(dir, `${name}.${project}.yaml`),
-    expectStep: expectStep as StepName,
-  };
-}
+const parsed = parseArgs(process.argv.slice(2));
+if (!parsed.ok) exit(64, USAGE);
+const args = parsed.args;
 
-const { previous, version, doctor: doctorName } = parseArgs(process.argv.slice(2));
+refuseUnless(
+  checkRehearsalHost({
+    env: process.env,
+    homeDir: homedir(),
+    confirmNotLaptop: args.confirmNotLaptop,
+    exists: existsSync,
+  }),
+);
 
 const repoRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
-const doctor = doctorName === undefined ? null : resolveDoctor(repoRoot, doctorName);
+
+let doctor = null;
+if (args.doctor !== null) {
+  const resolved = resolveDoctor(repoRoot, args.doctor);
+  if (!resolved.ok) exit(64, resolved.message);
+  doctor = resolved.doctor;
+}
+
+// The laptop check reads docker's stdout only; its stderr stays out of the job log.
+refuseUnless(
+  await checkNoLaptopStack((cmd, argv) => {
+    const r = spawnSync(cmd, argv, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return Promise.resolve({ code: r.status ?? 127, stdout: r.stdout });
+  }),
+);
+
 const workDir = mkdtempSync(path.join(tmpdir(), "budmon-rehearsal-"));
-process.stdout.write(`work dir: ${workDir}\n`);
+const stepLogs = path.join(workDir, "artifacts", "steps");
+process.stdout.write(`work dir: ${workDir}\nstep logs: ${stepLogs}\n`);
 
 const result = await runRehearsal(
   {
-    previousTag: previous === "none" ? null : previous,
-    version,
+    previousTag: args.previousTag,
+    version: args.version,
     images: {
       server: "budmon/server:rehearsal",
       web: "budmon/web:rehearsal",
@@ -124,7 +69,7 @@ const result = await runRehearsal(
     repoRoot,
     doctor,
   },
-  { exec },
+  { exec: createLoggingExec(stepLogs) },
 );
 for (const step of result.steps) {
   process.stdout.write(

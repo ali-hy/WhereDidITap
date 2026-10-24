@@ -22,6 +22,15 @@ export const REHEARSAL_HOSTS = {
   sentry: "sentry.rehearsal.invalid",
   s3: "s3.rehearsal.invalid",
 } as const;
+/**
+ * A-478: the rehearsal's own Compose projects and capture network, never the laptop's, so nothing
+ * the harness starts or removes can touch an owner's stack.
+ */
+export const REHEARSAL_PROJECTS = {
+  main: "budmon-rehearsal-main",
+  capture: "budmon-rehearsal-capture",
+} as const;
+export const REHEARSAL_CAPTURE_DB_NETWORK = "budmon_rehearsal_capture_db";
 /** A-454: https, as F-10 requires; .invalid never resolves, so rehearsal e-mail links lead nowhere. */
 export const REHEARSAL_PUBLIC_ORIGIN = "https://rehearsal.budmon.invalid";
 

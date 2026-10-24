@@ -12,9 +12,11 @@ import { scramVerifier } from "../../../infra/budmonctl/src/scram.js";
 import { fakeSignInCode, generateSignInKeyPair, startFakeGoogle } from "./fakeGoogle.js";
 import { startFakeFx } from "./fakeFx.js";
 import {
+  REHEARSAL_CAPTURE_DB_NETWORK,
   REHEARSAL_HOSTS,
   REHEARSAL_OWNER_EMAIL,
   REHEARSAL_PORTS,
+  REHEARSAL_PROJECTS,
   REHEARSAL_PUBLIC_ORIGIN,
   REHEARSAL_SIGNIN_CLIENT_ID,
   scanForNeedles,
@@ -75,6 +77,8 @@ export interface ExecOptions {
   env?: Record<string, string>;
   input?: string;
   timeoutMs?: number;
+  /** A-476: the call's stdout carries a secret, token or needle; its log withholds it. */
+  sensitiveStdout?: boolean;
 }
 export type Exec = (
   cmd: string,
@@ -161,7 +165,30 @@ const GOOGLE_NAMES = [
   "gmail.googleapis.com",
   "pubsub.googleapis.com",
 ];
-const STAGE_WORDS = /\b(HOST_ROLE|DEPLOYMENT|INFRA_STAGE|STAGE)\b/;
+/** A-477: a whole underscore-delimited env key, and a whole path token in mounts. */
+const STAGE_KEY = /^(?:[A-Z0-9]+_)*(HOST_ROLE|DEPLOYMENT|INFRA_STAGE|STAGE)(?:_[A-Z0-9]+)*$/;
+const STAGE_PATH = /(^|[/._-])(host[._-]role|deployment|infra[._-]stage|stage)([/._-]|$)/;
+
+/** A-477: the env keys and mount destinations of one container that name a stage setting. */
+export function stageSettingMentions(info: {
+  Env: readonly string[] | null;
+  Mounts: readonly { Source: string; Destination: string }[] | null;
+}): string[] {
+  const found: string[] = [];
+  for (const entry of info.Env ?? []) {
+    const key = entry.split("=")[0] ?? "";
+    if (STAGE_KEY.test(key)) found.push(key);
+  }
+  for (const mount of info.Mounts ?? []) {
+    if (
+      STAGE_PATH.test(mount.Source.toLowerCase()) ||
+      STAGE_PATH.test(mount.Destination.toLowerCase())
+    ) {
+      found.push(mount.Destination);
+    }
+  }
+  return found;
+}
 
 // ---- helpers ----
 
@@ -179,7 +206,7 @@ export function composeArgs(
     "--project-directory",
     r,
     "-p",
-    `budmon-${project}`,
+    REHEARSAL_PROJECTS[project],
     "-f",
     `${r}/compose.${project}.yaml`,
     "-f",
@@ -243,13 +270,20 @@ function compose(
   step: string,
   project: "main" | "capture",
   args: string[],
-  extra: { env?: Record<string, string>; input?: string; timeoutMs?: number; tag?: string } = {},
+  extra: {
+    env?: Record<string, string>;
+    input?: string;
+    timeoutMs?: number;
+    tag?: string;
+    sensitiveStdout?: boolean;
+  } = {},
 ) {
   return ctx.exec("docker", [...composeArgs(ctx, project), ...args], {
     step,
     env: { ...stackEnv(ctx, extra.tag), ...extra.env },
     ...(extra.input === undefined ? {} : { input: extra.input }),
     ...(extra.timeoutMs === undefined ? {} : { timeoutMs: extra.timeoutMs }),
+    ...(extra.sensitiveStdout === true ? { sensitiveStdout: true } : {}),
   });
 }
 
@@ -265,7 +299,13 @@ function merged(
 }
 
 /** psql as budmon_admin over the Postgres socket (peer authentication), the statement on stdin. */
-function adminSql(ctx: RehearsalContext, step: string, sql: string, database = "postgres") {
+function adminSql(
+  ctx: RehearsalContext,
+  step: string,
+  sql: string,
+  database = "postgres",
+  sensitiveStdout = false,
+) {
   return compose(
     ctx,
     step,
@@ -287,7 +327,7 @@ function adminSql(ctx: RehearsalContext, step: string, sql: string, database = "
       database,
       "-At",
     ],
-    { input: `${sql}\n` },
+    { input: `${sql}\n`, sensitiveStdout },
   );
 }
 
@@ -368,7 +408,7 @@ function jsonLines(stdout: string): unknown[] {
 async function containers(ctx: RehearsalContext, step: string, project: "main" | "capture") {
   const r = await ctx.exec(
     "docker",
-    ["ps", "-aq", "--filter", `label=com.docker.compose.project=budmon-${project}`],
+    ["ps", "-aq", "--filter", `label=com.docker.compose.project=${REHEARSAL_PROJECTS[project]}`],
     { step },
   );
   return r.stdout.split("\n").filter((id) => id.trim() !== "");
@@ -713,7 +753,7 @@ const secretsStep: StepFn = (ctx) =>
       )?.[1] ?? "";
     await x(
       "docker",
-      ["network", "create", "--internal", "--subnet", subnet, "budmon_capture_db"],
+      ["network", "create", "--internal", "--subnet", subnet, REHEARSAL_CAPTURE_DB_NETWORK],
       "network",
     );
     return ok();
@@ -870,7 +910,9 @@ function basePostgresImage(ctx: RehearsalContext): string {
  * runner's loopback (the rehearsal's Postgres is internal and admits the superuser only over its
  * socket).
  */
-const upgradeAssertionsStep: StepFn = async (ctx) => {
+const upgradeAssertionsStep: StepFn = (ctx) => guarded(() => upgradeAssertions(ctx));
+
+async function upgradeAssertions(ctx: RehearsalContext): Promise<StepOutcome> {
   const step = "upgrade-assertions";
   const caseDir = upgradeCaseDir(ctx);
   const files = existsSync(caseDir)
@@ -1004,7 +1046,7 @@ const upgradeAssertionsStep: StepFn = async (ctx) => {
     await ctx.exec("docker", ["rm", "-f", UPGRADE_PG], { step }).catch(() => undefined);
     await ctx.exec("rm", ["-f", dump], { step }).catch(() => undefined);
   }
-};
+}
 
 // ---- step 7: canary flows and the identity sub-steps ----
 
@@ -1065,7 +1107,7 @@ async function bootstrapOwner(
       "sh",
       REHEARSAL_OWNER_EMAIL,
     ],
-    { step, env: stackEnv(ctx) },
+    { step, env: stackEnv(ctx), sensitiveStdout: true },
   );
   if (r.stdout.includes("Unknown command:")) return { outcome: ok(SKIPPED), token: null };
   if (r.code !== 0) return { outcome: fail(`bootstrap_owner_exit_${String(r.code)}`), token: null };
@@ -1287,6 +1329,10 @@ const canaryFlowsStep: StepFn = async (ctx) => {
 
 // ---- step 8: the scan ----
 
+/**
+ * Step 8's sources: every container's logs (stderr merged), the Sentry events and pgboss.job's
+ * output. Their stdout is the scanned material, so the step logs withhold it (A-476).
+ */
 async function scanSources(
   ctx: RehearsalContext,
   step: string,
@@ -1295,18 +1341,32 @@ async function scanSources(
   for (const project of ["main", "capture"] as const) {
     for (const id of await containers(ctx, step, project)) {
       const info = await inspect(ctx, step, id);
-      const logs = await merged(ctx, step, "docker", ["logs", id]);
+      const logs = await merged(ctx, step, "docker", ["logs", id], { sensitiveStdout: true });
       sources.push({ name: `logs:${project}/${serviceOf(info) || id}`, text: logs.stdout });
     }
   }
   sources.push({ name: "sentry-events", text: (ctx.running.sentry?.events() ?? []).join("\n") });
-  const jobs = await adminSql(ctx, step, "SELECT output FROM pgboss.job", "budmon");
+  const jobs = await adminSql(ctx, step, "SELECT output FROM pgboss.job", "budmon", true);
   sources.push({ name: "pgboss.job.output", text: jobs.stdout });
   return sources;
 }
 
+function stepLogDir(ctx: RehearsalContext): string {
+  return path.join(ctx.opts.workDir, "artifacts", "steps");
+}
+
+/** A-476: the step logs written so far, as sources `steps/<file>`. */
+function stepLogSources(ctx: RehearsalContext): { name: string; text: string }[] {
+  const dir = stepLogDir(ctx);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".log"))
+    .sort()
+    .map((f) => ({ name: `steps/${f}`, text: readFileSync(path.join(dir, f), "utf8") }));
+}
+
 const scanStep: StepFn = async (ctx) => {
-  const sources = await scanSources(ctx, "scan");
+  const sources = [...(await scanSources(ctx, "scan")), ...stepLogSources(ctx)];
   const hits = [
     ...scanForCanaries(sources, CANARIES).map((h) => `${h.source}:${h.canary}`),
     ...scanForNeedles(sources, ctx.needles).map((h) => `${h.source}:${h.needle}`),
@@ -1357,13 +1417,16 @@ const noStageSettingStep: StepFn = async (ctx) => {
       const info = await inspect(ctx, step, id);
       const env = field(info, "Config", "Env");
       const mounts = field(info, "Mounts");
-      const texts = [
-        ...(Array.isArray(env) ? env.map(String) : []),
-        ...(Array.isArray(mounts)
-          ? mounts.flatMap((m) => [String(field(m, "Source")), String(field(m, "Destination"))])
-          : []),
-      ];
-      if (texts.some((t) => STAGE_WORDS.test(t))) found.push(serviceOf(info) || id);
+      const mentions = stageSettingMentions({
+        Env: Array.isArray(env) ? env.map(String) : null,
+        Mounts: Array.isArray(mounts)
+          ? mounts.map((m) => ({
+              Source: String(field(m, "Source")),
+              Destination: String(field(m, "Destination")),
+            }))
+          : null,
+      });
+      if (mentions.length > 0) found.push(serviceOf(info) || id);
     }
   }
   return found.length === 0 ? ok() : fail(`stage_setting: ${found.join(", ")}`);
@@ -1372,22 +1435,30 @@ const noStageSettingStep: StepFn = async (ctx) => {
 const crossRoleSecretsStep: StepFn = async (ctx) => {
   const step = "cross-role-secrets";
   const found: string[] = [];
-  // A-451: the capture key folder belongs to the capture project only.
+  // A-451: the capture key folder belongs to the capture project only. Sources are normalised and
+  // matched as path prefixes, so "<workDir>/ca/../capture-key" can't slip past.
+  const under = (source: string, dir: string) => {
+    const s = path.posix.normalize(source);
+    const d = path.posix.normalize(dir);
+    return s === d || s.startsWith(`${d}/`);
+  };
   for (const [project, others] of [
-    ["main", ["/secrets/capture", captureKeyDir(ctx)]],
-    ["capture", ["/secrets/main"]],
+    ["main", [path.join(ctx.budmonHome, "secrets/capture"), captureKeyDir(ctx)]],
+    ["capture", [path.join(ctx.budmonHome, "secrets/main")]],
   ] as const) {
     for (const id of await containers(ctx, step, project)) {
       const info = await inspect(ctx, step, id);
       const mounts = field(info, "Mounts");
       const sources = Array.isArray(mounts) ? mounts.map((m) => String(field(m, "Source"))) : [];
-      if (sources.some((s) => others.some((o) => s.includes(o)))) found.push(serviceOf(info) || id);
+      if (sources.some((s) => others.some((o) => under(s, o)))) found.push(serviceOf(info) || id);
     }
   }
   if (found.length > 0) return fail(`cross_role_mount: ${found.join(", ")}`);
+  // B-1: the probe must have been attempted and refused or timed out; it fails closed otherwise.
   const pgDataIp =
     /^PG_DATA_IP=(.*)$/m.exec(readFileSync(path.join(ctx.releaseDir, "local.env"), "utf8"))?.[1] ??
     "";
+  if (!isIpv4(pgDataIp)) return fail("isolation_probe_failed");
   const probe = await compose(ctx, step, "capture", [
     "exec",
     "-T",
@@ -1397,8 +1468,18 @@ const crossRoleSecretsStep: StepFn = async (ctx) => {
     'const s=require("node:net").connect({host:process.argv[1],port:5432,timeout:5000});s.on("connect",()=>{s.destroy();process.exit(0)});s.on("timeout",()=>process.exit(2));s.on("error",()=>process.exit(3));',
     pgDataIp,
   ]);
-  return probe.code === 0 ? fail("capture_reaches_data") : ok();
+  if (probe.code === 0) return fail("capture_reaches_data");
+  // The probe exits 2 on a timeout and 3 on a connection error; anything else didn't test anything.
+  return probe.code === 2 || probe.code === 3 ? ok() : fail("isolation_probe_failed");
 };
+
+function isIpv4(text: string): boolean {
+  const parts = text.split(".");
+  return (
+    parts.length === 4 &&
+    parts.every((p) => /^(0|[1-9][0-9]{0,2})$/.test(p) && Number.parseInt(p, 10) <= 255)
+  );
+}
 
 // ---- step 11 ----
 
@@ -1535,20 +1616,31 @@ const gateCommandsStep: StepFn = (ctx) =>
     const migrateDir = path.join(ctx.budmonHome, "secrets/main/migrate");
     const oldPassword = (
       await must(
-        ctx.exec("sudo", ["cat", path.join(migrateDir, "DB_PASSWORD")], { step }),
+        ctx.exec("sudo", ["cat", path.join(migrateDir, "DB_PASSWORD")], {
+          step,
+          sensitiveStdout: true,
+        }),
         "read_secret",
       )
     ).stdout;
     const roleSecrets = json(
       (
         await must(
-          ctx.exec("sudo", ["cat", path.join(migrateDir, "ROLE_SECRETS")], { step }),
+          ctx.exec("sudo", ["cat", path.join(migrateDir, "ROLE_SECRETS")], {
+            step,
+            sensitiveStdout: true,
+          }),
           "read_secret",
         )
       ).stdout,
     );
     if (typeof roleSecrets !== "object" || roleSecrets === null) return fail("role_secrets");
     const newPassword = randomBytes(32).toString("base64url");
+    // A-476: both passwords are needles for the final scan, before anything changes.
+    ctx.needles.push(
+      { name: "migrator-password-old", value: oldPassword },
+      { name: "migrator-password-new", value: newPassword },
+    );
     await must(
       ctx.exec(
         "sudo",
@@ -1641,6 +1733,11 @@ const rollbackStep: StepFn = (ctx) =>
       return r.status === 200 ? null : "health_ready";
     });
     if (pending !== null) return fail("previous_not_ready");
+    // A-476: the previous images' logs, before recreating the containers discards them (the step
+    // log is scanned by collectArtifacts).
+    for (const project of ["main", "capture"] as const) {
+      await compose(ctx, step, project, ["logs", "--no-color", "--timestamps"]);
+    }
     // A-446: back to the candidate, so step 14 tests it.
     await must(compose(ctx, step, "main", ["up", "-d"]), "candidate_up");
     await must(compose(ctx, step, "capture", ["up", "-d"]), "candidate_up");
@@ -1683,32 +1780,48 @@ export const defaultSteps: Readonly<Record<StepName, StepFn>> = Object.freeze({
 
 // ---- artifacts and cleanup ----
 
+/**
+ * A-476: gathers step 8's sources again, then (last) every step log, rescans all of them, and
+ * writes each one, except that a source with any hit is replaced by the hit's names. The report
+ * holds names only.
+ */
 const defaultCollectArtifacts: StepFn = async (ctx) => {
   const step = "artifacts";
   const dir = path.join(ctx.opts.workDir, "artifacts");
-  const save = (name: string, text: string) =>
-    ctx.exec("install", ["-D", "-m", "0644", "/dev/stdin", path.join(dir, name)], {
-      step,
-      input: text,
-    });
+  const save = (file: string, text: string) =>
+    ctx.exec("install", ["-D", "-m", "0644", "/dev/stdin", file], { step, input: text });
   await ctx.exec("mkdir", ["-p", dir], { step });
-  const sources = await scanSources(ctx, step).catch(() => []);
-  for (const source of sources) {
-    await save(`${source.name.replaceAll(/[^A-Za-z0-9._-]/g, "_")}.log`, source.text);
-  }
-  // Names only: the scan report never holds a value.
-  const report = {
-    canaries: scanForCanaries(sources, CANARIES).map((h) => ({
-      source: h.source,
-      canary: h.canary,
-    })),
-    needles: scanForNeedles(sources, ctx.needles).map((h) => ({
-      source: h.source,
-      needle: h.needle,
-    })),
+  const live = await scanSources(ctx, step).catch(() => []);
+  const sources = [...live, ...stepLogSources(ctx)];
+  const hits = new Map<string, Set<string>>();
+  const record = (source: string, name: string) => {
+    const set = hits.get(source) ?? new Set<string>();
+    set.add(name);
+    hits.set(source, set);
   };
-  await save("scan-report.json", `${JSON.stringify(report, null, 2)}\n`);
-  return ok();
+  for (const h of scanForCanaries(sources, CANARIES)) record(h.source, h.canary);
+  for (const h of scanForNeedles(sources, ctx.needles)) record(h.source, h.needle);
+  for (const source of sources) {
+    const found = hits.get(source.name);
+    const text =
+      found === undefined
+        ? source.text
+        : `withheld: ${String(found.size)} hit(s): ${[...found].sort().join(", ")}\n`;
+    const isStepLog = source.name.startsWith("steps/");
+    // A step log is already on disk; it's rewritten only when it must be withheld.
+    if (isStepLog && found === undefined) continue;
+    const file = isStepLog
+      ? path.join(dir, source.name)
+      : path.join(dir, `${source.name.replaceAll(/[^A-Za-z0-9._-]/g, "_")}.log`);
+    await save(file, text);
+  }
+  const final = [...hits.entries()].flatMap(([source, names]) =>
+    [...names].map((name) => ({ source, name })),
+  );
+  await save(path.join(dir, "scan-report.json"), `${JSON.stringify({ final }, null, 2)}\n`);
+  if (final.length === 0) return ok();
+  const leaks = [...new Set(final.map((h) => `${h.source}:${h.name}`))].sort();
+  return fail(`leak: ${leaks.join(", ")}`);
 };
 
 const defaultCleanup: StepFn = async (ctx) => {
@@ -1733,9 +1846,16 @@ const defaultCleanup: StepFn = async (ctx) => {
     ]);
     if (r.code !== 0) failures.push(`down_${project}`);
   }
-  await ctx.exec("docker", ["network", "rm", "budmon_capture_db"], { step });
-  const rm = await ctx.exec("sudo", ["rm", "-rf", ctx.budmonHome, captureKeyDir(ctx)], { step });
-  if (rm.code !== 0) failures.push("home");
+  await ctx.exec("docker", ["network", "rm", REHEARSAL_CAPTURE_DB_NETWORK], { step });
+  // A-478: rm -rf only inside the work directory.
+  const root = `${ctx.opts.workDir}/`;
+  const paths = [ctx.budmonHome, captureKeyDir(ctx)];
+  const safe = paths.filter((p) => path.posix.normalize(p).startsWith(root));
+  if (safe.length !== paths.length) failures.push("unsafe_path");
+  if (safe.length > 0) {
+    const rm = await ctx.exec("sudo", ["rm", "-rf", ...safe], { step });
+    if (rm.code !== 0) failures.push("home");
+  }
   return failures.length === 0 ? ok() : fail(`cleanup: ${failures.join(", ")}`);
 };
 

@@ -44,7 +44,9 @@ jobs:
       - name: The previous release and its images
         id: previous
         run: |
-          if previous="$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null)"; then
+          # The newest release or hotfix tag reachable from the head (F-183's rule), not the nearest.
+          previous="$(git tag --merged HEAD --list 'v[0-9]*' --sort=-v:refname | head -n 1)"
+          if [ -n "$previous" ]; then
             git worktree add --detach "$RUNNER_TEMP/previous" "$previous"
             docker build -f "$RUNNER_TEMP/previous/images/server/Dockerfile" -t "budmon/server:$previous" "$RUNNER_TEMP/previous"
             docker build -f "$RUNNER_TEMP/previous/images/web/Dockerfile" -t "budmon/web:$previous" "$RUNNER_TEMP/previous"
