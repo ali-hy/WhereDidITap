@@ -955,11 +955,26 @@ describe("TP-15.35: ci.yml's changes and infra-int jobs", () => {
     );
   });
 
-  it.each([
-    ["infra", ["infra/", "images/", "apps/server/", ".dockerignore", ".github/workflows/ci.yml"]],
-    ["infra-lint", ["infra/", "images/", "tools/ci/", ".github/"]],
-  ] as const)("TP-15.35 (A-424): the %s line lists exactly %j", (name, paths) => {
-    expect(outputAlternatives(ROOT, name)?.sort()).toEqual([...paths].sort());
+  // A-489: everything the images build from, in this order.
+  it("TP-15.35 (A-489): the infra line lists exactly the image inputs, in order", () => {
+    expect(outputAlternatives(ROOT, "infra")).toEqual([
+      "infra/",
+      "images/",
+      "apps/server/",
+      "apps/web/",
+      "packages/",
+      "package.json",
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml",
+      ".dockerignore",
+      ".github/workflows/ci.yml",
+    ]);
+  });
+
+  it("TP-15.35 (A-424): the infra-lint line lists exactly infra/, images/, tools/ci/, .github/", () => {
+    expect(outputAlternatives(ROOT, "infra-lint")?.sort()).toEqual(
+      ["infra/", "images/", "tools/ci/", ".github/"].sort(),
+    );
   });
 
   it("TP-15.35 (A-424): infra-lint's if reads needs.changes.outputs.infra-lint == 'true'", () => {

@@ -63,3 +63,50 @@ secret_set() {
   run calls_of sudo
   assert_output ""
 }
+
+# ---- A-487: --empty, for main/worker-general/SMTP_PASSWORD only ----
+
+SMTP=main/worker-general/SMTP_PASSWORD
+
+@test "TP-15.28 (A-487): secret set ${SMTP} --empty (stdin v not needed) writes it empty with sudo install -o 10002 -g 10002 -m 0400 /dev/null, exit 0" {
+  mkdir -p "${BUDMON_HOME}/secrets/main/worker-general"
+  run bash -c "printf 'v' | BUDMON_REEXEC=1 '${BUDMON_HOME}/releases/v1.0.0/budmon-local' secret set ${SMTP} --empty"
+  assert_success
+  assert_output --partial "written ${SMTP} (empty: no SMTP authentication)"
+  run calls_of sudo
+  assert_output --partial "install -o 10002 -g 10002 -m 0400 /dev/null ${BUDMON_HOME}/secrets/${SMTP}"
+  refute_output --partial "/dev/stdin"
+}
+
+@test "TP-15.28 (A-487): secret set --empty ${SMTP} (flag first) writes the same" {
+  mkdir -p "${BUDMON_HOME}/secrets/main/worker-general"
+  run bash -c "BUDMON_REEXEC=1 '${BUDMON_HOME}/releases/v1.0.0/budmon-local' secret set --empty ${SMTP} </dev/null"
+  assert_success
+  assert_output --partial "written ${SMTP} (empty: no SMTP authentication)"
+  run calls_of sudo
+  assert_output --partial "install -o 10002 -g 10002 -m 0400 /dev/null ${BUDMON_HOME}/secrets/${SMTP}"
+}
+
+@test "TP-15.28 (A-487): --empty on main/api/DB_PASSWORD exits 64 naming the only allowed path, no sudo install" {
+  run bash -c "printf 'v' | BUDMON_REEXEC=1 '${BUDMON_HOME}/releases/v1.0.0/budmon-local' secret set main/api/DB_PASSWORD --empty"
+  assert_failure 64
+  assert_output --partial "--empty is only allowed for main/worker-general/SMTP_PASSWORD"
+  run calls_of sudo
+  refute_output --partial "install"
+}
+
+@test "TP-15.28 (A-487): empty stdin to ${SMTP} without --empty still exits 22, no sudo install" {
+  mkdir -p "${BUDMON_HOME}/secrets/main/worker-general"
+  run bash -c "BUDMON_REEXEC=1 '${BUDMON_HOME}/releases/v1.0.0/budmon-local' secret set ${SMTP} </dev/null"
+  assert_failure 22
+  run calls_of sudo
+  refute_output --partial "install"
+}
+
+@test "TP-15.28 (A-487): secret set ${SMTP} --empty x (an extra argument) exits 64" {
+  mkdir -p "${BUDMON_HOME}/secrets/main/worker-general"
+  run bash -c "BUDMON_REEXEC=1 '${BUDMON_HOME}/releases/v1.0.0/budmon-local' secret set ${SMTP} --empty x </dev/null"
+  assert_failure 64
+  run calls_of sudo
+  refute_output --partial "install"
+}

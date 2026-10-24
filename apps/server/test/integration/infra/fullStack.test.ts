@@ -463,6 +463,26 @@ describe.skipIf(!INFRA_INT)("TP-15.28 (I): secret set with real sudo (F-178)", (
     expect(other.status).not.toBe(0);
     expect(other.stderr).toMatch(/Permission denied/);
   }, 300_000);
+
+  it("TP-15.28 (I) (A-487): secret set main/worker-general/SMTP_PASSWORD --empty after it held p: 0 bytes, owner 10002, mode 0400", () => {
+    const rel = "main/worker-general/SMTP_PASSWORD";
+    const first = sh(path.join(LOCAL, "budmon-local"), ["secret", "set", rel], {
+      env: { BUDMON_HOME: home },
+      input: "p",
+    });
+    expect(first.status, `${first.stdout}${first.stderr}`).toBe(0);
+    const file = path.join(home, "secrets", rel);
+    expect(sh("sudo", ["stat", "-c", "%s", file]).stdout.trim()).toBe("1");
+
+    const empty = sh(path.join(LOCAL, "budmon-local"), ["secret", "set", rel, "--empty"], {
+      env: { BUDMON_HOME: home },
+      input: "",
+    });
+    expect(empty.status, `${empty.stdout}${empty.stderr}`).toBe(0);
+    expect(empty.stdout).toContain(`written ${rel} (empty: no SMTP authentication)`);
+
+    expect(sh("sudo", ["stat", "-c", "%s %u %a", file]).stdout.trim()).toBe("0 10002 400");
+  }, 300_000);
 });
 
 /** The PEM of a fresh RSA-3072 public key: CAPTURE_PUBLIC_KEY must be at least 3072 bits (F-10). */

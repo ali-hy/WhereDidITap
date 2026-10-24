@@ -232,6 +232,26 @@ compose_calls() {
   assert_output ""
 }
 
+@test "TP-15.21 (k3) (A-488): a WEB_SENTRY_DSN without a project exits 13, not a valid Sentry DSN, the value not printed, no docker build" {
+  sed -i 's|^WEB_SENTRY_DSN=.*|WEB_SENTRY_DSN=https://pub@o1.ingest.sentry.io|' "${BUDMON_HOME}/site.env"
+  run_phase_b
+  assert_failure 13
+  assert_output --partial "site.env: WEB_SENTRY_DSN is not a valid Sentry DSN"
+  refute_output --partial "pub@o1.ingest.sentry.io"
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ /^build/' '${CALLS}'"
+  assert_output ""
+}
+
+@test "TP-15.21 (k4) (A-488): a WEB_SENTRY_DSN with a space in the host exits 13, not a valid Sentry DSN, the value not printed, no docker build" {
+  sed -i 's|^WEB_SENTRY_DSN=.*|WEB_SENTRY_DSN=https://pub@o1 ingest.sentry.io/2|' "${BUDMON_HOME}/site.env"
+  run_phase_b
+  assert_failure 13
+  assert_output --partial "site.env: WEB_SENTRY_DSN is not a valid Sentry DSN"
+  refute_output --partial "pub@o1 ingest"
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ /^build/' '${CALLS}'"
+  assert_output ""
+}
+
 @test "TP-15.21 (h): 5 existing dumps and 6 release copies: 5 dumps remain including the new one; copies pruned to 5, keeping v1.1.0 and v1.2.0" {
   local d
   for d in 20260901T120000Z 20260902T120000Z 20260903T120000Z 20260904T120000Z 20260905T120000Z; do

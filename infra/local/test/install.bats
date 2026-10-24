@@ -466,6 +466,38 @@ MV
   assert_output --partial "GOOGLE_SIGNIN_APP_ORIGINS"
 }
 
+# ---- TP-15.40 (A-488): the DSN prompts use F-10's production pattern ----
+
+@test "TP-15.40 (g) (A-488): invalid SENTRY_DSN and WEB_SENTRY_DSN answers are asked again, never echoed; the valid one is written, end of input gives __FILL_ME__" {
+  # Prompt order (F-175): six blanks up to SENTRY_DSN, then six blanks up to WEB_SENTRY_DSN.
+  local answers
+  answers="$(printf '\n\n\n\n\n\n%s\n%s\n\n\n\n\n\n\n%s\n%s\n' \
+    'https://sentry.io/1' 'https://0123abcd@o1.ingest.sentry.io/42' \
+    'https://k@o1.ingest.sentry.io/x' 'http://k@localhost:9000/1')"
+  run --separate-stderr bash -c "printf '%s' '${answers}' | '${SCRIPT}' install v1.0.0"
+  [ "$(grep -c 'invalid value for SENTRY_DSN' <<<"${stderr}")" -eq 1 ] || { echo "${stderr}"; return 1; }
+  [ "$(grep -c 'invalid value for WEB_SENTRY_DSN' <<<"${stderr}")" -eq 2 ] || { echo "${stderr}"; return 1; }
+  local rejected
+  for rejected in 'https://sentry.io/1' 'https://k@o1.ingest.sentry.io/x' 'http://k@localhost:9000/1'; do
+    [[ "${output}${stderr}" != *"${rejected}"* ]] || { echo "echoed: ${rejected}"; return 1; }
+  done
+  run cat "${BUDMON_HOME}/site.env"
+  assert_line "SENTRY_DSN=https://0123abcd@o1.ingest.sentry.io/42"
+  assert_line "WEB_SENTRY_DSN=__FILL_ME__"
+}
+
+@test "TP-15.40 (h) (A-488): site_valid accepts a DSN with a port and rejects a password or an extra path segment, for both keys" {
+  local key
+  for key in SENTRY_DSN WEB_SENTRY_DSN; do
+    run bash -c "source '${LOCAL}/lib/secrets.sh'; site_valid ${key} 'https://0123abcd@o1.ingest.sentry.io:8443/7'"
+    [ "${status}" -eq 0 ] || { echo "${key}: port rejected"; return 1; }
+    run bash -c "source '${LOCAL}/lib/secrets.sh'; site_valid ${key} 'https://pub:SECRET@o1.ingest.sentry.io/1'"
+    [ "${status}" -eq 1 ] || { echo "${key}: password accepted (${status})"; return 1; }
+    run bash -c "source '${LOCAL}/lib/secrets.sh'; site_valid ${key} 'https://k@h/1/2'"
+    [ "${status}" -eq 1 ] || { echo "${key}: two segments accepted (${status})"; return 1; }
+  done
+}
+
 # ---- TP-15.43 (A-433): install step 11's Postgres wait is bounded ----
 
 @test "TP-15.43: install step 11 with a pg_isready taking 3 s and failing, BUDMON_PG_READY_TIMEOUT=2: at most 2 probes, within 6 s" {
