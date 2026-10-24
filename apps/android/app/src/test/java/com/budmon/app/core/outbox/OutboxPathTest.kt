@@ -1,15 +1,19 @@
 // F-255 apiRoot, resolveOutboxPath and OutboxRepository.enqueue's path check (A-474). TP-13.18.
-//
-// Assumed: OutboxRepository keeps its constructor (dao, workManager, clock); A-474 doesn't change it.
+// The repository is built as OutboxRepository(dao, workManager, clock, baseUrl) (A-482).
 package com.budmon.app.core.outbox
 
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
 import com.budmon.app.core.db.BudmonDatabase
 import com.budmon.app.core.network.apiRoot
+import io.mockk.Called
+import io.mockk.confirmVerified
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.test.runTest
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.After
@@ -81,17 +85,44 @@ class OutboxPathTest {
     }
 
     @Test
-    fun `TP-13_18 enqueue refuses an absolute path and stores nothing, then stores a relative one`() = runTest {
-        val dao = db.outboxDao()
-        val repo = OutboxRepository(dao, mockk<WorkManager>(relaxed = true), Clock.systemUTC())
+    fun `TP-13_18 OutboxRepository with a base URL without a trailing slash throws IllegalArgumentException`() {
+        val workManager = mockk<WorkManager>(relaxed = true)
 
-        val error = runCatching { repo.enqueue("POST", "/things", "{}".toByteArray(), "application/json") }.exceptionOrNull()
-        assertTrue(error.toString(), error is IllegalArgumentException)
-        assertEquals("invalid outbox path", error?.message)
-        assertEquals(0, dao.countAll())
+        assertThrows(IllegalArgumentException::class.java) {
+            OutboxRepository(db.outboxDao(), workManager, Clock.systemUTC(), "https://h/budmon".toHttpUrl())
+        }
+        verify { workManager wasNot Called }
+    }
+
+    @Test
+    fun `TP-13_18 enqueue refuses an absolute or dot-dot path, storing nothing and scheduling nothing`() = runTest {
+        val dao = db.outboxDao()
+        val workManager = mockk<WorkManager>(relaxed = true)
+        val repo = OutboxRepository(dao, workManager, Clock.systemUTC(), "https://h/budmon/".toHttpUrl())
+
+        for (path in listOf("/things", "../x")) {
+            val error = runCatching { repo.enqueue("POST", path, "{}".toByteArray(), "application/json") }.exceptionOrNull()
+            assertTrue("$path: $error", error is IllegalArgumentException)
+            assertEquals(path, "invalid outbox path", error?.message)
+            assertEquals(path, 0, dao.countAll())
+        }
+        verify { workManager wasNot Called }
+    }
+
+    @Test
+    fun `TP-13_18 enqueue of a relative path stores it as passed and asks for one sync`() = runTest {
+        val dao = db.outboxDao()
+        val workManager = mockk<WorkManager>(relaxed = true)
+        val repo = OutboxRepository(dao, workManager, Clock.systemUTC(), "https://h/budmon/".toHttpUrl())
 
         val id = repo.enqueue("POST", "things", "{}".toByteArray(), "application/json")
+
         assertTrue(id > 0)
         assertEquals(1, dao.countAll())
+        assertEquals(listOf("things"), dao.pendingOldestFirst(10).map { it.path })
+        verify(exactly = 1) {
+            workManager.enqueueUniqueWork("outbox-sync-now", ExistingWorkPolicy.KEEP, any<OneTimeWorkRequest>())
+        }
+        confirmVerified(workManager)
     }
 }
