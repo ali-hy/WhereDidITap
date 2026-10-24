@@ -65,7 +65,9 @@ class BuildPropertiesTest {
     private fun gradle(vararg args: String): GradleRunner = GradleRunner.create()
         .withProjectDir(root)
         .withEnvironment(System.getenv() + ("HOME" to home.path))
-        .withArguments(*args, "--stacktrace", "-q")
+        // The daemon also takes the client's system properties for each build, so user.home is
+        // passed on the command line too; the jvmargs copy only keeps one daemon per home.
+        .withArguments(*args, "-Duser.home=${home.path}", "--stacktrace", "-q")
 
     private fun fails(vararg args: String): BuildResult = gradle(*args).buildAndFail()
     private fun succeeds(vararg args: String): BuildResult = gradle(*args).build()
