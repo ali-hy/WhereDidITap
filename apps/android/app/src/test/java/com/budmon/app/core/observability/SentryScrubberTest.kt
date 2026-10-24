@@ -191,7 +191,7 @@ class SentryScrubberTest {
     }
 
     @Test
-    fun `TP-13_8 (re-review B-2) exception frames - one valid kept with only function, filename, lineno, colno and in_app`() {
+    fun `TP-13_8 (A-485) nine frames - 1 kept, 3 to 7 kept as unknown, 2, 8 and 9 dropped`() {
         val valid = frame("run", "Worker.kt").apply {
             vars = mapOf("note" to canary)
             contextLine = "val note = \"$canary\""
@@ -206,11 +206,13 @@ class SentryScrubberTest {
                         listOf(
                             valid,
                             frame("x $canary", "Worker.kt"),
-                            // F-260 re-checks A-110's filename pattern only; an absolute path of
-                            // allowed characters passes it (question for the planner), so this
-                            // frame fails the pattern by its space.
+                            frame("run", "/data/user/0/$canary/x.kt"),
                             frame("run", "/data/user/0/$canary x.kt"),
+                            frame("run", "C:\\src\\$canary.kt"),
+                            frame("run", "https://h.example/$canary.kt"),
+                            frame("run", "<unknown>"),
                             frame("run", null),
+                            frame("run", ""),
                         ),
                     )
                 },
@@ -220,10 +222,9 @@ class SentryScrubberTest {
         val scrubbed = SentryScrubber().execute(e, Hint())!!
         val frames = scrubbed.exceptions!!.single().stacktrace!!.frames!!
 
-        assertEquals(1, frames.size)
-        val kept = frames.single()
-        assertEquals("run", kept.function)
-        assertEquals("Worker.kt", kept.filename)
+        assertEquals(listOf("Worker.kt", "<unknown>", "<unknown>", "<unknown>", "<unknown>", "<unknown>"), frames.map { it.filename })
+        assertTrue(frames.all { it.function == "run" })
+        val kept = frames.first()
         assertEquals(12, kept.lineno)
         assertEquals(4, kept.colno)
         assertEquals(true, kept.isInApp)

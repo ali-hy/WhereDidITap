@@ -72,6 +72,9 @@ describe("TP-11.25: web Sentry scrubbing (F-217)", () => {
     const url = (scrubbed?.["request"] as { url?: string } | undefined)?.url ?? "";
     expect(url).not.toContain("?");
     expect(url).toMatch(/\/api\/v1\/things$/);
+    // F-217: stripped to the path, so no host.
+    expect(url).toBe("/api/v1/things");
+    expect(text).not.toContain("budmon.example");
     const values = (scrubbed?.["exception"] as { values?: { value?: string }[] } | undefined)
       ?.values;
     expect(values?.[0]?.value).toBe("TypeError");
@@ -135,6 +138,9 @@ describe("TP-11.25: web Sentry scrubbing (F-217)", () => {
       expect(kept).not.toBeNull();
       expect(JSON.stringify(kept)).not.toContain(CANARY);
       expect(JSON.stringify(kept)).toContain("/api/v1/things");
+      // F-217: the path only, no host.
+      expect((kept as { data?: { url?: unknown } } | null)?.data?.url).toBe("/api/v1/things");
+      expect(JSON.stringify(kept)).not.toContain("budmon.example");
     }
     const nav = crumb({ category: "navigation", data: { from: "/a?x=1", to: `/b?q=${CANARY}` } });
     expect(nav).not.toBeNull();
@@ -260,4 +266,105 @@ describe("TP-11.25: web Sentry scrubbing (F-217)", () => {
     expect(postcode?.exception?.values?.[0]?.value).toBe("Error");
     expect(JSON.stringify(postcode)).not.toContain("SW1A1AA");
   });
+});
+
+// ---- A-485: frame filenames reduced as on the server ----
+
+type Frame = Record<string, unknown>;
+
+async function reducer(): Promise<(f: string) => string> {
+  // Typed loosely so this file compiles before reduceFrameFilename exists.
+  const mod = (await loadSentry()) as unknown as Record<string, unknown>;
+  const fn = mod["reduceFrameFilename"];
+  expect(fn, "reduceFrameFilename is exported").toBeTypeOf("function");
+  return fn as (f: string) => string;
+}
+
+const at = (filename: string | undefined, extra: Frame = {}): Frame => ({
+  ...(filename === undefined ? {} : { filename }),
+  function: "run",
+  lineno: 3,
+  colno: 9,
+  in_app: true,
+  ...extra,
+});
+
+const FRAMES: [string, Frame][] = [
+  [
+    "(a)",
+    at("https://laptop.tail1234.ts.net/assets/index-AbC1.js?v=1#x", {
+      abs_path: `https://laptop.tail1234.ts.net/assets/${CANARY}.js`,
+      module: CANARY,
+      context_line: CANARY,
+      pre_context: [CANARY],
+      vars: { note: CANARY },
+    }),
+  ],
+  ["(b)", at("http://localhost:5173/assets/chunk/x-1.js")],
+  ["(c)", at(`https://laptop.tail1234.ts.net/src/${CANARY}.ts`)],
+  ["(d)", at(`chrome-extension://abc/${CANARY}.js`)],
+  ["(e)", at("<anonymous>")],
+  ["(f)", at("assets/index-AbC1.js")],
+  ["(g)", at(`https://h/assets/../${CANARY}.js`)],
+  ["(h)", at("https://h/assets/%2e%2e/x.js")],
+  ["(i)", at(undefined)],
+  ["(j)", at("")],
+  ["(k)", at("https://h/assets/a.js", { function: `x ${CANARY} y` })],
+];
+
+describe("TP-11.25 (A-485): scrubWebEvent reduces frame filenames and drops frames without one", () => {
+  it("TP-11.25 (A-485): (a)-(k) → kept frames (a) (b) (c) (d) (e) (f) (g) (h) with reduced filenames; (i) (j) (k) dropped; no host, extension or canary left", async () => {
+    const { scrubWebEvent } = await loadSentry();
+    const event = {
+      exception: {
+        values: [
+          {
+            type: "TypeError",
+            value: "x",
+            stacktrace: { frames: FRAMES.map(([, f]) => f) },
+          },
+        ],
+      },
+    };
+
+    const scrubbed = scrubWebEvent(event);
+    const values = (scrubbed?.["exception"] as { values?: { stacktrace?: { frames?: Frame[] } }[] })
+      .values;
+    const frames = values?.[0]?.stacktrace?.frames ?? [];
+
+    expect(frames.map((f) => f["filename"])).toEqual([
+      "assets/index-AbC1.js",
+      "assets/chunk/x-1.js",
+      "<unknown>",
+      "<unknown>",
+      "<unknown>",
+      "assets/index-AbC1.js",
+      "<unknown>",
+      "<unknown>",
+    ]);
+    expect(Object.keys(frames[0] ?? {}).sort()).toEqual(
+      ["colno", "filename", "function", "in_app", "lineno"].sort(),
+    );
+    expect(frames[0]).toEqual({
+      filename: "assets/index-AbC1.js",
+      function: "run",
+      lineno: 3,
+      colno: 9,
+      in_app: true,
+    });
+    const text = JSON.stringify(scrubbed);
+    for (const banned of ["ts.net", "localhost", "chrome-extension", CANARY]) {
+      expect(text, banned).not.toContain(banned);
+    }
+  });
+
+  it.each(FRAMES.slice(0, 8))(
+    "TP-11.25 (A-485): reduceFrameFilename is idempotent for %s",
+    async (_label, frame) => {
+      const reduce = await reducer();
+      const once = reduce(String(frame["filename"]));
+
+      expect(reduce(once)).toBe(once);
+    },
+  );
 });
