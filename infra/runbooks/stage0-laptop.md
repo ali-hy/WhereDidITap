@@ -27,9 +27,10 @@ in the platform LLD (F-178); its commands print a one-line reason for every fail
      read-only application key for the API and a read-write key for the worker;
    - Sentry: three projects, each with e-mail alerts: `budmon-server` and `budmon-web` (the
      install asks for their DSNs, `SENTRY_DSN` and `WEB_SENTRY_DSN`) and `budmon-android` (its DSN
-     goes into the Android build as `budmon.sentryDsn`, in `~/.budmon/android.properties`). In
-     each project, turn on Settings → Security & Privacy → **Prevent Storing of IP Addresses**
-     (Budmon sends error events only, with no IP address);
+     goes into the Android build as `budmon.sentryDsn`, in the Windows file
+     `%UserProfile%\.budmon\android.properties`: see "Android" below). In each project, turn on
+     Settings → Security & Privacy → **Prevent Storing of IP Addresses** (Budmon sends error
+     events only, with no IP address);
    - Google Cloud, in the project used below:
      - the Gmail OAuth client (web application) with the redirect
        `http://localhost:8080/api/v1/…` (Gmail is connected from the laptop's own browser);
@@ -107,10 +108,15 @@ with the configuration problem in its log.
 
 Android Studio and `adb` run on Windows, from a Windows-side clone used only for Android work. The
 emulator uses debug builds against the development stack (`pnpm dev`, `http://10.0.2.2:5173/`). The
-phone gets the `stage0` release build over `adb` Wi-Fi debugging from Windows, built with
-`~/.budmon/android.properties`, which holds three keys: `budmon.apiBaseUrl` (the laptop's tailnet
-origin), `budmon.googleServerClientId` (the "Budmon sign-in" web client's id) and
-`budmon.sentryDsn` (the `budmon-android` project's DSN).
+phone gets the `stage0` release build over `adb` Wi-Fi debugging from Windows. That build reads its
+settings from `%UserProfile%\.budmon\android.properties`, a file in your Windows user profile (for
+example `C:\Users\<you>\.budmon\android.properties`, which Ubuntu sees as
+`/mnt/c/Users/<you>/.budmon/android.properties`). It isn't in the Ubuntu `~/.budmon` that
+`budmon-local` uses: Gradle runs on Windows, where `~` is your Windows profile. The file is never
+committed and holds three keys: `budmon.apiBaseUrl` (the laptop's tailnet origin),
+`budmon.googleServerClientId` (the "Budmon sign-in" web client's id) and `budmon.sentryDsn` (the
+`budmon-android` project's DSN). If the release build fails naming `budmon.apiBaseUrl`, check that
+the file is in that folder and that the key is an `https://` address ending in `/`.
 
 ## Gmail
 
@@ -140,15 +146,15 @@ laptop's browser when the connection shows "needs reconnect".
   finish, or end it with `kill <pid>`.
 - **"starting … failed: docker compose up -d for budmon-main (or budmon-capture) exited …"**
   (exit 31; also `… didn't start on the restored database (…)` and
-  `starting Postgres for first setup failed`): Docker couldn't start a container, and Compose's
-  own reason is printed just above that line. Most often a port is taken: the reason then names
+  `starting Postgres for first setup failed`): Docker couldn't start a container, and Compose's own
+  reason is printed just above that line. Most often a port is taken: the reason then names
   `127.0.0.1:8080` (Caddy) or `127.0.0.1:8025` (Mailpit) and says `address already in use` or
   `port is already allocated`. Stop whatever holds the port (another container, listed by
   `docker ps`, or another program on the laptop), then run the same command again: it removes and
-  recreates the containers that didn't start. After a failed `upgrade`, the release that was running has been started again;
-  after a failed `restore`, the current release and its database are back. If the command had
-  turned maintenance on, it stays on (`budmon-local maintenance status`): a successful re-run
-  turns it off, and if you don't re-run it, run `budmon-local maintenance off`.
+  recreates the containers that didn't start. After a failed `upgrade`, the release that was running
+  has been started again; after a failed `restore`, the current release and its database are back.
+  If the command had turned maintenance on, it stays on (`budmon-local maintenance status`): a
+  successful re-run turns it off, and if you don't re-run it, run `budmon-local maintenance off`.
 
 ### A restore didn't finish
 

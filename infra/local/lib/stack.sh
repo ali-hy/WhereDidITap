@@ -1,10 +1,12 @@
 # shellcheck shell=bash
 # budmon-local (F-178): starting, checking and switching the stack; phase B and restore.
 
-# A-507 (1): the services of budmon-<project> whose container didn't start, one per line: those
-# `created` (never ran), then those `exited` with a non-empty State.Error (a start that failed
-# after the container had run before). A normal stop or a crash leaves State.Error empty, so those
-# containers are never listed. A failing `ps` counts as none; inspect's exit status is ignored.
+# A-507 (1), A-508 (4): the services of budmon-<project> whose container didn't start, one per
+# line: those `created` (never ran), then those `exited` with a non-empty State.Error (a start
+# that failed after the container had run before). A normal stop or a crash leaves State.Error
+# empty, so those containers are never listed. A failing `ps` counts as none; inspect's exit
+# status is ignored. Blank lines (an empty list, or inspect's line for a container without a
+# start error) are dropped: a blank name would make `rm -f ""` fail with `no such service:`.
 unstarted_services() {
   local tag="$1" project="$2" created ids
   created="$(compose_for "${tag}" "${project}" ps -a --status created --services 2>/dev/null \
