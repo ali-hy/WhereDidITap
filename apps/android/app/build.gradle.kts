@@ -222,6 +222,7 @@ dependencies {
     ksp(libs.androidx.hilt.compiler)
 
     implementation(libs.okhttp)
+    // compile-only need: the generated ApiClient imports HttpLoggingInterceptor; the app never installs it.
     implementation(libs.okhttp.logging)
     implementation(libs.retrofit)
     implementation(libs.retrofit.kotlinx.serialization)

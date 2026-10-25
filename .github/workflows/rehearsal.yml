@@ -6,6 +6,9 @@ name: Rehearsal
 # hotfix tag reachable from the head (F-183's rule); with none, the upgrade and rollback steps are
 # skipped. With `doctored: true` (A-468, test only) it runs instead the five doctored cases, each
 # of which must fail at its expected step.
+# The doctored job first generates this commit's pending schema migration (A-497), never committed
+# or uploaded, so a branch without committed migrations still gets platform tables; the plain
+# rehearsal never generates and rehearses only the committed migrations.
 
 on:
   workflow_call:
@@ -98,6 +101,11 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Throwaway schema migration (A-497)
+        id: schema
+        run: |
+          pnpm db:release-migration v0.0.0 || { echo "::error::throwaway schema migration failed (A-497)"; exit 1; }
+          [ -f apps/server/drizzle/meta/_journal.json ] || { echo "::error::no schema source: apps/server/drizzle/meta/_journal.json is missing after generation (A-497)"; exit 1; }
       - name: The candidate's images
         run: |
           docker build -f images/server/Dockerfile -t budmon/server:rehearsal .

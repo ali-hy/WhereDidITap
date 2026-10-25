@@ -34,7 +34,9 @@ usage: budmon-local <command>
   start | stop | restart | status    the running release's stack
   logs [-f] [service]                the last 200 log lines
   maintenance on|off|status          the maintenance flag
-  secret set <role>/<service>/<KEY>  write one secret file from stdin
+  secret set <role>/<service>/<KEY> [--empty]
+                                     write one secret file from stdin; --empty (no SMTP
+                                     authentication) only for main/worker-general/SMTP_PASSWORD
   restore <dump file>                restore a dump with the release that wrote it
   bootstrap-owner --email <address> [--replace]
 USAGE
