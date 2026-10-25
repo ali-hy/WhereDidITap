@@ -68,7 +68,12 @@ describe("TP-13.19: the committed Room schema matches F-254 (A-486)", () => {
     expect(fields.filter((f) => f.notNull !== true).map((f) => f.columnName)).toEqual([
       "lastErrorKey",
     ]);
-    expect(fields.find((f) => f.columnName === "lastErrorKey")?.notNull).toBe(false);
+    // Room omits notNull when it's false; an absent key counts as false, nothing else does.
+    const lastErrorKey = fields.find((f) => f.columnName === "lastErrorKey");
+    expect(lastErrorKey).toBeDefined();
+    expect(
+      lastErrorKey !== undefined && "notNull" in lastErrorKey ? lastErrorKey.notNull : false,
+    ).toBe(false);
   });
 
   it("TP-13.19: primary key id, auto-generated; one unique index on idempotencyKey", () => {
