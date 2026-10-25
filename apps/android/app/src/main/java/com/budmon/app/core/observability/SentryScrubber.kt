@@ -11,7 +11,6 @@ import io.sentry.protocol.SentryException
 import io.sentry.protocol.SentryStackFrame
 import io.sentry.protocol.SentryStackTrace
 import io.sentry.protocol.User
-import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /** An API error key (A-101) may stay as an exception value; anything else becomes the type. */
@@ -81,18 +80,12 @@ private fun scrubException(e: SentryException): SentryException = SentryExceptio
     if (frames != null) stacktrace = SentryStackTrace(frames)
 }
 
-/** scheme://host[:port]/path, rebuilt (no userinfo, query or fragment), or null. */
-private fun reduceUrl(raw: String): String? {
-    val url = raw.toHttpUrlOrNull() ?: return null
-    return HttpUrl
-        .Builder()
-        .scheme(url.scheme)
-        .host(url.host)
-        .port(url.port)
-        .encodedPath(url.encodedPath)
-        .build()
-        .toString()
-}
+/**
+ * F-260 (A-498): an HTTP crumb's URL as its path only, OkHttp's `encodedPath` (always starting
+ * with `/`, keeping any base-URL prefix): no scheme, userinfo, host, port, query or fragment. Null
+ * when it isn't an absolute http(s) URL, so the crumb is kept without `data.url`.
+ */
+private fun reduceUrl(raw: String): String? = raw.toHttpUrlOrNull()?.encodedPath
 
 class SentryScrubber : SentryOptions.BeforeSendCallback {
     override fun execute(event: SentryEvent, hint: Hint): SentryEvent? {
@@ -119,8 +112,9 @@ class SentryScrubber : SentryOptions.BeforeSendCallback {
 
     companion object {
         /**
-         * F-35: navigation and HTTP crumbs only, with exactly category, timestamp, type and level;
-         * an HTTP crumb also keeps data.url (scheme://host[:port]/path), method and status_code.
+         * F-35, F-260: navigation and HTTP crumbs only, with exactly category, timestamp, type and
+         * level; navigation keeps no data; an HTTP crumb also keeps data.url as the path only
+         * (A-498), method (`^[A-Z]{1,10}$`) and a numeric status_code, each only when valid.
          */
         fun scrubBreadcrumb(crumb: Breadcrumb): Breadcrumb? {
             val category = crumb.category

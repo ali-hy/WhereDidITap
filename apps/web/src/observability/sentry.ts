@@ -37,7 +37,12 @@ function isHttpStatus(value: unknown): boolean {
 function checkedTags(tags: Json): Json {
   const out: Json = {};
   const route = str(tags["route"]);
-  if (route !== undefined && isRoute(stripToPath(route))) out["route"] = stripToPath(route);
+  if (route !== undefined) {
+    // A-499: route keeps A-112's drop-on-failure rule; a non-path never becomes "/".
+    const part = pathPart(route);
+    const value = part === "" ? "/" : part;
+    if (isRoute(value)) out["route"] = value;
+  }
   const job = str(tags["job"]);
   if (job !== undefined && JOB_NAME.test(job)) out["job"] = job;
   const clientKind = str(tags["client_kind"]);
@@ -75,12 +80,22 @@ function stripQuery(url: string): string {
 }
 
 /**
- * F-217: a URL "stripped to the path": no query or fragment, and no scheme, host or port (any
- * leading `scheme:` parts and `//authority`), so the tailnet host never reaches Sentry.
+ * A-495 (1) (a), (b): the URL without its query and fragment and without the leading run of
+ * `scheme:` parts and an optional `//authority`. May be empty or not a path.
+ */
+function pathPart(url: string): string {
+  return stripQuery(url).replace(/^(?:[A-Za-z][A-Za-z0-9+.-]*:)*(?:\/\/[^/]*)?/, "");
+}
+
+/**
+ * F-217: a URL "stripped to the path", so the tailnet host never reaches Sentry: no query or
+ * fragment, no scheme, host or port, and (A-499) anything that isn't a path starting with `/`
+ * (an opaque `data:`/`mailto:` payload, a host without a scheme, a relative reference, or
+ * nothing) becomes `/`. Never throws.
  */
 export function stripToPath(url: string): string {
-  const rest = stripQuery(url).replace(/^(?:[A-Za-z][A-Za-z0-9+.-]*:)*(?:\/\/[^/]*)?/, "");
-  return rest === "" ? "/" : rest;
+  const part = pathPart(url);
+  return part.startsWith("/") ? part : "/";
 }
 
 const ASSET_PATH = /^assets\/[A-Za-z0-9_-][A-Za-z0-9_.-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$/;
