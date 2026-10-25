@@ -167,4 +167,33 @@ describe("TP-3.14: the real Sentry SDK", () => {
     expectRebuilt(events);
     noCanary(sentry);
   });
+
+  // A-502 (1): error events only; no sessions and no client reports.
+  it("TP-3.14 (e): nothing is sent before a report; one report sends one envelope holding only an event, with no user agent; the options turn client reports and default integrations off", async () => {
+    const sentry = await server();
+    const reporter = initSentry({ ...CFG, dsn: sentry.dsn });
+
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    await reporter.flush(2_000);
+    expect(sentry.bodies).toEqual([]);
+
+    reporter.report(new Error("x"), {});
+    await reporter.flush(2_000);
+
+    expect(sentry.bodies).toHaveLength(1);
+    const body = sentry.bodies[0] ?? "";
+    const lines = body.split("\n").filter((l) => l !== "");
+    const types: unknown[] = [];
+    for (let i = 1; i < lines.length; i += 2) {
+      types.push((JSON.parse(lines[i] ?? "{}") as { type?: unknown }).type);
+    }
+    expect(types).toEqual(["event"]);
+    expect(body).not.toContain("user_agent");
+    const options = Sentry.getClient()?.getOptions();
+    expect(options?.sendClientReports).toBe(false);
+    expect((options as Record<string, unknown> | undefined)?.["defaultIntegrations"]).toBe(false);
+    expect((options?.integrations ?? []).map((i) => i.name).sort()).toEqual(
+      ["LinkedErrors", "OnUncaughtException", "OnUnhandledRejection"].sort(),
+    );
+  }, 15_000);
 });

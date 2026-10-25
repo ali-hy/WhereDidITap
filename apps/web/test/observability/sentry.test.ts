@@ -1,6 +1,6 @@
 // F-217 web Sentry: init options and scrubbing. TP-11.25, plus extra cases TP-11.32x. IDs ending in
 // "x" are test-architect additions, not LLD test-plan IDs.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { definedError, loadSentry } from "../support/s11b.js";
 
 const sentry = vi.hoisted(() => ({ init: vi.fn() }));
@@ -23,6 +23,8 @@ interface InitOptions {
   beforeBreadcrumb?: (b: Record<string, unknown>, hint?: unknown) => unknown;
   replaysSessionSampleRate?: number;
   replaysOnErrorSampleRate?: number;
+  defaultIntegrations?: unknown;
+  sendClientReports?: unknown;
 }
 
 beforeEach(() => {
@@ -206,6 +208,24 @@ describe("TP-11.25: web Sentry scrubbing (F-217)", () => {
       request: { url: `https://budmon.example/x?q=${CANARY}` },
     });
     expect(JSON.stringify(sent)).not.toContain(CANARY);
+  });
+
+  it("TP-11.25 (A-502 (1)): init options: defaultIntegrations false, exactly seven integrations in order, sendClientReports false, no autoSessionTracking", async () => {
+    const options = await initOptions();
+
+    expect(options.defaultIntegrations).toBe(false);
+    expect(Array.isArray(options.integrations)).toBe(true);
+    expect(integrationNames(options.integrations)).toEqual([
+      "EventFilters",
+      "FunctionToString",
+      "BrowserApiErrors",
+      "Breadcrumbs",
+      "GlobalHandlers",
+      "LinkedErrors",
+      "Dedupe",
+    ]);
+    expect(options.sendClientReports).toBe(false);
+    expect(Object.keys(options)).not.toContain("autoSessionTracking");
   });
 
   it("TP-11.25 (A-371): without a DSN, init isn't called", async () => {
@@ -695,6 +715,83 @@ describe("TP-11.25 (A-501 (1)): the route tag is the parser's path, not a re-par
     });
 
     expect(scrubbed?.["tags"]).toStrictEqual({ route: "/things/{id}/items/{itemId}" });
+  });
+});
+
+// ---- A-502 (12): condition (iii) decodes the parser's brace escapes ----
+
+/** A URL class whose pathname leaves { and } raw, as a parser that doesn't encode them would. */
+function rawBraceURL(): typeof URL {
+  const Real = globalThis.URL;
+  class RawBraceURL extends Real {}
+  Object.defineProperty(RawBraceURL.prototype, "pathname", {
+    configurable: true,
+    get(this: URL): string {
+      // The real getter, wherever it sits on the prototype chain, with this instance.
+      const value: string = Reflect.get(Real.prototype, "pathname", this);
+      return value.replace(/%7B/g, "{").replace(/%7D/g, "}");
+    },
+  });
+  return RawBraceURL;
+}
+
+describe("TP-11.25 (A-502 (12)): the route tag holds with a parser that leaves braces raw", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("TP-11.25 (A-502): the stub really leaves braces raw", () => {
+    vi.stubGlobal("URL", rawBraceURL());
+
+    expect(new URL("https://h/things/{id}").pathname).toBe("/things/{id}");
+  });
+
+  it.each([
+    ["/things/{id}", "/things/{id}"],
+    ["https://budmon.example/things/{id}/items/{itemId}?q=x", "/things/{id}/items/{itemId}"],
+  ])("TP-11.25 (A-502): with raw braces, route %j → %j", async (route, expected) => {
+    const { scrubWebEvent } = await loadSentry();
+    vi.stubGlobal("URL", rawBraceURL());
+
+    expect(scrubWebEvent({ tags: { route } })?.["tags"]).toStrictEqual({ route: expected });
+  });
+
+  it.each([
+    ["(r1)", `https:////${H}/x`],
+    ["(r2)", `////${H}/x`],
+    ["(r3)", `HTTPS:////${H}`],
+    ["(r4)", `blob:https:////${H}/x`],
+    ["(r5)", "data:////"],
+    ["(r6)", `https:/${H}/../x`],
+    ["(r7)", `/${H}/../x`],
+    ["(r8)", `https:/${H}/..`],
+    ["(r9)", "https://h/a/../b"],
+    ["(r10)", "/a/./b"],
+    ["(r11)", "https://h//x"],
+  ])(
+    "TP-11.25 (A-502): with raw braces, %s route %j still gives no route tag",
+    async (_l, route) => {
+      const { scrubWebEvent } = await loadSentry();
+      vi.stubGlobal("URL", rawBraceURL());
+
+      const scrubbed = scrubWebEvent({ tags: { route, custom: CANARY } });
+
+      const tags = (scrubbed?.["tags"] ?? {}) as Record<string, unknown>;
+      expect(Object.keys(tags)).not.toContain("route");
+      expect(JSON.stringify(scrubbed)).not.toContain("ts.net");
+    },
+  );
+
+  it("TP-11.25 (A-502): with the real parser, /{a}{b} is kept and /things/%7Bid%7D gets no route tag", async () => {
+    const { scrubWebEvent } = await loadSentry();
+
+    expect(scrubWebEvent({ tags: { route: "/{a}{b}" } })?.["tags"]).toStrictEqual({
+      route: "/{a}{b}",
+    });
+    const encoded = scrubWebEvent({ tags: { route: "/things/%7Bid%7D" } });
+    expect(Object.keys((encoded?.["tags"] ?? {}) as Record<string, unknown>)).not.toContain(
+      "route",
+    );
   });
 });
 

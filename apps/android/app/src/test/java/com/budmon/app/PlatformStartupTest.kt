@@ -73,6 +73,9 @@ class PlatformStartupTest {
         assertFalse(options.isAttachViewHierarchy)
         assertEquals(20, options.maxBreadcrumbs)
         assertTrue(options.beforeSend is SentryScrubber)
+        // A-502 (1): no session envelopes and no client reports, only error events.
+        assertFalse(options.isEnableAutoSessionTracking)
+        assertFalse(options.isSendClientReports)
         assertOutboxSyncEnqueued()
     }
 }

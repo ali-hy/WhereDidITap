@@ -22,6 +22,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.StringWriter
 import java.util.Base64
+import java.util.UUID
 
 class SentryScrubberTest {
     // F-198's canary shape, standing in for user data.
@@ -34,7 +35,8 @@ class SentryScrubberTest {
         }
         setExtra("note", canary)
         user = User().apply {
-            id = "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b"
+            // A-502 (1): a random UUID, as DefaultAndroidEventProcessor sets from Installation.id.
+            id = UUID.randomUUID().toString()
             email = "$canary@example.com"
         }
         exceptions = listOf(
@@ -54,8 +56,8 @@ class SentryScrubberTest {
         scrubbed!!
         assertNull(scrubbed.request)
         assertNull(scrubbed.getExtra("note"))
-        assertEquals("0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b", scrubbed.user?.id)
-        assertNull(scrubbed.user?.email)
+        // A-502 (1): Android events carry no user, not even a UUID id.
+        assertNull(scrubbed.user)
         assertEquals("IllegalStateException", scrubbed.exceptions?.first()?.value)
         val text = listOf(
             scrubbed.request,
@@ -67,6 +69,13 @@ class SentryScrubberTest {
             scrubbed.contexts.keys().toList(),
         ).toString()
         assertFalse(text.contains(canary))
+    }
+
+    @Test
+    fun `TP-13_8 (A-502) an event whose only user field is a random UUID id has no user`() {
+        val e = SentryEvent().apply { user = User().apply { id = UUID.randomUUID().toString() } }
+
+        assertNull(SentryScrubber().execute(e, Hint())!!.user)
     }
 
     @Test
