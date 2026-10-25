@@ -18,6 +18,7 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
+import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, createHmac, generateKeyPairSync, pbkdf2Sync, randomBytes } from "node:crypto";
 import { get as httpGet } from "node:http";
 import { tmpdir } from "node:os";
@@ -1001,4 +1002,230 @@ describe.skipIf(!INFRA_INT)("TP-15.22 (I): install and restore on a real runner 
     }
     expect(status).toBe(200);
   }, 1_700_000);
+});
+
+// TP-15.48 (A-502 (2)): a real install with a published port taken fails at once (exit 31), and the
+// same install run again, once the port is free, resumes and starts everything, the never-started
+// container included. Each case uses its own fresh home and throwaway origin, as TP-15.22 (I) does.
+describe.skipIf(!INFRA_INT)("TP-15.48: install with a taken port, then resumed (F-178)", () => {
+  const TAG = "v0.0.1";
+
+  interface Prepared {
+    work: string;
+    home: string;
+    run: (args: readonly string[], input?: string) => ReturnType<typeof sh>;
+  }
+
+  /** TP-15.22 (I1)'s set-up up to the second install: origin, tag, first install, secrets, site.env. */
+  function prepare(): Prepared {
+    const work = mkdtempSync(path.join(tmpdir(), "budmon-tp15-48-"));
+    const home = path.join(work, "home");
+    mkdirSync(home, { mode: 0o700 });
+    const origin = path.join(work, "origin.git");
+    const repoDir = path.join(work, "repo");
+    const git = (args: readonly string[], cwd?: string) => {
+      const r = sh("git", cwd === undefined ? args : ["-C", cwd, ...args]);
+      if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
+      return r.stdout.trim();
+    };
+    git(["init", "-q", "--bare", "-b", "master", origin]);
+    git(["config", "receive.shallowUpdate", "true"], origin);
+    git(["push", "-q", origin, "HEAD:refs/heads/master"], ROOT);
+    git(["clone", "-q", origin, repoDir]);
+    const fixture = serverFixture(work);
+    try {
+      generateBaseline(fixture.dir, TAG);
+      cpSync(fixture.drizzle, path.join(repoDir, "apps/server/drizzle"), { recursive: true });
+    } finally {
+      fixture.remove();
+    }
+    git(["add", "apps/server/drizzle"], repoDir);
+    git(
+      [
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.invalid",
+        "commit",
+        "-q",
+        "-m",
+        `release ${TAG}`,
+      ],
+      repoDir,
+    );
+    git(["push", "-q", "origin", "HEAD:refs/heads/master"], repoDir);
+    git(["tag", TAG, "master"], origin);
+    const run = (args: readonly string[], input?: string) =>
+      sh(path.join(LOCAL, "budmon-local"), args, {
+        env: { BUDMON_HOME: home, BUDMON_REPO: repoDir },
+        ...(input === undefined ? {} : { input }),
+        timeoutMs: 1_500_000,
+      });
+    const first = run(["install", TAG], "laptop.tailnet.ts.net\n");
+    if (first.status !== 20) throw new Error(`install 1: ${String(first.status)} ${first.stderr}`);
+    const pub = rsaPublicPem();
+    const values: Record<string, string> = {
+      "main/api/S3_ACCESS_KEY_ID": "access-key-id",
+      "main/api/S3_SECRET_ACCESS_KEY": "secret-access-key",
+      "main/api/CAPTURE_PUBLIC_KEY": pub,
+      "main/api/GOOGLE_SIGNIN_CLIENT_SECRET": "signin-secret",
+      "main/worker-general/S3_ACCESS_KEY_ID": "access-key-id",
+      "main/worker-general/S3_SECRET_ACCESS_KEY": "secret-access-key",
+      "main/worker-general/FX_PRIMARY_APP_ID": "oxr-app-id",
+      "main/worker-general/CAPTURE_PUBLIC_KEY": pub,
+      "capture/worker-capture/GCP_CREDENTIALS": JSON.stringify({
+        type: "service_account",
+        project_id: "p",
+      }),
+      "capture/worker-capture/GOOGLE_OAUTH_CLIENT_SECRET": "oauth-secret",
+      "capture/worker-capture/CAPTURE_PUBLIC_KEY": pub,
+    };
+    for (const [key, value] of Object.entries(values)) {
+      const r = run(["secret", "set", key], value);
+      if (r.status !== 0) throw new Error(`secret set ${key}: ${r.stderr}`);
+    }
+    writeFileSync(
+      path.join(home, "site.env"),
+      [
+        "PUBLIC_ORIGIN=https://laptop.tailnet.ts.net",
+        "CAPTURE_KEY_VERSION=projects/p/locations/europe-west3/keyRings/budmon/cryptoKeys/capture-credentials/cryptoKeyVersions/1",
+        "GOOGLE_OAUTH_CLIENT_ID=123-oauth.apps.googleusercontent.com",
+        "S3_ENDPOINT=https://s3.eu-central-003.backblazeb2.com",
+        "S3_REGION=eu-central-003",
+        "S3_BUCKET_EXPORTS=budmon-exports",
+        "S3_BUCKET_ERASURE_LOG=budmon-erasure-log",
+        "SENTRY_DSN=https://k@sentry.invalid/1",
+        "GOOGLE_SIGNIN_CLIENT_ID=123-signin.apps.googleusercontent.com",
+        "GOOGLE_SIGNIN_ANDROID_CLIENT_IDS=",
+        "GOOGLE_SIGNIN_CALLBACK_ORIGIN=http://localhost:8080",
+        "GOOGLE_SIGNIN_APP_ORIGINS=https://laptop.tailnet.ts.net,http://localhost:8080",
+        "SMTP_URL=smtp://mailpit:1025",
+        "EMAIL_FROM=Budmon <no-reply@budmon.local>",
+        "WEB_SENTRY_DSN=https://pub@sentry.invalid/2",
+        "",
+      ].join("\n"),
+      { mode: 0o600 },
+    );
+    return { work, home, run };
+  }
+
+  /** Removes both projects' containers and networks, the capture network and the work tree. */
+  function remove(work: string): void {
+    for (const project of ["budmon-main", "budmon-capture"]) {
+      const ids = sh("docker", [
+        "ps",
+        "-aq",
+        "--filter",
+        `label=com.docker.compose.project=${project}`,
+      ])
+        .stdout.split("\n")
+        .filter((id) => id !== "");
+      if (ids.length > 0) sh("docker", ["rm", "-f", "-v", ...ids]);
+      const nets = sh("docker", [
+        "network",
+        "ls",
+        "-q",
+        "--filter",
+        `label=com.docker.compose.project=${project}`,
+      ])
+        .stdout.split("\n")
+        .filter((id) => id !== "");
+      if (nets.length > 0) sh("docker", ["network", "rm", ...nets]);
+    }
+    sh("docker", ["network", "rm", "budmon_capture_db"]);
+    sh("sudo", ["rm", "-rf", work]);
+  }
+
+  /** A listener holding 127.0.0.1:<port>, as another program on the laptop would. */
+  async function hold(port: number): Promise<ChildProcess> {
+    const child = spawn("python3", ["-m", "http.server", String(port), "--bind", "127.0.0.1"], {
+      stdio: "ignore",
+    });
+    for (let i = 0; i < 50; i += 1) {
+      if (sh("bash", ["-c", `exec 3<>/dev/tcp/127.0.0.1/${String(port)}`]).status === 0)
+        return child;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    child.kill("SIGKILL");
+    throw new Error(`nothing listens on ${String(port)}`);
+  }
+
+  /** `docker compose … <args>` for a project, with the installed release copy's files. */
+  const stack = (home: string, project: "main" | "capture", args: readonly string[]) => {
+    const release = path.join(home, "releases", TAG);
+    return sh(
+      "docker",
+      [
+        "compose",
+        "--project-directory",
+        release,
+        "-p",
+        `budmon-${project}`,
+        "-f",
+        path.join(release, `compose.${project}.yaml`),
+        "--env-file",
+        path.join(release, "local.env"),
+        ...args,
+      ],
+      { env: { BUDMON_HOME: home, BUDMON_TAG: TAG } },
+    );
+  };
+
+  const lines = (text: string) =>
+    text
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l !== "");
+
+  async function caseFor(port: 8025 | 8080): Promise<void> {
+    const prepared = prepare();
+    let listener: ChildProcess | undefined;
+    try {
+      listener = await hold(port);
+      const started = Date.now();
+      const failed = prepared.run(["install", TAG]);
+      const seconds = (Date.now() - started) / 1_000;
+
+      expect(failed.status, `${failed.stdout}${failed.stderr}`).toBe(31);
+      expect(seconds).toBeLessThan(60);
+      expect(failed.stderr).toContain("budmon-main");
+      expect(failed.stderr).toContain("port is already allocated");
+      expect(existsSync(path.join(prepared.home, "install.inprogress"))).toBe(true);
+
+      listener.kill("SIGKILL");
+      listener = undefined;
+      await new Promise((r) => setTimeout(r, 500));
+      const resumed = prepared.run(["install", TAG]);
+      expect(resumed.status, `${resumed.stdout}${resumed.stderr}`).toBe(0);
+
+      expect(stack(prepared.home, "main", ["port", "mailpit", "8025"]).stdout.trim()).toBe(
+        "127.0.0.1:8025",
+      );
+      expect(stack(prepared.home, "main", ["port", "caddy", "8080"]).stdout.trim()).toBe(
+        "127.0.0.1:8080",
+      );
+      expect(
+        lines(stack(prepared.home, "main", ["ps", "--status", "running", "--services"]).stdout),
+      ).toEqual(expect.arrayContaining(["caddy", "api", "worker-general", "postgres", "mailpit"]));
+      expect(
+        lines(stack(prepared.home, "capture", ["ps", "--status", "running", "--services"]).stdout),
+      ).toContain("worker-capture");
+      const probe =
+        port === 8025
+          ? sh("curl", ["-fsS", "http://127.0.0.1:8025/"])
+          : sh("curl", ["-fsS", "http://127.0.0.1:8080/version.json"]);
+      expect(probe.status, probe.stderr).toBe(0);
+    } finally {
+      listener?.kill("SIGKILL");
+      remove(prepared.work);
+    }
+  }
+
+  it("TP-15.48 (a): with 127.0.0.1:8025 held, install exits 31 within 60 s naming budmon-main; freed, install again exits 0 and mailpit is published and running", async () => {
+    await caseFor(8025);
+  }, 1_800_000);
+
+  it("TP-15.48 (b): the same with 127.0.0.1:8080 held, from a fresh home: caddy is published and serves version.json", async () => {
+    await caseFor(8080);
+  }, 1_800_000);
 });

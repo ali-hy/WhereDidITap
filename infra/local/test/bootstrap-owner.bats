@@ -15,6 +15,7 @@ setup() {
   make_release v1.0.0
   cat >"${STUB_CONFIG}" <<CONF
 stub_docker() {
+  stack_answer "$@" && return "${STACK_EXIT:-0}"
   local all="\$*"
   if [[ "\${all}" == *" ps"* || "\${all}" == *"inspect"* ]]; then
     if [ "\${API_DOWN:-0}" = 1 ]; then return 1; fi

@@ -40,6 +40,7 @@ stub_git() {
   return 0
 }
 stub_docker() {
+  stack_answer "$@" && return "${STACK_EXIT:-0}"
   local all="$*"
   case "${all}" in
     build*) return "${BUILD_EXIT:-0}" ;;
@@ -379,3 +380,115 @@ write_marker() {
   [ -n "${line}" ] && [ -n "${reason}" ] && [ "${line}" -lt "${reason}" ] || { echo "${stderr}"; return 1; }
 }
 
+
+# ---- TP-15.47 (A-502 (2)): a failed start stops at once; never-started containers are recreated ----
+
+# Compose calls of one project (main or capture), each reduced to a label, in order.
+project_steps() {
+  awk -F'\t' -v p="budmon-$1" '
+    $1=="docker" && $3 ~ ("-p " p " ") {
+      if ($3 ~ / ps -a --status created --services/) print "created?"
+      else if ($3 ~ / rm -f /) print "rm"
+      else if ($3 ~ / up -d( |$)/ && $3 !~ / migrate/) print "up"
+    }' "${CALLS}"
+}
+
+no_readiness_probe() {
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ /healthcheck/' '${CALLS}'"
+  assert_output ""
+}
+
+first_release() {
+  rm -f "${BUDMON_HOME}/state"
+  make_release v1.0.0
+  mkdir -p "${BUDMON_HOME}/build/v1.0.0/apps/server"
+}
+
+@test "TP-15.47 (b): _upgrade-continue v1.0.0 --first with capture's up -d failing exits 31 naming budmon-capture; no stop, rm or later up" {
+  first_release
+  export UP_EXIT_capture=1
+  BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.0.0/budmon-local" _upgrade-continue v1.0.0 --no-dump --first
+  assert_failure 31
+  [[ "${stderr}" == *"port is already allocated"* ]] || { echo "${stderr}"; return 1; }
+  [[ "${stderr}" == *"starting v1.0.0 failed: docker compose up -d for budmon-capture exited 1"* ]] || { echo "${stderr}"; return 1; }
+  # Nothing after the failing capture up -d.
+  local after
+  after="$(awk -F'\t' 'found { print } $1=="docker" && $3 ~ /-p budmon-capture / && $3 ~ / up -d/ { found=1 }' "${CALLS}")"
+  [ -z "${after}" ] || { echo "after the failure: ${after}"; return 1; }
+  no_readiness_probe
+}
+
+@test "TP-15.47 (c): v1.2.0's main up -d failing starts v1.1.0 again (both projects, BUDMON_TAG=v1.1.0) and exits 31; no readiness probe; state unchanged" {
+  export UP_EXIT_main=1 UP_EXIT_MATCH="*/releases/v1.2.0/*"
+  BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.2.0/budmon-local" _upgrade-continue v1.2.0
+  assert_failure 31
+  [[ "${stderr}" == *"starting v1.2.0 failed: docker compose up -d for budmon-main exited 1; v1.1.0 started again"* ]] || { echo "${stderr}"; return 1; }
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ / up -d/ && \$3 !~ / migrate/ && \$3 ~ /releases\\/v1.1.0\\//' '${CALLS}'"
+  assert_output --partial "compose.main.yaml"
+  assert_output --partial "compose.capture.yaml"
+  assert_output --partial "TAG=v1.1.0"
+  refute_output --partial "TAG=v1.2.0"
+  no_readiness_probe
+  run cat "${BUDMON_HOME}/state"
+  assert_line "current=v1.1.0"
+  assert_line "previous=v1.0.0"
+}
+
+@test "TP-15.47 (d): as (c) with v1.1.0's up -d failing too exits 17 (run budmon-local start)" {
+  export UP_EXIT_main=1 UP_EXIT_MATCH="*/releases/v1.2.0/*" OLD_UP_EXIT=1
+  BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.2.0/budmon-local" _upgrade-continue v1.2.0
+  assert_failure 17
+  [[ "${stderr}" == *"starting v1.2.0 failed and starting v1.1.0 again failed: run budmon-local start"* ]] || { echo "${stderr}"; return 1; }
+}
+
+@test "TP-15.47 (f): a never-started mailpit is removed before main's up -d (phase B --first, then start); capture lists none; no rm has -v" {
+  first_release
+  export CREATED_main=mailpit
+  BUDMON_REEXEC=1 run "${BUDMON_HOME}/releases/v1.0.0/budmon-local" _upgrade-continue v1.0.0 --no-dump --first
+  assert_success
+  BUDMON_REEXEC=1 run "${BUDMON_HOME}/releases/v1.0.0/budmon-local" start
+  assert_success
+
+  # Per start: main asks for created services, removes them, then starts; capture asks, then starts.
+  run project_steps main
+  [ "$(tr '\n' ' ' <<<"${output}")" = "created? rm up created? rm up " ] || { echo "main: ${output}"; return 1; }
+  run project_steps capture
+  [ "$(tr '\n' ' ' <<<"${output}")" = "created? up created? up " ] || { echo "capture: ${output}"; return 1; }
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ / rm -f/' '${CALLS}'"
+  [ "${#lines[@]}" -eq 2 ] || { echo "${output}"; return 1; }
+  for line in "${lines[@]}"; do
+    [[ "${line}" == *"-p budmon-main "*" rm -f mailpit"* ]] || { echo "${line}"; return 1; }
+    [[ "${line}" != *" -v"* ]] || { echo "rm with -v: ${line}"; return 1; }
+  done
+}
+
+@test "TP-15.47 (h): mailpit's port published only from the third probe: exit 0 after the third" {
+  export PORT_MAILPIT_EMPTY_FOR=2
+  run_phase_b
+  assert_success
+  [ "$(cat "${CALLS}.mailpit-port")" -eq 3 ] || { echo "probes: $(cat "${CALLS}.mailpit-port")"; return 1; }
+}
+
+@test "TP-15.47 (h2): mailpit never published: exit 16 within 6 s naming (mailpit not published on 127.0.0.1:8025)" {
+  export PORT_MAILPIT="" BUDMON_READY_TIMEOUT=2
+  local started=${SECONDS}
+  BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.2.0/budmon-local" _upgrade-continue v1.2.0
+  assert_failure 16
+  [ $((SECONDS - started)) -le 6 ] || { echo "took $((SECONDS - started)) s"; return 1; }
+  [[ "${stderr}" == *"(mailpit not published on 127.0.0.1:8025)"* ]] || { echo "${stderr}"; return 1; }
+}
+
+@test "TP-15.47 (h3): caddy not running: exit 16 naming (caddy not running)" {
+  export RUNNING_SERVICES="api worker-general postgres mailpit" BUDMON_READY_TIMEOUT=2
+  BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.2.0/budmon-local" _upgrade-continue v1.2.0
+  assert_failure 16
+  [[ "${stderr}" == *"(caddy not running)"* ]] || { echo "${stderr}"; return 1; }
+}
+
+@test "TP-15.47 (i): start with main's up -d failing exits 31 (Compose's message is above)" {
+  write_state v1.2.0 v1.1.0
+  export UP_EXIT_main=1
+  BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.2.0/budmon-local" start
+  assert_failure 31
+  [[ "${stderr}" == *"starting v1.2.0 failed: docker compose up -d for budmon-main exited 1 (Compose's message is above)"* ]] || { echo "${stderr}"; return 1; }
+}

@@ -57,6 +57,7 @@ stub_df() {
   echo "/dev/x ${kb} 0 ${kb} 0% /"
 }
 stub_docker() {
+  stack_answer "$@" && return "${STACK_EXIT:-0}"
   local all="$*"
   if [[ "${all}" == *"psql"* ]]; then
     local sql="${all}"
@@ -541,3 +542,43 @@ assert_unfinished() {
   [ -n "${line}" ] && [ -n "${reason}" ] && [ "${line}" -lt "${reason}" ] || { echo "${stderr}"; return 1; }
 }
 
+
+# ---- TP-15.47 (A-502 (2)): restore step 8's up -d failing rolls back at once ----
+
+# The rollback's events after the failing `up -d` of releases/v1.1.0's main project.
+events_after_failed_up() {
+  awk -F'\t' '
+    !found && $1=="docker" && $3 ~ /-p budmon-main / && $3 ~ / up -d/ && $3 ~ /releases\/v1\.1\.0\// { found = 1; next }
+    found {
+      if ($1=="docker" && $3 ~ / stop api worker-general$/ && $3 ~ /releases\/v1\.1\.0\//) print "stop-main"
+      else if ($1=="docker" && $3 ~ / stop worker-capture$/ && $3 ~ /releases\/v1\.1\.0\//) print "stop-capture"
+      else if ($1=="docker" && $3 ~ /pg_isready/) print "pg_isready"
+      else if ($1=="sql" && $2 ~ /ALLOW_CONNECTIONS false/) print "allow-false"
+      else if ($1=="sql" && $2 ~ /"budmon" RENAME TO "budmon_restore_failed_/) print "rename-failed"
+      else if ($1=="sql" && $2 ~ /"budmon_old_[0-9TZ]+" RENAME TO "budmon"/) print "rename-back"
+      else if ($1=="sql" && $2 ~ /ALLOW_CONNECTIONS true/) print "allow-true"
+      else if ($1=="docker" && $3 ~ / up -d/ && $3 ~ /releases\/v1\.2\.0\//) print "up-v1.2.0"
+    }' "${CALLS}" | uniq
+}
+
+@test "TP-15.47 (e): v1.1.0's main up -d failing skips the wait, runs r1 to r8 in order, and exits 31; maintenance stays on" {
+  export UP_EXIT_main=1 UP_EXIT_MATCH="*/releases/v1.1.0/*"
+  BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.2.0/budmon-local" restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+  assert_failure 31
+  [[ "${stderr}" == *"v1.1.0 didn't start on the restored database (docker compose up -d for budmon-main exited 1); v1.2.0 and its database are back, maintenance stays on"* ]] || { echo "${stderr}"; return 1; }
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ /healthcheck/' '${CALLS}'"
+  assert_output ""
+  run events_after_failed_up
+  [ "$(tr '\n' ' ' <<<"${output}")" = "stop-main stop-capture pg_isready allow-false rename-failed rename-back allow-true up-v1.2.0 " ] || {
+    echo "rollback: $(tr '\n' ' ' <<<"${output}")"
+    return 1
+  }
+  [ -e "${BUDMON_HOME}/maintenance/on" ]
+}
+
+@test "TP-15.47 (e2): as (e) with r8's up -d failing too exits 17 (run budmon-local start)" {
+  export UP_EXIT_main=1 UP_EXIT_MATCH="*/releases/v1.1.0/*" UP_FAIL_MATCH="releases/v1.2.0/"
+  BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.2.0/budmon-local" restore "${BUDMON_HOME}/dumps/${DUMP_NAME}"
+  assert_failure 17
+  [[ "${stderr}" == *"v1.1.0 didn't start on the restored database; the database is back but starting v1.2.0 failed: run budmon-local start"* ]] || { echo "${stderr}"; return 1; }
+}

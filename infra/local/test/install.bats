@@ -100,6 +100,7 @@ stub_openssl() {
   return 0
 }
 stub_docker() {
+  stack_answer "$@" && return "${STACK_EXIT:-0}"
   local all="$*"
   if [[ "${all}" == run\ * && -n "${PROBE_FAIL_DIR:-}" && "${all}" == *"${PROBE_FAIL_DIR}:"* ]]; then return 1; fi
   if [[ "${all}" == *"pg_isready"* ]]; then
@@ -196,6 +197,7 @@ placeholder_ready_home() {
   placeholder_ready_home
   cat >>"${STUB_CONFIG}" <<'CONF'
 stub_docker() {
+  stack_answer "$@" && return "${STACK_EXIT:-0}"
   if [[ "$*" == *"BUDMON_FIRST_SETUP=1"* || "${BUDMON_FIRST_SETUP:-}" == 1 ]]; then
     if [ -f "${BUDMON_HOME}/install.inprogress" ]; then
       printf 'marker=%s mode=%s\n' "$(cat "${BUDMON_HOME}/install.inprogress")" "$(stat -c '%a' "${BUDMON_HOME}/install.inprogress")" >>"${CALLS}.marker"
@@ -565,3 +567,71 @@ assert_s3_rejected_then_eof() {
   [ $((SECONDS - started)) -le 7 ] || { echo "took $((SECONDS - started)) s"; return 1; }
 }
 
+
+# ---- TP-15.47 (A-502 (2)): install with a failing start stops at once and resumes cleanly ----
+
+@test "TP-15.47 (a): install whose main up -d fails exits 31 within 5 s naming budmon-main; no capture up, no readiness probe; install.inprogress kept, no state" {
+  placeholder_ready_home
+  # Phase B runs for real here: the build tree and any release copy get the real script back.
+  local copy
+  for copy in "${BUDMON_HOME}/build/v1.0.0/infra/local" "${BUDMON_HOME}/releases/v1.0.0"; do
+    [ -d "${copy}" ] && cp "${LOCAL}/budmon-local" "${copy}/budmon-local"
+  done
+  export UP_EXIT_main=1 UP_EXIT_MATCH="* up -d "
+  local started=${SECONDS}
+  run --separate-stderr "${SCRIPT}" install v1.0.0
+  assert_failure 31
+  [ $((SECONDS - started)) -le 5 ] || { echo "took $((SECONDS - started)) s"; return 1; }
+  [[ "${stderr}" == *"port is already allocated"* ]] || { echo "${stderr}"; return 1; }
+  [[ "${stderr}" == *"starting v1.0.0 failed: docker compose up -d for budmon-main exited 1"* ]] || { echo "${stderr}"; return 1; }
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ /-p budmon-capture / && \$3 ~ / up -d/' '${CALLS}'"
+  assert_output ""
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ /healthcheck/' '${CALLS}'"
+  assert_output ""
+  [ -e "${BUDMON_HOME}/install.inprogress" ] || { echo "no install.inprogress"; return 1; }
+  [ ! -e "${BUDMON_HOME}/state" ] || { echo "state written"; return 1; }
+}
+
+@test "TP-15.47 (g): install step 11 removes a never-started postgres before its first-setup up -d; that up -d failing exits 31" {
+  placeholder_ready_home
+  export CREATED_main=postgres UP_EXIT_main=1 UP_EXIT_MATCH="* up -d postgres *"
+  run --separate-stderr "${SCRIPT}" install v1.0.0
+  assert_failure 31
+  [[ "${stderr}" == *"starting Postgres for first setup failed"* ]] || { echo "${stderr}"; return 1; }
+  run bash -c "awk -F'\t' '\$1==\"docker\" && (\$3 ~ / rm -f / || \$3 ~ / up -d postgres/) { print (\$3 ~ / rm -f postgres/ ? \"rm-postgres\" : (\$3 ~ / rm -f / ? \"rm-other\" : \"up-postgres \" \$NF)) }' '${CALLS}'"
+  [ "$(tr '\n' ' ' <<<"${output}")" = "rm-postgres up-postgres FIRST_SETUP=1 " ] || { echo "${output}"; return 1; }
+}
+
+# ---- TP-15.50 (A-502 (4)): install reports a maintenance flag set before it ----
+
+@test "TP-15.50: install with maintenance/on already present exits 0, ends with the tailscale serve line then the maintenance notice, and keeps the flag" {
+  placeholder_ready_home
+  mkdir -p "${BUDMON_HOME}/maintenance"
+  : >"${BUDMON_HOME}/maintenance/on"
+  run "${SCRIPT}" install v1.0.0
+  assert_success
+  local last two
+  last="$(tail -n 1 <<<"${output}")"
+  two="$(tail -n 2 <<<"${output}" | head -n 1)"
+  [ "${last}" = "budmon-local: maintenance is on: Budmon answers 503 until you run budmon-local maintenance off" ] || { echo "${output}"; return 1; }
+  [[ "${two}" == *"tailscale serve --bg --https=443 http://127.0.0.1:8080"* ]] || { echo "${output}"; return 1; }
+  [ -e "${BUDMON_HOME}/maintenance/on" ]
+}
+
+# ---- TP-15.49 (d) (A-502 (3)): install step 12's child inherits the lock ----
+
+@test "TP-15.49 (d): with the lock free, install v1.0.0 runs its real phase B child without exit 30; the lock file is 0600 with one install line" {
+  placeholder_ready_home
+  local copy
+  for copy in "${BUDMON_HOME}/build/v1.0.0/infra/local" "${BUDMON_HOME}/releases/v1.0.0"; do
+    [ -d "${copy}" ] && cp "${LOCAL}/budmon-local" "${copy}/budmon-local"
+  done
+  run --separate-stderr "${SCRIPT}" install v1.0.0
+  [ "${status}" -ne 30 ] || { echo "${stderr}"; return 1; }
+  assert_success
+  local lock="${BUDMON_HOME}/budmon-local.lock"
+  [ "$(stat -c '%a' "${lock}")" = 600 ] || { echo "mode $(stat -c '%a' "${lock}")"; return 1; }
+  run cat "${lock}"
+  [ "${#lines[@]}" -eq 1 ] || { echo "${output}"; return 1; }
+  [[ "${lines[0]}" =~ ^install\ pid=[0-9]+\ since=[0-9]{8}T[0-9]{6}Z$ ]] || { echo "${output}"; return 1; }
+}

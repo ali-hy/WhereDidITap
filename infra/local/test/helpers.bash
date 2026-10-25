@@ -41,13 +41,17 @@ if declare -F "stub_${name}" >/dev/null; then
   "stub_${name}" "$@"
   exit $?
 fi
+# A-502 (2): without a test's own docker stub, the stack answers the start and readiness queries.
+if [ "${name}" = docker ] && declare -F stack_answer >/dev/null && stack_answer "$@"; then
+  exit "${STACK_EXIT:-0}"
+fi
 exit 0
 STUB
     chmod +x "${STUB_DIR}/${cmd}"
   done
   export PATH="${STUB_DIR}:${PATH}"
   # Stubs run as their own processes; let a stub_<cmd> call the fake F-191 helpers.
-  export -f fake_init_local fill_placeholders
+  export -f fake_init_local fill_placeholders stack_answer
   unset BUDMON_REEXEC BUDMON_FIRST_SETUP BUDMON_PG_READY_TIMEOUT BUDMON_READY_TIMEOUT BUDMON_RENAME_RETRY_DELAY
 }
 
@@ -120,3 +124,62 @@ fill_placeholders() {
   while IFS= read -r f; do echo "filled" >"${f}"; done < <(grep -rlx "__FILL_ME__" "${BUDMON_HOME}/secrets")
 }
 
+
+# A-502 (2): the stack's answers to the calls `up_project`/`up_both` and `wait_ready` make, so every
+# suite's docker stub can start with `stack_answer "$@" && return "${STACK_EXIT:-0}"`. It returns 0
+# (and prints the answer) when it handled the call, else 1. Knobs (environment):
+#   CREATED_main, CREATED_capture   services `ps -a --status created --services` lists (default none)
+#   RUNNING_SERVICES                what `ps --status running --services` lists
+#                                   (default: caddy api worker-general postgres mailpit)
+#   PORT_CADDY, PORT_MAILPIT        what `port caddy 8080` / `port mailpit 8025` print
+#                                   (default 127.0.0.1:8080 / 127.0.0.1:8025; set empty for nothing)
+#   PORT_MAILPIT_EMPTY_FOR=n        `port mailpit 8025` prints nothing for the first n calls
+#   UP_EXIT_main, UP_EXIT_capture   exit status of that project's `up -d` (default 0), optionally
+#   UP_EXIT_MATCH                   only for calls whose " <arguments> " match this glob; a non-zero
+#                                   status prints Compose's port-allocated message on stderr
+# shellcheck disable=SC2034 # STACK_EXIT is read by the calling stub
+stack_answer() {
+  local all=" $* " project=""
+  STACK_EXIT=0
+  case "${all}" in
+    *" -p budmon-main "*) project=main ;;
+    *" -p budmon-capture "*) project=capture ;;
+  esac
+  case "${all}" in
+    *" ps -a --status created --services "*)
+      local created_var="CREATED_${project}"
+      local s
+      for s in ${!created_var:-}; do echo "${s}"; done
+      return 0
+      ;;
+    *" ps --status running --services "*)
+      local s
+      for s in ${RUNNING_SERVICES-caddy api worker-general postgres mailpit}; do echo "${s}"; done
+      return 0
+      ;;
+    *" port caddy 8080 "*)
+      [ -n "${PORT_CADDY-127.0.0.1:8080}" ] && echo "${PORT_CADDY-127.0.0.1:8080}"
+      return 0
+      ;;
+    *" port mailpit 8025 "*)
+      local n=0
+      n=$(( $(cat "${CALLS}.mailpit-port" 2>/dev/null || echo 0) + 1 ))
+      echo "${n}" >"${CALLS}.mailpit-port"
+      if [ "${n}" -le "${PORT_MAILPIT_EMPTY_FOR:-0}" ]; then return 0; fi
+      [ -n "${PORT_MAILPIT-127.0.0.1:8025}" ] && echo "${PORT_MAILPIT-127.0.0.1:8025}"
+      return 0
+      ;;
+    *" up -d"*)
+      [ -n "${project}" ] || return 1
+      local up_var="UP_EXIT_${project}"
+      local code="${!up_var:-0}"
+      [ "${code}" != 0 ] || return 1
+      # shellcheck disable=SC2053 # UP_EXIT_MATCH is a glob pattern on purpose
+      if [ -n "${UP_EXIT_MATCH:-}" ] && [[ "${all}" != ${UP_EXIT_MATCH} ]]; then return 1; fi
+      echo "Error response from daemon: failed to set up container networking: driver failed programming external connectivity on endpoint budmon-${project}-mailpit-1: Bind for 127.0.0.1:8025 failed: port is already allocated" >&2
+      STACK_EXIT="${code}"
+      return 0
+      ;;
+  esac
+  return 1
+}
