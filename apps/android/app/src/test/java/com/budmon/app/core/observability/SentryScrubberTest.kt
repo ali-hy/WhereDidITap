@@ -5,6 +5,7 @@ import io.sentry.Breadcrumb
 import io.sentry.Hint
 import io.sentry.JsonSerializer
 import io.sentry.SentryEvent
+import io.sentry.SentryLevel
 import io.sentry.SentryOptions
 import io.sentry.protocol.Message
 import io.sentry.protocol.Request
@@ -248,7 +249,46 @@ class SentryScrubberTest {
 
         assertNotNull(kept)
         assertTrue(kept!!.data.toString(), kept.data.isEmpty())
+        // A-501 (4): navigation is one of Sentry's breadcrumb types, so it's kept.
+        assertEquals("navigation", kept.type)
     }
+
+    // ---- A-501 (4): an http crumb keeps type only when it's one of Sentry's breadcrumb types ----
+
+    @Test
+    fun `TP-13_8 (A-501) y1 - type http is kept with the level and the timestamp`() {
+        val crumb = httpCrumb("https://budmon.example/api/v1/things").apply { level = SentryLevel.WARNING }
+
+        val kept = SentryScrubber.scrubBreadcrumb(crumb)
+
+        assertNotNull(kept)
+        assertEquals("http", kept!!.type)
+        assertEquals(SentryLevel.WARNING, kept.level)
+        assertEquals(crumb.timestamp, kept.timestamp)
+    }
+
+    @Test
+    fun `TP-13_8 (A-501) y2 to y4 - a type outside Sentry's set is left null, the crumb and its data kept`() {
+        for (type in listOf(canary, "laptop.tail1234.ts.net", "HTTP")) {
+            val crumb = httpCrumb("https://budmon.example/api/v1/things").apply {
+                this.type = type
+                level = SentryLevel.WARNING
+            }
+
+            val kept = SentryScrubber.scrubBreadcrumb(crumb)
+
+            assertNotNull(type, kept)
+            assertNull(type, kept!!.type)
+            assertEquals(type, SentryLevel.WARNING, kept.level)
+            assertEquals(type, setOf("url", "method", "status_code"), kept.data.keys)
+            assertFalse(type, serializedCrumb(kept).contains(canary))
+            assertFalse(type, serializedCrumb(kept).contains("ts.net"))
+        }
+    }
+
+    private fun serializedCrumb(crumb: Breadcrumb): String = StringWriter().also {
+        JsonSerializer(SentryOptions()).serialize(crumb, it)
+    }.toString()
 
     @Test
     fun `TP-13_8 (B-8) a ui click breadcrumb is dropped`() {

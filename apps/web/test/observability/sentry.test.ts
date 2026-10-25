@@ -631,3 +631,155 @@ describe("TP-11.25 (A-500 (4)): a fetch crumb keeps a valid method and a numeric
     },
   );
 });
+
+// ---- A-501 (1), G-1 and N-1: the route tag is exactly the parser's path and never starts with // ----
+
+describe("TP-11.25 (A-501 (1)): the route tag is the parser's path, not a re-parsed reduction", () => {
+  it.each([
+    ["(r1)", `https:////${H}/x`],
+    ["(r2)", `////${H}/x`],
+    ["(r3)", `HTTPS:////${H}`],
+    ["(r4)", `blob:https:////${H}/x`],
+    ["(r5)", "data:////"],
+    ["(r6)", `https:/${H}/../x`],
+    ["(r7)", `/${H}/../x`],
+    ["(r8)", `https:/${H}/..`],
+    ["(r9)", "https://h/a/../b"],
+    ["(r10)", "/a/./b"],
+    ["(r11)", "https://h//x"],
+  ])("TP-11.25 (A-501): %s route %j gives no route tag", async (_label, route) => {
+    const { scrubWebEvent } = await loadSentry();
+
+    const scrubbed = scrubWebEvent({ tags: { route, custom: CANARY } });
+
+    const tags = (scrubbed?.["tags"] ?? {}) as Record<string, unknown>;
+    expect(Object.keys(tags)).not.toContain("route");
+    const text = JSON.stringify(scrubbed);
+    expect(text).not.toContain("ts.net");
+    expect(text).not.toContain(CANARY);
+  });
+
+  it.each([
+    [`//${H}/x`, "/x"],
+    ["/a//b", "/a//b"],
+  ])("TP-11.25 (A-501): route %j → tags exactly { route: %j }", async (route, expected) => {
+    const { scrubWebEvent } = await loadSentry();
+
+    const scrubbed = scrubWebEvent({ tags: { route } });
+
+    expect(scrubbed?.["tags"]).toStrictEqual({ route: expected });
+    expect(JSON.stringify(scrubbed)).not.toContain("ts.net");
+  });
+
+  it.each([["/things/{id}"], ["/things"], ["/"], ["/x"], ["/a//b"]])(
+    "TP-11.25 (A-501): a kept route tag %j scrubbed again comes back unchanged",
+    async (route) => {
+      const { scrubWebEvent } = await loadSentry();
+
+      expect(scrubWebEvent({ tags: { route } })?.["tags"]).toStrictEqual({ route });
+    },
+  );
+});
+
+// ---- A-501 (3), N-2: a kept crumb's timestamp, type and level are value-checked ----
+
+describe("TP-11.25 (A-501 (3)): crumb timestamp, type and level are kept only when valid", () => {
+  const base = { category: "fetch", data: { url: "https://budmon.example/api/v1/things" } };
+  const DATA = { url: "/api/v1/things" };
+  const clean = (r: unknown) => {
+    const text = JSON.stringify(r);
+    expect(text).not.toContain(CANARY);
+    expect(text).not.toContain("ts.net");
+  };
+
+  it("TP-11.25 (A-501): (t0) valid type, level and timestamp are kept exactly", async () => {
+    const { scrubWebBreadcrumb } = await loadSentry();
+
+    const r = scrubWebBreadcrumb({
+      ...base,
+      type: "http",
+      level: "warning",
+      timestamp: 1761379200.123,
+    });
+
+    expect(r).toStrictEqual({
+      category: "fetch",
+      type: "http",
+      level: "warning",
+      timestamp: 1761379200.123,
+      data: DATA,
+    });
+  });
+
+  it.each([
+    ["(t1)", { type: { secret: CANARY }, level: CANARY, timestamp: CANARY }],
+    ["(t2)", { type: CANARY, level: H, timestamp: "1761379200" }],
+  ])(
+    "TP-11.25 (A-501): %s invalid type, level and timestamp are all dropped",
+    async (_l, extra) => {
+      const { scrubWebBreadcrumb } = await loadSentry();
+
+      const r = scrubWebBreadcrumb({ ...base, ...extra });
+
+      expect(r).toStrictEqual({ category: "fetch", data: DATA });
+      clean(r);
+    },
+  );
+
+  it.each([[Number.NaN], [Number.POSITIVE_INFINITY]])(
+    "TP-11.25 (A-501): (t3) timestamp %s is dropped",
+    async (timestamp) => {
+      const { scrubWebBreadcrumb } = await loadSentry();
+
+      const r = scrubWebBreadcrumb({ ...base, timestamp });
+
+      expect(Object.keys(r ?? {})).not.toContain("timestamp");
+    },
+  );
+
+  it("TP-11.25 (A-501): (t4) type HTTP and level Warning (wrong case) are dropped", async () => {
+    const { scrubWebBreadcrumb } = await loadSentry();
+
+    const r = scrubWebBreadcrumb({ ...base, type: "HTTP", level: "Warning" });
+
+    expect(Object.keys(r ?? {})).not.toContain("type");
+    expect(Object.keys(r ?? {})).not.toContain("level");
+  });
+
+  it("TP-11.25 (A-501): (t5) an invalid level is dropped on its own", async () => {
+    const { scrubWebBreadcrumb } = await loadSentry();
+
+    const r = scrubWebBreadcrumb({ ...base, type: "http", level: CANARY, timestamp: 1761379200 });
+
+    expect(Object.keys(r ?? {}).sort()).toEqual(["category", "data", "timestamp", "type"]);
+    clean(r);
+  });
+
+  it("TP-11.25 (A-501): (t6) an xhr crumb keeps level log; a navigation crumb keeps type navigation and its paths", async () => {
+    const { scrubWebBreadcrumb } = await loadSentry();
+
+    expect(scrubWebBreadcrumb({ ...base, category: "xhr", level: "log" })?.["level"]).toBe("log");
+    const nav = scrubWebBreadcrumb({
+      category: "navigation",
+      type: "navigation",
+      data: { from: `/a?q=${CANARY}`, to: "/b" },
+    });
+    expect(nav).toStrictEqual({
+      category: "navigation",
+      type: "navigation",
+      data: { from: "/a", to: "/b" },
+    });
+    clean(nav);
+  });
+
+  it("TP-11.25 (A-501): scrubWebEvent with the (t1) crumb gives exactly its scrubbed form", async () => {
+    const { scrubWebEvent } = await loadSentry();
+
+    const scrubbed = scrubWebEvent({
+      breadcrumbs: [{ ...base, type: { secret: CANARY }, level: CANARY, timestamp: CANARY }],
+    });
+
+    expect(scrubbed?.["breadcrumbs"]).toStrictEqual([{ category: "fetch", data: DATA }]);
+    clean(scrubbed);
+  });
+});
