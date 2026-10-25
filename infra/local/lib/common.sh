@@ -61,6 +61,10 @@ utc_stamp() {
   date -u +%Y%m%dT%H%M%SZ
 }
 
+# A-506 (2): every git call runs without the lock's fd 9, so nothing git starts (a credential
+# cache daemon, `gc --auto`) can outlive the command and keep the lock.
+git() { command git "$@" 9>&-; }
+
 # A-502 (3): one budmon-local command at a time. A non-blocking flock on fd 9; the lock is
 # inherited (BUDMON_LOCK_HELD=1 with fd 9 still the lock file) by phase A's exec of
 # _upgrade-continue, install's step-12 child and the re-execution rule's exec. It never waits,
