@@ -1,9 +1,43 @@
 # shellcheck shell=bash
 # budmon-local (F-178): starting, checking and switching the stack; phase B and restore.
 
+# A-502 (2): one project's `up -d`, after removing its containers that never started (for
+# example on a taken port), so a resumed command recreates them. No `-v`: bind mounts and volumes
+# stay. Returns the first non-zero status of the `rm` and the `up -d`; Compose's own stderr
+# reaches the terminal unchanged.
+up_project() {
+  local tag="$1" project="$2" created status=0 code=0
+  created="$(compose_for "${tag}" "${project}" ps -a --status created --services 2>/dev/null \
+    </dev/null)" || created=""
+  if [ -n "${created}" ]; then
+    local services=()
+    mapfile -t services <<<"${created}"
+    compose_for "${tag}" "${project}" rm -f "${services[@]}" </dev/null || status=$?
+  fi
+  compose_for "${tag}" "${project}" up -d </dev/null || code=$?
+  [ "${status}" != 0 ] || status="${code}"
+  return "${status}"
+}
+
+# A-502 (2): main, then (only if it started) capture. On a failure UP_PROJECT and UP_STATUS name
+# the project and its exit status, and it returns 1.
 up_both() {
-  local tag="$1"
-  compose_for "${tag}" main up -d </dev/null && compose_for "${tag}" capture up -d </dev/null
+  local tag="$1" status=0
+  UP_PROJECT=""
+  UP_STATUS=""
+  up_project "${tag}" main || status=$?
+  if [ "${status}" != 0 ]; then
+    UP_PROJECT=budmon-main
+    UP_STATUS="${status}"
+    return 1
+  fi
+  up_project "${tag}" capture || status=$?
+  if [ "${status}" != 0 ]; then
+    UP_PROJECT=budmon-capture
+    UP_STATUS="${status}"
+    return 1
+  fi
+  return 0
 }
 
 # api, worker-general and worker-capture only: postgres, caddy and mailpit keep running. A failing
@@ -14,20 +48,54 @@ stop_app() {
   compose_for "${tag}" capture stop worker-capture </dev/null || true
 }
 
-# The API's readiness (directly, not through Caddy, which answers 503 in maintenance) and both
-# workers' heartbeats, within BUDMON_READY_TIMEOUT seconds (A-433: a SECONDS deadline, probed at
-# least once).
+# One readiness probe (A-502 (2)), checked in this order and stopping at the first failure, which
+# it names in READY_FAILED: the API's readiness (directly, not through Caddy, which answers 503 in
+# maintenance), both workers' heartbeats, the five main services running, and Caddy's and
+# Mailpit's published ports.
+ready_probe() {
+  local tag="$1" running service
+  if ! compose_for "${tag}" main exec -T api node dist/main/healthcheck.js --ready \
+    >/dev/null 2>&1 </dev/null; then
+    READY_FAILED="api not ready"
+    return 1
+  fi
+  if ! compose_for "${tag}" main exec -T worker-general node dist/main/healthcheck.js \
+    --heartbeat >/dev/null 2>&1 </dev/null; then
+    READY_FAILED="worker-general heartbeat"
+    return 1
+  fi
+  if ! compose_for "${tag}" capture exec -T worker-capture node dist/main/healthcheck.js \
+    --heartbeat >/dev/null 2>&1 </dev/null; then
+    READY_FAILED="worker-capture heartbeat"
+    return 1
+  fi
+  running="$(compose_for "${tag}" main ps --status running --services 2>/dev/null </dev/null)" ||
+    running=""
+  for service in caddy api worker-general postgres mailpit; do
+    if ! grep -qx -- "${service}" <<<"${running}"; then
+      READY_FAILED="${service} not running"
+      return 1
+    fi
+  done
+  if [ "$(compose_for "${tag}" main port caddy 8080 2>/dev/null </dev/null)" != "127.0.0.1:8080" ]; then
+    READY_FAILED="caddy not published on 127.0.0.1:8080"
+    return 1
+  fi
+  if [ "$(compose_for "${tag}" main port mailpit 8025 2>/dev/null </dev/null)" != "127.0.0.1:8025" ]; then
+    READY_FAILED="mailpit not published on 127.0.0.1:8025"
+    return 1
+  fi
+  READY_FAILED=""
+  return 0
+}
+
+# Readiness within BUDMON_READY_TIMEOUT seconds (A-433: a SECONDS deadline, probed at least once).
+# On a timeout READY_FAILED holds the last probe's failing check.
 wait_ready() {
   local tag="$1" deadline=$((SECONDS + READY_TIMEOUT))
+  READY_FAILED=""
   while :; do
-    if compose_for "${tag}" main exec -T api node dist/main/healthcheck.js --ready \
-      >/dev/null 2>&1 </dev/null &&
-      compose_for "${tag}" main exec -T worker-general node dist/main/healthcheck.js --heartbeat \
-        >/dev/null 2>&1 </dev/null &&
-      compose_for "${tag}" capture exec -T worker-capture node dist/main/healthcheck.js \
-        --heartbeat >/dev/null 2>&1 </dev/null; then
-      return 0
-    fi
+    ready_probe "${tag}" && return 0
     [ "${SECONDS}" -lt "${deadline}" ] || return 1
     sleep 1
   done
@@ -85,6 +153,10 @@ cmd_upgrade_continue() {
       *) usage ;;
     esac
   done
+  # 0. A-502 (4): an upgrade needs an installation; install's own call passes --first.
+  if [ "${first}" = 0 ] && [ ! -f "${BUDMON_HOME}/state" ]; then
+    die 2 "not installed: run budmon-local install <tag>"
+  fi
   check_tag_format "${tag}"
   local current previous
   current="$(state_get current)"
@@ -124,17 +196,28 @@ cmd_upgrade_continue() {
     die 15 "migrate failed for ${tag}"
   fi
 
-  # 5. and 6. Start both projects and wait for readiness.
-  up_both "${tag}" || true
+  # 5. Start both projects (A-502 (2)); a failed `up -d` skips the readiness wait.
+  if ! up_both "${tag}"; then
+    local failed_project="${UP_PROJECT}" failed_status="${UP_STATUS}"
+    if [ "${first}" = 1 ] || [ -z "${current}" ]; then
+      die 31 "starting ${tag} failed: docker compose up -d for ${failed_project} exited ${failed_status} (Compose's message is above); fix the cause, then run the same command again"
+    fi
+    # 7. Roll back to the running release.
+    if up_both "${current}"; then
+      die 31 "starting ${tag} failed: docker compose up -d for ${failed_project} exited ${failed_status}; ${current} started again"
+    fi
+    die 17 "starting ${tag} failed and starting ${current} again failed: run budmon-local start"
+  fi
+  # 6. Wait for readiness.
   if ! wait_ready "${tag}"; then
     # 7. Roll back to the running release.
     if [ "${first}" = 1 ] || [ -z "${current}" ]; then
-      die 16 "${tag} isn't ready; containers left for budmon-local logs"
+      die 16 "${tag} isn't ready (${READY_FAILED}); containers left for budmon-local logs"
     fi
     if up_both "${current}"; then
-      die 16 "${tag} isn't ready; ${current} started again"
+      die 16 "${tag} isn't ready (${READY_FAILED}); ${current} started again"
     fi
-    die 17 "${tag} isn't ready and starting ${current} again failed"
+    die 17 "${tag} isn't ready (${READY_FAILED}) and starting ${current} again failed"
   fi
 
   # 8. Record the release.
@@ -312,9 +395,17 @@ cmd_restore() {
   # Not fatal by itself: the readiness wait then fails and the rollback runs.
   admin_sql "${current}" "ALTER DATABASE \"budmon\" WITH ALLOW_CONNECTIONS true" >/dev/null || true
 
-  # 8. Start the dump's release.
-  up_both "${tag}" || true
-  if ! wait_ready "${tag}"; then
+  # 8. Start the dump's release (A-502 (2)); a failed `up -d` skips the wait and rolls back.
+  local start_failed=0 failed_project="" failed_status="" ready=1
+  if up_both "${tag}"; then
+    wait_ready "${tag}" || ready=0
+  else
+    start_failed=1
+    ready=0
+    failed_project="${UP_PROJECT}"
+    failed_status="${UP_STATUS}"
+  fi
+  if [ "${ready}" = 0 ]; then
     # 9. The rollback (A-426), each step checked.
     stop_app "${tag}" # r1
     wait_postgres "${current}" || # r2
@@ -328,9 +419,15 @@ cmd_restore() {
       restore_fail 26 "${incomplete} budmon holds the data from before the restore but refuses connections; ${runbook}"
     rm -f "$(restore_marker)" # r7
     if up_both "${current}"; then # r8
-      restore_fail 16 "${tag} isn't ready on the restored database; ${current} and its database are back, maintenance stays on"
+      if [ "${start_failed}" = 1 ]; then
+        restore_fail 31 "${tag} didn't start on the restored database (docker compose up -d for ${failed_project} exited ${failed_status}); ${current} and its database are back, maintenance stays on"
+      fi
+      restore_fail 16 "${tag} isn't ready on the restored database (${READY_FAILED}); ${current} and its database are back, maintenance stays on"
     fi
-    restore_fail 17 "${tag} isn't ready on the restored database; the database is back but starting ${current} failed: run budmon-local start"
+    if [ "${start_failed}" = 1 ]; then
+      restore_fail 17 "${tag} didn't start on the restored database; the database is back but starting ${current} failed: run budmon-local start"
+    fi
+    restore_fail 17 "${tag} isn't ready on the restored database (${READY_FAILED}); the database is back but starting ${current} failed: run budmon-local start"
   fi
 
   # 9. Record the switch.

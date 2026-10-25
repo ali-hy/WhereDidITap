@@ -2,8 +2,16 @@
 # over TLS on the internal budmon_capture_db network, and the internet through its own bridge.
 name: budmon-capture
 
+# A-502 (5): at most 50 MB of logs per container, whatever it writes (not Mailpit: driver none).
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   worker-capture:
+    logging: *logging
     image: budmon/server:${BUDMON_TAG:?BUDMON_TAG is not set}
     user: "10003:10003"
     command: ["node", "--import", "./dist/main/instrument.js", "dist/main/worker.js"]

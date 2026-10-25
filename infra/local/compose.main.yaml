@@ -4,6 +4,13 @@
 # Secrets are files under ${BUDMON_HOME}/secrets/<project>/<service>, mounted at /run/secrets.
 name: budmon-main
 
+# A-502 (5): at most 50 MB of logs per container, whatever it writes (not Mailpit: driver none).
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 x-app: &app
   read_only: true
   tmpfs: [/tmp]
@@ -19,6 +26,7 @@ x-release: &release
 
 services:
   caddy:
+    logging: *logging
     <<: *app
     image: budmon/web:${BUDMON_TAG:?BUDMON_TAG is not set}
     user: "10005:10005"
@@ -40,6 +48,7 @@ services:
         read_only: true
 
   api:
+    logging: *logging
     <<: *app
     image: budmon/server:${BUDMON_TAG:?BUDMON_TAG is not set}
     user: "10001:10001"
@@ -76,6 +85,7 @@ services:
         condition: service_healthy
 
   worker-general:
+    logging: *logging
     <<: *app
     image: budmon/server:${BUDMON_TAG:?BUDMON_TAG is not set}
     user: "10002:10002"
@@ -110,6 +120,7 @@ services:
         condition: service_healthy
 
   migrate:
+    logging: *logging
     <<: *app
     image: budmon/server:${BUDMON_TAG:?BUDMON_TAG is not set}
     user: "10004:10004"
@@ -135,6 +146,7 @@ services:
         condition: service_healthy
 
   postgres:
+    logging: *logging
     image: budmon/postgres:${BUDMON_TAG:?BUDMON_TAG is not set}
     restart: unless-stopped
     # A-432: USER postgres (999), no gosu or chown step, so no capability is needed.

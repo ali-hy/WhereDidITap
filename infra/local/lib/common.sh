@@ -61,6 +61,33 @@ utc_stamp() {
   date -u +%Y%m%dT%H%M%SZ
 }
 
+# A-502 (3): one budmon-local command at a time. A non-blocking flock on fd 9; the lock is
+# inherited (BUDMON_LOCK_HELD=1 with fd 9 still the lock file) by phase A's exec of
+# _upgrade-continue, install's step-12 child and the re-execution rule's exec. It never waits,
+# and it ends with the last process holding fd 9, so a crash or kill leaves no stale lock.
+acquire_lock() {
+  local lock="${BUDMON_HOME}/budmon-local.lock" line
+  if [ "${BUDMON_LOCK_HELD:-}" = 1 ] && [ /proc/$$/fd/9 -ef "${lock}" ]; then
+    return 0
+  fi
+  if [ ! -d "${BUDMON_HOME}" ]; then
+    mkdir -p "${BUDMON_HOME}"
+    chmod 0700 "${BUDMON_HOME}"
+  fi
+  exec 9>>"${lock}"
+  chmod 0600 "${lock}"
+  if ! flock -n 9; then
+    line="$(head -n 1 "${lock}" 2>/dev/null || true)"
+    if [[ "${line}" =~ ^[a-z_-]+(\ [a-z]+)?\ pid=[0-9]+\ since=[0-9]{8}T[0-9]{6}Z$ ]]; then
+      die 30 "another budmon-local command is running: ${line}; wait for it to finish"
+    fi
+    die 30 "another budmon-local command is running; wait for it to finish"
+  fi
+  : >"${lock}"
+  printf '%s pid=%s since=%s\n' "$*" "$$" "$(utc_stamp)" >&9
+  export BUDMON_LOCK_HELD=1
+}
+
 # ---- state ----
 
 state_get() {

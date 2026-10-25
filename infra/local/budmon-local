@@ -184,8 +184,17 @@ cmd_install() {
     chmod 0600 "${marker}"
   fi
   if ! pg_has_version; then
-    BUDMON_FIRST_SETUP=1 compose_for "${tag}" main up -d postgres </dev/null ||
-      die 1 "starting Postgres for first setup failed"
+    # A-502 (2): a postgres container that never started is recreated, not left behind.
+    local created status=0
+    created="$(compose_for "${tag}" main ps -a --status created --services 2>/dev/null \
+      </dev/null)" || created=""
+    if grep -qx postgres <<<"${created}"; then
+      compose_for "${tag}" main rm -f postgres </dev/null || status=$?
+    fi
+    if [ "${status}" = 0 ]; then
+      BUDMON_FIRST_SETUP=1 compose_for "${tag}" main up -d postgres </dev/null || status=$?
+    fi
+    [ "${status}" = 0 ] || die 31 "starting Postgres for first setup failed"
     wait_postgres "${tag}" || die 18 "Postgres not ready after ${PG_READY_TIMEOUT}s"
   fi
   # 12. Phase B of the new release.
@@ -199,12 +208,18 @@ cmd_install() {
   # 13. TLS for the tailnet is Tailscale Serve's, on Windows.
   say "installed ${tag}. In Windows (PowerShell), run:"
   echo "  tailscale serve --bg --https=443 http://127.0.0.1:8080"
+  # A-502 (4): a flag set before the install doesn't go unnoticed.
+  if [ -e "${BUDMON_HOME}/maintenance/on" ]; then
+    say "maintenance is on: Budmon answers 503 until you run budmon-local maintenance off"
+  fi
 }
 
 # ---- upgrade, phase A ----
 
 cmd_upgrade() {
   refuse_unfinished_restore # 0. A-426
+  # 0b. A-502 (4): before any git call; an unfinished install is resumed with install.
+  [ -f "${BUDMON_HOME}/state" ] || die 2 "not installed: run budmon-local install <tag>"
   if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then usage; fi
   local tag="$1" no_dump=()
   if [ "$#" -eq 2 ]; then
@@ -223,7 +238,8 @@ cmd_upgrade() {
 cmd_start() {
   local current
   current="$(require_current)"
-  up_both "${current}"
+  up_both "${current}" ||
+    die 31 "starting ${current} failed: docker compose up -d for ${UP_PROJECT} exited ${UP_STATUS} (Compose's message is above)"
 }
 
 cmd_stop() {
@@ -319,6 +335,19 @@ main() {
   local command="$1"
   shift
   reexec_if_needed "${command}" "$@"
+  # A-502 (3): every command but status, logs, maintenance status and the usage text takes the
+  # lock, before any other action.
+  case "${command}" in
+    install | upgrade | _upgrade-continue | start | stop | restart | restore | bootstrap-owner)
+      acquire_lock "${command}"
+      ;;
+    secret)
+      if [ "${1:-}" = set ]; then acquire_lock secret set; fi
+      ;;
+    maintenance)
+      case "${1:-}" in on | off) acquire_lock maintenance "$1" ;; esac
+      ;;
+  esac
   case "${command}" in
     install) cmd_install "$@" ;;
     upgrade) cmd_upgrade "$@" ;;
