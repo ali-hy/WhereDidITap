@@ -15,10 +15,10 @@ import {
 } from "@budmon/shared";
 import { batch, createSignal, onMount, type JSX } from "solid-js";
 import { APP_NAME } from "../app/brand.js";
+import { generated, shipped, type Catalog } from "./catalogs.js";
 import en from "./messages/en.json";
 import { I18nContext, type I18n } from "./useI18n.js";
 
-type Catalog = Record<string, string>;
 type FormatValues = Parameters<IntlShape["formatMessage"]>[1];
 
 const PSEUDO_LOCALES = ["en-XA", "ar-XB"] as const;
@@ -33,14 +33,6 @@ export function supportedLocales(): readonly string[] {
 function intlLocaleOf(locale: string): string {
   return (PSEUDO_LOCALES as readonly string[]).includes(locale) ? "en" : locale;
 }
-
-const shipped = import.meta.glob<Catalog>("./messages/*.json", { import: "default" });
-// N-2: the generated pseudo catalogs only in pseudo builds; Vite replaces the flag statically, so
-// other builds drop the branch and its chunks.
-const generated: Record<string, () => Promise<Catalog>> =
-  import.meta.env.VITE_PSEUDO_LOCALES === "1"
-    ? import.meta.glob<Catalog>("./generated/*.json", { import: "default" })
-    : {};
 
 async function loadCatalog(locale: string): Promise<Catalog> {
   if (locale === "en") return en;
