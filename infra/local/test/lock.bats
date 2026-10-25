@@ -59,6 +59,10 @@ CONF
 
 teardown() {
   if [ -n "${HOLDER:-}" ]; then kill "${HOLDER}" 2>/dev/null || true; fi
+  # TP-15.49 (f): the stand-in for git's credential-cache daemon.
+  if [ -f "${BATS_TEST_TMPDIR}/daemon.pid" ]; then
+    kill "$(cat "${BATS_TEST_TMPDIR}/daemon.pid")" 2>/dev/null || true
+  fi
 }
 
 LOCK_FILE() { echo "${BUDMON_HOME}/budmon-local.lock"; }
@@ -170,3 +174,50 @@ lock_line_ok() {
   run --separate-stderr "${SCRIPT}" start
   [ "${status}" -ne 30 ] || { echo "${stderr}"; return 1; }
 }
+
+# A-506 (2): git runs without the lock's fd 9, so a daemon git leaves behind (credential-cache--daemon
+# keeps every descriptor it inherits) can't hold the lock after the command ends.
+@test "TP-15.49 (f): every git call runs with fd 9 closed; a daemon a git call leaves running doesn't keep the lock, so maintenance on afterwards exits 0" {
+  cat >>"${STUB_CONFIG}" <<'CONF'
+stub_git() {
+  local args=("$@")
+  while [ "${args[0]:-}" = "-C" ]; do args=("${args[@]:2}"); done
+  local fd9=closed
+  [ -e "/proc/$$/fd/9" ] && fd9=open
+  printf '%s fd9=%s\n' "${args[0]:-}" "${fd9}" >>"${CALLS}.git-fd9"
+  case "${args[0]:-}" in
+    fetch)
+      # A stand-in for `git credential-cache--daemon`: it keeps every descriptor but fd 3.
+      setsid /bin/sleep 30 </dev/null >/dev/null 2>&1 3>&- &
+      echo "$!" >"${BATS_TEST_TMPDIR}/daemon.pid" ;;
+    rev-parse) echo "c0ffee0000000000000000000000000000000001" ;;
+    rev-list) echo 42 ;;
+    worktree)
+      if [ "${args[1]}" = "add" ]; then
+        local dir="" a
+        for a in "${args[@]:2}"; do case "${a}" in --*) ;; *) [ -z "${dir}" ] && dir="${a}" ;; esac; done
+        mkdir -p "${dir}/infra/local" "${dir}/apps/server"
+        (cd "${ROOT_FOR_STUBS}/infra/local" && tar --exclude=./test --exclude=./rehearsal -cf - .) | (cd "${dir}/infra/local" && tar -xf -)
+      fi ;;
+  esac
+  return 0
+}
+CONF
+  run --separate-stderr "${SCRIPT}" upgrade v1.3.0
+  [ "${status}" -ne 30 ] || { echo "upgrade: ${stderr}"; return 1; }
+  [ -f "${BATS_TEST_TMPDIR}/daemon.pid" ] && kill -0 "$(cat "${BATS_TEST_TMPDIR}/daemon.pid")" || {
+    echo "the stand-in daemon isn't running"
+    return 1
+  }
+
+  run cat "${CALLS}.git-fd9"
+  local subcommand
+  for subcommand in fetch remote merge-base worktree rev-parse; do
+    assert_line --regexp "^${subcommand} fd9="
+  done
+  refute_output --partial "fd9=open"
+
+  run --separate-stderr "${SCRIPT}" maintenance on
+  [ "${status}" -eq 0 ] || { echo "maintenance on: exit ${status}: ${stderr}"; return 1; }
+}
+

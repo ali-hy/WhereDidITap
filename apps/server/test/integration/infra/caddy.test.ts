@@ -10,7 +10,7 @@
 // exactly what Caddy forwards. A-391: runs in the infra-int job (`pnpm test:infra`), skipped
 // elsewhere.
 import { rmSync, unlinkSync, writeFileSync } from "node:fs";
-import { get } from "node:http";
+import { request } from "node:http";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildImage, compose, INFRA_INT, laptopHome, sh, TEST_TAG } from "./support.js";
@@ -135,8 +135,13 @@ interface RawResponse {
 
 /** A GET through Caddy, keeping the raw header list so duplicates can be counted. */
 function rawGet(urlPath: string): Promise<RawResponse> {
+  return rawRequest("GET", urlPath);
+}
+
+/** Any method through Caddy, with an optional client timeout (A-506's 502s take Caddy 10 s). */
+function rawRequest(method: string, urlPath: string, timeoutMs = 0): Promise<RawResponse> {
   return new Promise((resolve, reject) => {
-    const req = get({ host: "127.0.0.1", port: 8080, path: urlPath }, (res) => {
+    const req = request({ host: "127.0.0.1", port: 8080, path: urlPath, method }, (res) => {
       let body = "";
       res.setEncoding("utf8");
       res.on("data", (chunk: string) => (body += chunk));
@@ -144,7 +149,13 @@ function rawGet(urlPath: string): Promise<RawResponse> {
         resolve({ status: res.statusCode ?? 0, body, raw: res.rawHeaders });
       });
     });
+    if (timeoutMs > 0) {
+      req.setTimeout(timeoutMs, () => {
+        req.destroy(new Error(`${method} ${urlPath}: no answer within ${String(timeoutMs)} ms`));
+      });
+    }
     req.on("error", reject);
+    req.end();
   });
 }
 
@@ -388,3 +399,35 @@ describe.skipIf(!INFRA_INT)("TP-15.53: paths the laptop never serves are 404 (F-
     }
   });
 });
+
+// A-506 (1): Caddy's own error responses (handle_errors) carry its four headers too. Last in the
+// file: it stops the stub API, so Docker's DNS no longer resolves `api`.
+describe.skipIf(!INFRA_INT)(
+  "TP-15.52 (c): Caddy's own errors keep the security headers (F-175)",
+  () => {
+    function expectEmptyError(r: RawResponse, label: string): void {
+      expect(r.body, label).toBe("");
+      expect(values(r.raw, "content-length"), label).toEqual(["0"]);
+      expectCaddyHeadersOnce(r, label);
+    }
+
+    it("TP-15.52 (c): POST / is file_server's 405 with Allow: GET, HEAD, an empty body and Caddy's four headers once", async () => {
+      const r = await rawRequest("POST", "/", 30_000);
+
+      expect(r.status).toBe(405);
+      expect(values(r.raw, "allow")).toEqual(["GET, HEAD"]);
+      expectEmptyError(r, "POST /");
+    });
+
+    it("TP-15.52 (c): with the stub API stopped, /api/v1/x and /health/ready are 502s with an empty body and Caddy's four headers once", async () => {
+      const stop = sh("docker", ["stop", STUB]);
+      expect(stop.status, stop.stderr).toBe(0);
+
+      for (const urlPath of ["/api/v1/x", "/health/ready"]) {
+        const r = await rawRequest("GET", urlPath, 30_000);
+        expect(r.status, urlPath).toBe(502);
+        expectEmptyError(r, urlPath);
+      }
+    }, 90_000);
+  },
+);

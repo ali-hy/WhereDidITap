@@ -51,6 +51,23 @@ describe("TP-15.54: diagnostics:sentry-test (F-93, AC-15.4)", () => {
     expect(sentryEvents(sentry.bodies)).toEqual([]);
   }, 60_000);
 
+  // A-506 (3): any other argument list is a usage error, before anything is sent.
+  it.each([[["--force"]], [["--no"]], [["--yes", "--yes"]], [["--yes", "extra"]]])(
+    "TP-15.54 (d): %j exits 64 with the usage text, nothing on stdout and no envelope",
+    async (args) => {
+      const r = await cli(["diagnostics:sentry-test", ...args], { ...env, SENTRY_DSN: sentry.dsn });
+
+      expect(r.code, [...r.stdout, ...r.stderr].join("\n")).toBe(64);
+      const stderr = r.stderr.join("\n");
+      expect(stderr).toContain("Usage:");
+      expect(stderr).toContain("diagnostics:sentry-test --yes");
+      expect(stderr).not.toContain("run it with --yes");
+      expect(r.stdout).toEqual([]);
+      expect(sentryEvents(sentry.bodies)).toEqual([]);
+    },
+    60_000,
+  );
+
   it("TP-15.54: --yes with no SENTRY_DSN prints {sent:false} and exits 0", async () => {
     const noDsn = { ...env };
     delete noDsn["SENTRY_DSN"];
