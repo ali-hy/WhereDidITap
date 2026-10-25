@@ -38,13 +38,19 @@ function checkedTags(tags: Json): Json {
   const out: Json = {};
   const route = str(tags["route"]);
   if (route !== undefined) {
-    // A-499 (2), A-501 (1): A-112's drop-on-failure rule; a non-path never becomes "/". The
-    // pattern's reduction is written only when it doesn't start with `//` and, with `{`/`}`
-    // encoded, is exactly the path the URL parser reads from `route`, so nothing the parser reads
-    // as the scheme, authority, query or fragment is in it.
+    // A-499 (2), A-501 (1), A-502 (12): A-112's drop-on-failure rule; a non-path never becomes
+    // "/". The pattern's reduction is written only when it doesn't start with `//` and is exactly
+    // the path the URL parser reads from `route` with its brace escapes decoded, so nothing the
+    // parser reads as the scheme, authority, query or fragment is in it.
     const part = pathPart(route);
     const value = part === "" ? "/" : part;
-    if (isRoute(value) && !value.startsWith("//") && encodeBraces(value) === httpPath(route))
+    const parsed = httpPath(route);
+    if (
+      isRoute(value) &&
+      !value.startsWith("//") &&
+      parsed !== null &&
+      value === decodeBraces(parsed)
+    )
       out["route"] = value;
   }
   const job = str(tags["job"]);
@@ -115,11 +121,12 @@ function pathPart(url: string): string {
 }
 
 /**
- * A-501 (1): a route path with `{` and `}` percent-encoded as the URL parser writes them in a
- * path (`%7B`, `%7D`); nothing else changes.
+ * A-502 (12): the parser's path with each `%7B` and `%7D` (upper case, as the WHATWG path
+ * percent-encode set writes them) turned back into `{` and `}`; nothing else changes. A parser
+ * that leaves braces raw gives the same result.
  */
-function encodeBraces(path: string): string {
-  return path.replace(/\{/g, "%7B").replace(/\}/g, "%7D");
+function decodeBraces(path: string): string {
+  return path.replace(/%7B/g, "{").replace(/%7D/g, "}");
 }
 
 /**
@@ -318,9 +325,22 @@ export function initWebSentry(cfg: { dsn?: string; release: string; environment:
       stackFrameVariables: false,
       frameContextLines: 0,
     },
-    // The defaults only: no browser tracing (no client spans, D-24) and no Replay.
-    integrations: (defaults: { name: string }[]) =>
-      defaults.filter((i) => !/replay|tracing/i.test(i.name)),
+    // A-502 (1): error events only. An explicit list, so a default a later SDK adds can't send
+    // anything unreviewed: no BrowserSession (session envelopes with the user agent, outside
+    // beforeSend), HttpContext, CultureContext, Console or ConversationId, and no browser tracing
+    // (no client spans, D-24) or Replay. Breadcrumbs keeps fetch, xhr and history.
+    defaultIntegrations: false,
+    integrations: [
+      Sentry.eventFiltersIntegration(),
+      Sentry.functionToStringIntegration(),
+      Sentry.browserApiErrorsIntegration(),
+      Sentry.breadcrumbsIntegration({ dom: false, sentry: false }),
+      Sentry.globalHandlersIntegration(),
+      Sentry.linkedErrorsIntegration(),
+      Sentry.dedupeIntegration(),
+    ],
+    // A-502 (1): no client reports (outcomes) either.
+    sendClientReports: false,
     beforeSend: (event: unknown, hint: { originalException?: unknown } | undefined) =>
       scrubWebEvent(event as Json, hint),
     beforeBreadcrumb: (crumb: unknown) => scrubWebBreadcrumb(crumb as Json),

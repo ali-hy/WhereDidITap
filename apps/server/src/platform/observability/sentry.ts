@@ -195,6 +195,12 @@ export function initSentry(cfg: {
       Sentry.onUncaughtExceptionIntegration({ exitEvenIfOtherHandlersAreRegistered: false }),
       Sentry.onUnhandledRejectionIntegration({ mode: "none" }),
     ],
+    // A-502 (1): error events only; the Node client would otherwise flush outcomes every 60 s.
+    sendClientReports: false,
+    // A-503: @sentry/core 11.4.0's ServerRuntimeClient otherwise appends a SpanStreaming
+    // integration. This doesn't enable tracing: only tracesSampleRate/tracesSampler would, and
+    // neither is set.
+    traceLifecycle: "static",
     beforeSend: (event, hint) => {
       // Events Sentry built itself (uncaught exceptions, unhandled rejections) carry frames parsed
       // from err.stack, which can hold message text. Their exception is rebuilt from the original

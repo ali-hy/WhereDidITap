@@ -40,10 +40,15 @@ object PlatformStartup {
         )
     }
 
-    /** F-260's options: no PII, screenshots or view hierarchy; 20 scrubbed breadcrumbs. */
+    /**
+     * F-260's options: no PII, screenshots or view hierarchy; 20 scrubbed breadcrumbs; error events
+     * only (A-502 (1): no session tracking, no client reports).
+     */
     fun configureSentry(options: SentryAndroidOptions, dsn: String) {
         options.dsn = dsn
         options.isSendDefaultPii = false
+        options.isEnableAutoSessionTracking = false
+        options.isSendClientReports = false
         options.isAttachScreenshot = false
         options.isAttachViewHierarchy = false
         options.maxBreadcrumbs = 20

@@ -10,12 +10,10 @@ import io.sentry.SpanContext
 import io.sentry.protocol.SentryException
 import io.sentry.protocol.SentryStackFrame
 import io.sentry.protocol.SentryStackTrace
-import io.sentry.protocol.User
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /** An API error key (A-101) may stay as an exception value; anything else becomes the type. */
 private val ERROR_KEY = Regex("^[A-Z][A-Z0-9_]{1,63}$")
-private val UUID = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 // A-110's frame patterns.
 private val FRAME_FUNCTION = Regex("^(?:(?:async|new) )?[A-Za-z_$][A-Za-z0-9_$.<>\\[\\]]{0,99}$")
@@ -103,8 +101,9 @@ class SentryScrubber : SentryOptions.BeforeSendCallback {
         event.tags?.forEach { (key, value) ->
             validTag(key, value)?.let { scrubbed.setTag(key, it) }
         }
-        val userId = event.user?.id
-        if (userId != null && UUID.matches(userId)) scrubbed.user = User().apply { id = userId }
+        // A-502 (1): Android events carry no user. DefaultAndroidEventProcessor sets user.id to the
+        // SDK's per-install id whenever no user is set, and that would pass the UUID rule.
+        scrubbed.user = null
         // contexts.trace.{trace_id, span_id} only. SpanContext needs a non-null operation; it is
         // left empty so nothing from the original span's op is sent.
         event.contexts.trace?.let { trace ->
