@@ -1189,7 +1189,17 @@ describe.skipIf(!INFRA_INT)("TP-15.48: install with a taken port, then resumed (
       expect(failed.status, `${failed.stdout}${failed.stderr}`).toBe(31);
       expect(seconds).toBeLessThan(60);
       expect(failed.stderr).toContain("budmon-main");
-      expect(failed.stderr).toContain("port is already allocated");
+      // A-504: Compose's bind error names the held address; Docker's wording depends on what
+      // holds the port (another container, or a host process as here).
+      const held = `127.0.0.1:${String(port)}`;
+      const bindError = failed.stderr
+        .split("\n")
+        .find(
+          (line) =>
+            line.includes(held) &&
+            (line.includes("port is already allocated") || line.includes("address already in use")),
+        );
+      expect(bindError, failed.stderr).toBeDefined();
       expect(existsSync(path.join(prepared.home, "install.inprogress"))).toBe(true);
 
       listener.kill("SIGKILL");
