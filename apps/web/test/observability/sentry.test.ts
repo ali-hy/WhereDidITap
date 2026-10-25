@@ -164,6 +164,16 @@ describe("TP-11.25: web Sentry scrubbing (F-217)", () => {
     expect(scrubbed?.["tags"]).toEqual({ route: "/things" });
   });
 
+  // A-499 (2): an empty path part reads as "/", which passes the route rule.
+  it.each([["https://h"], ["//h"]])(
+    "TP-11.25 (A-499): route %s has an empty path, so the route tag is exactly /",
+    async (route) => {
+      const { scrubWebEvent } = await loadSentry();
+
+      expect(scrubWebEvent({ tags: { route } })?.["tags"]).toEqual({ route: "/" });
+    },
+  );
+
   it("TP-11.32x: the transaction name loses its query", async () => {
     const { scrubWebEvent } = await loadSentry();
 

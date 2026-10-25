@@ -215,6 +215,27 @@ class SentryScrubberTest {
     }
 
     @Test
+    fun `TP-13_8 (A-498) an invalid method or a non-numeric status_code is dropped, the crumb's other keys kept`() {
+        val url = "https://budmon.example/api/v1/things"
+        val cases = listOf(
+            Triple("method get", httpCrumb(url).apply { setData("method", "get") }, setOf("url", "status_code")),
+            Triple("method GET canary", httpCrumb(url).apply { setData("method", "GET $canary") }, setOf("url", "status_code")),
+            Triple("status_code \"200\"", httpCrumb(url).apply { setData("status_code", "200") }, setOf("url", "method")),
+        )
+
+        for ((label, crumb, keys) in cases) {
+            val kept = SentryScrubber.scrubBreadcrumb(crumb)
+
+            assertNotNull(label, kept)
+            assertEquals(label, keys, kept!!.data.keys)
+            assertEquals(label, "/api/v1/things", kept.getData("url"))
+            if ("method" in keys) assertEquals(label, "GET", kept.getData("method"))
+            if ("status_code" in keys) assertEquals(label, 200, kept.getData("status_code"))
+            assertFalse(label, kept.data.toString().contains(canary))
+        }
+    }
+
+    @Test
     fun `TP-13_8 (B-8) a navigation breadcrumb keeps no data (from and to are dropped)`() {
         val crumb = Breadcrumb().apply {
             type = "navigation"
