@@ -383,13 +383,19 @@ write_marker() {
 
 # ---- TP-15.47 (A-502 (2)): a failed start stops at once; never-started containers are recreated ----
 
-# Compose calls of one project (main or capture), each reduced to a label, in order.
-project_steps() {
-  awk -F'\t' -v p="budmon-$1" '
-    $1=="docker" && $3 ~ ("-p " p " ") {
-      if ($3 ~ / ps -a --status created --services/) print "created?"
+# Compose calls of one project (main or capture), each reduced to a label, in order: `created?`,
+# `rm` and `up` wherever they are, plus every other call of that project from each `created?` to
+# the next `up`: `exited?` and `inspect` (A-507's unstarted_services calls), or `other: <arguments>`.
+window_steps() {
+  awk -F'\t' -v p="budmon-$1" -v id="cid-$1-" '
+    $1 != "docker" { next }
+    $3 ~ /^container inspect / { if (index($3, id) && inwin) print "inspect"; next }
+    $3 ~ ("-p " p " ") {
+      if ($3 ~ / ps -a --status created --services/) { print "created?"; inwin = 1 }
       else if ($3 ~ / rm -f /) print "rm"
-      else if ($3 ~ / up -d( |$)/ && $3 !~ / migrate/) print "up"
+      else if ($3 ~ / up -d( |$)/ && $3 !~ / migrate/) { print "up"; inwin = 0 }
+      else if (inwin && $3 ~ / ps -a --status exited -q/) print "exited?"
+      else if (inwin) print "other: " $3
     }' "${CALLS}"
 }
 
@@ -441,7 +447,7 @@ first_release() {
   [[ "${stderr}" == *"starting v1.2.0 failed and starting v1.1.0 again failed: run budmon-local start"* ]] || { echo "${stderr}"; return 1; }
 }
 
-@test "TP-15.47 (f): a never-started mailpit is removed before main's up -d (phase B --first, then start); capture lists none; no rm has -v" {
+@test "TP-15.47 (f): a never-started mailpit is removed before main's up -d (phase B --first, then start), with only unstarted_services' calls and the rm between; capture lists none; no rm has -v" {
   first_release
   export CREATED_main=mailpit
   BUDMON_REEXEC=1 run "${BUDMON_HOME}/releases/v1.0.0/budmon-local" _upgrade-continue v1.0.0 --no-dump --first
@@ -450,10 +456,18 @@ first_release() {
   assert_success
 
   # Per start: main asks for created services, removes them, then starts; capture asks, then starts.
-  run project_steps main
-  [ "$(tr '\n' ' ' <<<"${output}")" = "created? rm up created? rm up " ] || { echo "main: ${output}"; return 1; }
-  run project_steps capture
-  [ "$(tr '\n' ' ' <<<"${output}")" = "created? up created? up " ] || { echo "capture: ${output}"; return 1; }
+  # Between the two, only unstarted_services' other calls (A-507: exited?, inspect) and the rm.
+  local project expected
+  for project in main capture; do
+    expected="created? rm up created? rm up "
+    [ "${project}" = capture ] && expected="created? up created? up "
+    run window_steps "${project}"
+    refute_output --partial "other: "
+    [ "$(grep -v -x -e 'exited?' -e inspect <<<"${output}" | tr '\n' ' ')" = "${expected}" ] || {
+      echo "${project}: ${output}"
+      return 1
+    }
+  done
   run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ / rm -f/' '${CALLS}'"
   [ "${#lines[@]}" -eq 2 ] || { echo "${output}"; return 1; }
   for line in "${lines[@]}"; do
@@ -491,4 +505,104 @@ first_release() {
   BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.2.0/budmon-local" start
   assert_failure 31
   [[ "${stderr}" == *"starting v1.2.0 failed: docker compose up -d for budmon-main exited 1 (Compose's message is above)"* ]] || { echo "${stderr}"; return 1; }
+}
+
+# ---- TP-15.47 (j) (A-507 (1)): containers whose last start failed are removed before up -d ----
+
+# The start calls of both projects, in order, as "<project> <label>".
+stack_calls() {
+  awk -F'\t' '
+    $1 != "docker" { next }
+    $3 ~ /^container inspect / {
+      # The IDs must be the trailing arguments; an ID before a non-ID argument shows as "inspect-misplaced".
+      n = split($3, a, " "); first = n + 1
+      while (first > 1 && index(a[first - 1], "cid-") == 1) first--
+      ids = ""; p = ""
+      for (i = first; i <= n; i++) ids = ids " " a[i]
+      for (i = 1; i < first; i++) if (index(a[i], "cid-") == 1) ids = ids " inspect-misplaced"
+      if (first <= n) { p = a[first]; sub(/^cid-/, "", p); sub(/-.*/, "", p) }
+      print p " inspect" ids
+      next
+    }
+    match($3, /-p budmon-(main|capture) /) {
+      p = substr($3, RSTART + 10, RLENGTH - 11)
+      if ($3 ~ / ps -a --status created --services/) print p " created?"
+      else if ($3 ~ / ps -a --status exited -q/) print p " exited?"
+      else if (match($3, / rm -f .*/)) print p " rm" substr($3, RSTART + 6)
+      else if ($3 ~ / stop( |$)/) print p " stop"
+      else if ($3 ~ / up -d( |$)/ && $3 !~ / migrate/) print p " up"
+    }' "${CALLS}"
+}
+
+calls_of_project() {
+  stack_calls | awk -v p="$1" '$1 == p { $1 = ""; sub(/^ /, ""); print }'
+}
+
+joined() { tr '\n' '|' <<<"$1"; }
+
+STOPPED_FOUR="api worker-general postgres mailpit"
+
+@test "TP-15.47 (j): start with a failed caddy: main lists created, lists exited, inspects the five IDs, removes caddy only, then up; capture inspects and starts without rm" {
+  write_state v1.2.0 v1.1.0
+  export FAILED_main=caddy STOPPED_main="${STOPPED_FOUR}" STOPPED_capture=worker-capture
+  BUDMON_REEXEC=1 run "${BUDMON_HOME}/releases/v1.2.0/budmon-local" start
+  assert_success
+  run calls_of_project main
+  [ "$(joined "${output}")" = "created?|exited?|inspect cid-main-caddy cid-main-api cid-main-worker-general cid-main-postgres cid-main-mailpit|rm caddy|up|" ] || { echo "main: ${output}"; return 1; }
+  run calls_of_project capture
+  [ "$(joined "${output}")" = "created?|exited?|inspect cid-capture-worker-capture|up|" ] || { echo "capture: ${output}"; return 1; }
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ / rm /' '${CALLS}'"
+  [ "${#lines[@]}" -eq 1 ] || { echo "${output}"; return 1; }
+  [[ "${lines[0]}" != *" -v"* && "${lines[0]}" != *" -s"* ]] || { echo "${lines[0]}"; return 1; }
+}
+
+@test "TP-15.47 (j2): start after stop (every container exited without a start error): no rm at all" {
+  write_state v1.2.0 v1.1.0
+  export STOPPED_main="caddy ${STOPPED_FOUR}" STOPPED_capture=worker-capture
+  BUDMON_REEXEC=1 run "${BUDMON_HOME}/releases/v1.2.0/budmon-local" start
+  assert_success
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ / rm /' '${CALLS}'"
+  assert_output ""
+}
+
+@test "TP-15.47 (j3): restart with a failed mailpit: capture stops, then main, then main and capture start as in (j) with rm -f mailpit" {
+  write_state v1.2.0 v1.1.0
+  export FAILED_main=mailpit STOPPED_main="caddy api worker-general postgres" STOPPED_capture=worker-capture
+  BUDMON_REEXEC=1 run "${BUDMON_HOME}/releases/v1.2.0/budmon-local" restart
+  assert_success
+  run stack_calls
+  [ "$(joined "${output}")" = "capture stop|main stop|main created?|main exited?|main inspect cid-main-mailpit cid-main-caddy cid-main-api cid-main-worker-general cid-main-postgres|main rm mailpit|main up|capture created?|capture exited?|capture inspect cid-capture-worker-capture|capture up|" ] || {
+    echo "calls: ${output}"
+    return 1
+  }
+}
+
+@test "TP-15.47 (j4): a created mailpit and a failed caddy are removed by one rm -f mailpit caddy" {
+  write_state v1.2.0 v1.1.0
+  export CREATED_main=mailpit FAILED_main=caddy
+  BUDMON_REEXEC=1 run "${BUDMON_HOME}/releases/v1.2.0/budmon-local" start
+  assert_success
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ / rm /' '${CALLS}'"
+  [ "${#lines[@]}" -eq 1 ] || { echo "${output}"; return 1; }
+  [[ "${lines[0]}" == *"-p budmon-main "*" rm -f mailpit caddy	"* ]] || { echo "${lines[0]}"; return 1; }
+}
+
+@test "TP-15.47 (j5a): ps -a --status exited -q failing: no inspect, no rm, main's up -d runs, exit 0" {
+  write_state v1.2.0 v1.1.0
+  export FAILED_main=caddy EXITED_PS_FAIL=1
+  BUDMON_REEXEC=1 run "${BUDMON_HOME}/releases/v1.2.0/budmon-local" start
+  assert_success
+  run bash -c "awk -F'\t' '\$1==\"docker\" && (\$3 ~ /^container inspect / || \$3 ~ / rm /)' '${CALLS}'"
+  assert_output ""
+  run calls_of_project main
+  assert_line "up"
+}
+
+@test "TP-15.47 (j5b): container inspect printing its lines then exiting 1: rm -f caddy all the same, exit 0" {
+  write_state v1.2.0 v1.1.0
+  export FAILED_main=caddy INSPECT_EXIT=1
+  BUDMON_REEXEC=1 run "${BUDMON_HOME}/releases/v1.2.0/budmon-local" start
+  assert_success
+  run calls_of_project main
+  assert_line "rm caddy"
 }

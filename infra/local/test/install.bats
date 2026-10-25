@@ -602,6 +602,14 @@ assert_s3_rejected_then_eof() {
   [ "$(tr '\n' ' ' <<<"${output}")" = "rm-postgres up-postgres FIRST_SETUP=1 " ] || { echo "${output}"; return 1; }
 }
 
+@test "TP-15.47 (j6): install step 11 removes a postgres whose last start failed before its first-setup up -d, and runs no other rm" {
+  placeholder_ready_home
+  export FAILED_main=postgres CREATED_main="" UP_EXIT_main=1 UP_EXIT_MATCH="* up -d postgres *"
+  run --separate-stderr "${SCRIPT}" install v1.0.0
+  run bash -c "awk -F'\t' '\$1==\"docker\" && (\$3 ~ / rm / || \$3 ~ / up -d postgres/) { print (\$3 ~ / rm -f postgres\$/ ? \"rm-postgres\" : (\$3 ~ / rm / ? \"rm-other: \" \$3 : \"up-postgres \" \$NF)) }' '${CALLS}'"
+  [ "$(tr '\n' ' ' <<<"${output}")" = "rm-postgres up-postgres FIRST_SETUP=1 " ] || { echo "${output}"; return 1; }
+}
+
 # ---- TP-15.50 (A-502 (4)): install reports a maintenance flag set before it ----
 
 @test "TP-15.50: install with maintenance/on already present exits 0, ends with the tailscale serve line then the maintenance notice, and keeps the flag" {

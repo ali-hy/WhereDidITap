@@ -204,7 +204,8 @@ stub_git() {
 }
 CONF
   run --separate-stderr "${SCRIPT}" upgrade v1.3.0
-  [ "${status}" -ne 30 ] || { echo "upgrade: ${stderr}"; return 1; }
+  # Exit 0 (A-507), so phase B ran to the end and made its own git calls.
+  [ "${status}" -eq 0 ] || { echo "upgrade: exit ${status}: ${stderr}"; return 1; }
   [ -f "${BATS_TEST_TMPDIR}/daemon.pid" ] && kill -0 "$(cat "${BATS_TEST_TMPDIR}/daemon.pid")" || {
     echo "the stand-in daemon isn't running"
     return 1
@@ -212,7 +213,7 @@ CONF
 
   run cat "${CALLS}.git-fd9"
   local subcommand
-  for subcommand in fetch remote merge-base worktree rev-parse; do
+  for subcommand in fetch remote merge-base worktree rev-parse rev-list; do
     assert_line --regexp "^${subcommand} fd9="
   done
   refute_output --partial "fd9=open"

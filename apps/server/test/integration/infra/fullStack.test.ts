@@ -1238,6 +1238,21 @@ describe.skipIf(!INFRA_INT)("TP-15.48: install with a taken port, then resumed (
       .map((l) => l.trim())
       .filter((l) => l !== "");
 
+  /**
+   * A-504: Compose's bind error names the held address; Docker's wording depends on what holds the
+   * port (another container, or a host process as here).
+   */
+  const bindErrorLine = (stderr: string, port: number) => {
+    const held = `127.0.0.1:${String(port)}`;
+    return stderr
+      .split("\n")
+      .find(
+        (line) =>
+          line.includes(held) &&
+          (line.includes("port is already allocated") || line.includes("address already in use")),
+      );
+  };
+
   async function caseFor(port: 8025 | 8080): Promise<void> {
     const prepared = prepare();
     let listener: ChildProcess | undefined;
@@ -1250,17 +1265,7 @@ describe.skipIf(!INFRA_INT)("TP-15.48: install with a taken port, then resumed (
       expect(failed.status, `${failed.stdout}${failed.stderr}`).toBe(31);
       expect(seconds).toBeLessThan(60);
       expect(failed.stderr).toContain("budmon-main");
-      // A-504: Compose's bind error names the held address; Docker's wording depends on what
-      // holds the port (another container, or a host process as here).
-      const held = `127.0.0.1:${String(port)}`;
-      const bindError = failed.stderr
-        .split("\n")
-        .find(
-          (line) =>
-            line.includes(held) &&
-            (line.includes("port is already allocated") || line.includes("address already in use")),
-        );
-      expect(bindError, failed.stderr).toBeDefined();
+      expect(bindErrorLine(failed.stderr, port), failed.stderr).toBeDefined();
       expect(existsSync(path.join(prepared.home, "install.inprogress"))).toBe(true);
 
       listener.kill("SIGKILL");
@@ -1298,5 +1303,88 @@ describe.skipIf(!INFRA_INT)("TP-15.48: install with a taken port, then resumed (
 
   it("TP-15.48 (b): the same with 127.0.0.1:8080 held, from a fresh home: caddy is published and serves version.json", async () => {
     await caseFor(8080);
+  }, 1_800_000);
+
+  // TP-15.57 (A-507 (1)): `start` after `stop` with 127.0.0.1:8025 taken leaves mailpit `exited`
+  // with a start error (not `created`); once the port is free, the next `start` removes and
+  // recreates mailpit only, and the containers `stop` left keep their IDs.
+  it("TP-15.57: start after stop with 127.0.0.1:8025 held exits 31 and leaves mailpit exited with a start error; freed, start again exits 0, recreating mailpit only", async () => {
+    const prepared = prepare();
+    let listener: ChildProcess | undefined;
+    try {
+      const installed = prepared.run(["install", TAG]);
+      if (installed.status !== 0)
+        throw new Error(`install 2: ${String(installed.status)} ${installed.stderr}`);
+
+      const services = [
+        ["main", "caddy"],
+        ["main", "api"],
+        ["main", "worker-general"],
+        ["main", "postgres"],
+        ["main", "mailpit"],
+        ["capture", "worker-capture"],
+      ] as const;
+      const containerIds = () =>
+        Object.fromEntries(
+          services.map(([project, service]) => [
+            service,
+            stack(prepared.home, project, ["ps", "-a", "-q", service]).stdout.trim(),
+          ]),
+        );
+      const recorded = containerIds();
+      for (const [, service] of services)
+        if (recorded[service] === "") throw new Error(`no ${service} container after install`);
+
+      // (1)
+      const stopped = prepared.run(["stop"]);
+      if (stopped.status !== 0)
+        throw new Error(`stop: ${String(stopped.status)} ${stopped.stderr}`);
+
+      // (2), (3)
+      listener = await hold(8025);
+      const started = Date.now();
+      const failed = prepared.run(["start"]);
+      const seconds = (Date.now() - started) / 1_000;
+      expect(failed.status, `${failed.stdout}${failed.stderr}`).toBe(31);
+      expect(seconds).toBeLessThan(60);
+      expect(failed.stderr).toContain("budmon-main");
+      expect(bindErrorLine(failed.stderr, 8025), failed.stderr).toBeDefined();
+
+      // (4)
+      const inspected = sh("docker", ["container", "inspect", "budmon-main-mailpit-1"]);
+      expect(inspected.status, inspected.stderr).toBe(0);
+      const [mailpit] = JSON.parse(inspected.stdout) as [
+        { State: { Status: string; Error: string } },
+      ];
+      expect(mailpit.State.Status).toBe("exited");
+      expect(mailpit.State.Error).not.toBe("");
+
+      // (5), (6)
+      listener.kill("SIGKILL");
+      listener = undefined;
+      await new Promise((r) => setTimeout(r, 500));
+      const restarted = prepared.run(["start"]);
+      expect(restarted.status, `${restarted.stdout}${restarted.stderr}`).toBe(0);
+      expect(stack(prepared.home, "main", ["port", "mailpit", "8025"]).stdout.trim()).toBe(
+        "127.0.0.1:8025",
+      );
+      const probe = sh("curl", ["-fsS", "http://127.0.0.1:8025/"]);
+      expect(probe.status, probe.stderr).toBe(0);
+      expect(
+        lines(stack(prepared.home, "main", ["ps", "--status", "running", "--services"]).stdout),
+      ).toEqual(expect.arrayContaining(["caddy", "api", "worker-general", "postgres", "mailpit"]));
+      expect(
+        lines(stack(prepared.home, "capture", ["ps", "--status", "running", "--services"]).stdout),
+      ).toContain("worker-capture");
+
+      const after = containerIds();
+      expect(after.mailpit).not.toBe("");
+      expect(after.mailpit).not.toBe(recorded.mailpit);
+      for (const service of ["caddy", "api", "worker-general", "postgres", "worker-capture"])
+        expect(after[service], service).toBe(recorded[service]);
+    } finally {
+      listener?.kill("SIGKILL");
+      remove(prepared.work);
+    }
   }, 1_800_000);
 });

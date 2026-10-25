@@ -134,6 +134,13 @@ fill_placeholders() {
 #   PORT_CADDY, PORT_MAILPIT        what `port caddy 8080` / `port mailpit 8025` print
 #                                   (default 127.0.0.1:8080 / 127.0.0.1:8025; set empty for nothing)
 #   PORT_MAILPIT_EMPTY_FOR=n        `port mailpit 8025` prints nothing for the first n calls
+#   FAILED_main, FAILED_capture     A-507: services whose container is `exited` with a start error;
+#   STOPPED_main, STOPPED_capture   and those `exited` by `stop`. `ps -a --status exited -q` lists
+#                                   one ID per service (FAILED_ first, then STOPPED_), `cid-<p>-<s>`;
+#                                   `container inspect` prints, per ID argument, the service for a
+#                                   FAILED_ ID and an empty line for a STOPPED_ one (default: none)
+#   EXITED_PS_FAIL=1                that `ps -a --status exited -q` prints nothing and exits 1
+#   INSPECT_EXIT                    `container inspect`'s exit status after printing (default 0)
 #   UP_EXIT_main, UP_EXIT_capture   exit status of that project's `up -d` (default 0), optionally
 #   UP_EXIT_MATCH                   only for calls whose " <arguments> " match this glob; a non-zero
 #                                   status prints Compose's port-allocated message on stderr
@@ -150,6 +157,28 @@ stack_answer() {
       local created_var="CREATED_${project}"
       local s
       for s in ${!created_var:-}; do echo "${s}"; done
+      return 0
+      ;;
+    *" ps -a --status exited -q "*)
+      if [ "${EXITED_PS_FAIL:-0}" = 1 ]; then
+        STACK_EXIT=1
+        return 0
+      fi
+      local failed_var="FAILED_${project}" stopped_var="STOPPED_${project}" s
+      for s in ${!failed_var:-} ${!stopped_var:-}; do echo "cid-${project}-${s}"; done
+      return 0
+      ;;
+    *" container inspect "*)
+      local a id_project id_service failed_list
+      for a in "$@"; do
+        [[ "${a}" == cid-* ]] || continue
+        id_project="${a#cid-}"
+        id_project="${id_project%%-*}"
+        id_service="${a#cid-"${id_project}"-}"
+        failed_list="FAILED_${id_project}"
+        if [[ " ${!failed_list:-} " == *" ${id_service} "* ]]; then echo "${id_service}"; else echo ""; fi
+      done
+      STACK_EXIT="${INSPECT_EXIT:-0}"
       return 0
       ;;
     *" ps --status running --services "*)
