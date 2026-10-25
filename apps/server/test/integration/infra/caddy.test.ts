@@ -1,6 +1,8 @@
 // The laptop's Caddy (F-175 Caddyfile) in the web image: maintenance answers, the API proxy, SPA
 // and asset caching, headers on every response, an access log without query strings, canaries or
-// headers (A-4), and no TLS (auto_https off). TP-15.13.
+// headers (A-4), and no TLS (auto_https off). TP-15.13. A-502 (6): the API owns the security headers
+// of the responses it sends, Caddy those of its own, each once (TP-15.52 (a)); A-502 (7): paths the
+// laptop never serves are 404 (TP-15.53).
 //
 // The web image runs as Compose's caddy service. A-394: the stub API is the server image running an
 // inline Node HTTP server on :3000 (alias `api`, the Caddyfile's upstream) that answers every request
@@ -8,6 +10,7 @@
 // exactly what Caddy forwards. A-391: runs in the infra-int job (`pnpm test:infra`), skipped
 // elsewhere.
 import { rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { get } from "node:http";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildImage, compose, INFRA_INT, laptopHome, sh, TEST_TAG } from "./support.js";
@@ -21,15 +24,29 @@ const CSP =
 const MAINT_BODY =
   '{"defined":true,"code":"SERVICE_UNAVAILABLE","status":503,"message":"Service unavailable","data":{"outcome":"not_applied"}}';
 
-/** A-394: the stub API, about 20 lines of Node; one stdout line per request. */
+/** TP-15.52: the headers the stub API sends on paths under /api/v1/h/ (F-61's shape). */
+const API_HEADERS = {
+  "content-security-policy": "default-src 'none';frame-ancestors 'none'",
+  "strict-transport-security": "max-age=31536000; includeSubDomains",
+  "referrer-policy": "no-referrer",
+  "x-content-type-options": "nosniff",
+  "cross-origin-resource-policy": "same-origin",
+};
+
+/**
+ * A-394: the stub API, about 20 lines of Node; one stdout line per request. TP-15.52: paths under
+ * /api/v1/h/ also carry API_HEADERS; other paths none of them.
+ */
 const STUB_SERVER = `
 const http = require("node:http");
+const API_HEADERS = ${JSON.stringify(API_HEADERS)};
 http
   .createServer((req, res) => {
     process.stdout.write("REQ " + req.method + " " + req.url + "\\n");
     req.resume();
     req.on("end", () => {
-      res.writeHead(200, { "content-type": "application/json" });
+      const extra = req.url.startsWith("/api/v1/h/") ? API_HEADERS : {};
+      res.writeHead(200, { "content-type": "application/json", ...extra });
       res.end('{"stub":true}');
     });
   })
@@ -97,7 +114,8 @@ const flag = () => path.join(home, "maintenance/on");
 
 function expectHeaders(res: Response): void {
   expect(res.headers.get("content-security-policy")).toBe(CSP);
-  expect(res.headers.get("strict-transport-security")).toBe("max-age=31536000");
+  // A-502 (6): F-61's value, so the browser's stored policy doesn't depend on the response.
+  expect(res.headers.get("strict-transport-security")).toBe("max-age=31536000; includeSubDomains");
   expect(res.headers.get("referrer-policy")).toBe("no-referrer");
   expect(res.headers.get("x-content-type-options")).toBe("nosniff");
 }
@@ -107,6 +125,56 @@ const stubRequests = (since: string) => {
   const r = sh("docker", ["logs", "--since", since, STUB]);
   return `${r.stdout}${r.stderr}`;
 };
+
+interface RawResponse {
+  status: number;
+  body: string;
+  /** Node's rawHeaders: name, value, name, value, … as they came off the wire. */
+  raw: string[];
+}
+
+/** A GET through Caddy, keeping the raw header list so duplicates can be counted. */
+function rawGet(urlPath: string): Promise<RawResponse> {
+  return new Promise((resolve, reject) => {
+    const req = get({ host: "127.0.0.1", port: 8080, path: urlPath }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk: string) => (body += chunk));
+      res.on("end", () => {
+        resolve({ status: res.statusCode ?? 0, body, raw: res.rawHeaders });
+      });
+    });
+    req.on("error", reject);
+  });
+}
+
+/** Every value of header `name` (case-insensitive) in a raw header list. */
+function values(raw: readonly string[], name: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i + 1 < raw.length; i += 2) {
+    if ((raw[i] ?? "").toLowerCase() === name) out.push(raw[i + 1] ?? "");
+  }
+  return out;
+}
+
+const SECURITY = [
+  "strict-transport-security",
+  "content-security-policy",
+  "referrer-policy",
+  "x-content-type-options",
+] as const;
+
+/** Caddy's own four, once each, and no Cross-Origin-Resource-Policy (TP-15.52). */
+function expectCaddyHeadersOnce(r: RawResponse, label: string): void {
+  for (const name of SECURITY) expect(values(r.raw, name), `${label} ${name}`).toHaveLength(1);
+  expect(values(r.raw, "strict-transport-security"), label).toEqual([
+    "max-age=31536000; includeSubDomains",
+  ]);
+  expect(values(r.raw, "referrer-policy"), label).toEqual(["no-referrer"]);
+  expect(values(r.raw, "x-content-type-options"), label).toEqual(["nosniff"]);
+  expect(values(r.raw, "content-security-policy"), label).toEqual([CSP]);
+  expect(values(r.raw, "cross-origin-resource-policy"), label).toEqual([]);
+}
 
 describe.skipIf(!INFRA_INT)("TP-15.13: Caddy on the laptop (F-175)", () => {
   it('TP-15.13: with the maintenance flag, /api/* is the exact 503 envelope with Retry-After 120, and /health/ready is {"status":"maintenance"} 503', async () => {
@@ -219,5 +287,104 @@ describe.skipIf(!INFRA_INT)("TP-15.13: Caddy on the laptop (F-175)", () => {
     const r = sh("curl", ["-k", "-sS", "--max-time", "10", "https://127.0.0.1:8080/"]);
 
     expect(r.status).not.toBe(0);
+  });
+});
+
+// A-502 (6): the API owns the headers of its responses and Caddy those of its own, each once.
+describe.skipIf(!INFRA_INT)(
+  "TP-15.52 (a): security headers appear once on every response (F-175, F-61)",
+  () => {
+    it("TP-15.52 (a): /api/v1/h/x carries the API's four headers (and CORP) once each, none of Caddy's", async () => {
+      const r = await rawGet("/api/v1/h/x");
+
+      expect(r.status).toBe(200);
+      for (const name of SECURITY) expect(values(r.raw, name), name).toEqual([API_HEADERS[name]]);
+      expect(values(r.raw, "cross-origin-resource-policy")).toEqual(["same-origin"]);
+    });
+
+    it.each([
+      ["/api/v1/x"],
+      ["/health/ready"],
+      ["/"],
+      ["/some/route"],
+      ["/version.json"],
+      ["/assets/a.js"],
+      ["/assets/missing.js"],
+      ["/.env"],
+    ])("TP-15.52 (a): %s carries Caddy's four headers once each, and no CORP", async (urlPath) => {
+      expectCaddyHeadersOnce(await rawGet(urlPath), urlPath);
+    });
+
+    it("TP-15.52 (a): with the maintenance flag, /api/v1/h/x and /health/ready carry Caddy's four headers once each", async () => {
+      writeFileSync(flag(), "");
+      try {
+        for (const urlPath of ["/api/v1/h/x", "/health/ready"]) {
+          const r = await rawGet(urlPath);
+          expect(r.status, urlPath).toBe(503);
+          expectCaddyHeadersOnce(r, urlPath);
+        }
+      } finally {
+        unlinkSync(flag());
+      }
+    });
+  },
+);
+
+// A-502 (7): Caddy answers 404 for paths the laptop never serves, before the SPA fallback.
+describe.skipIf(!INFRA_INT)("TP-15.53: paths the laptop never serves are 404 (F-175)", () => {
+  const NOT_SERVED = [
+    "/health/live",
+    "/health",
+    "/health/other",
+    "/dev",
+    "/dev/objects/x",
+    "/.env",
+    "/.git/config",
+    "/a/.hidden",
+    "/.well-known/x",
+  ];
+
+  it.each(NOT_SERVED.map((p) => [p]))(
+    "TP-15.53: %s is 404 with an empty body and no-store, not index.html, and never reaches the API",
+    async (urlPath) => {
+      const since = new Date(Date.now() - 1_000).toISOString();
+
+      const r = await rawGet(urlPath);
+
+      expect(r.status).toBe(404);
+      expect(r.body).toBe("");
+      expect(values(r.raw, "cache-control")).toEqual(["no-store"]);
+      expect(r.body).not.toMatch(/<div id="root"/);
+      const lines = stubRequests(since)
+        .split("\n")
+        .map((l) => l.trim());
+      expect(lines).not.toContain(`REQ GET ${urlPath}`);
+    },
+  );
+
+  it("TP-15.53: with the maintenance flag, /health/live is still 404 (not 503)", async () => {
+    writeFileSync(flag(), "");
+    try {
+      const r = await rawGet("/health/live");
+      expect(r.status).toBe(404);
+      expect(r.body).toBe("");
+    } finally {
+      unlinkSync(flag());
+    }
+  });
+
+  it("TP-15.53: controls: /health/ready and /api/v1/x reach the API; /healthy and /some/route serve index.html", async () => {
+    const since = new Date(Date.now() - 1_000).toISOString();
+
+    expect((await rawGet("/health/ready")).status).toBe(200);
+    expect((await rawGet("/api/v1/x")).status).toBe(200);
+    const forwarded = stubRequests(since);
+    expect(forwarded).toContain("REQ GET /health/ready");
+    expect(forwarded).toContain("REQ GET /api/v1/x");
+    for (const urlPath of ["/healthy", "/some/route"]) {
+      const r = await rawGet(urlPath);
+      expect(r.status, urlPath).toBe(200);
+      expect(r.body, urlPath).toMatch(/<div id="root"/);
+    }
   });
 });

@@ -169,7 +169,7 @@ describe("TP-3.14: the real Sentry SDK", () => {
   });
 
   // A-502 (1): error events only; no sessions and no client reports.
-  it("TP-3.14 (e): nothing is sent before a report; one report sends one envelope holding only an event, with no user agent; the options turn client reports and default integrations off", async () => {
+  it("TP-3.14 (e): nothing is sent before a report; one report sends one envelope holding only an event, with no user agent; the options turn client reports, default integrations and span streaming off", async () => {
     const sentry = await server();
     const reporter = initSentry({ ...CFG, dsn: sentry.dsn });
 
@@ -192,6 +192,8 @@ describe("TP-3.14: the real Sentry SDK", () => {
     const options = Sentry.getClient()?.getOptions();
     expect(options?.sendClientReports).toBe(false);
     expect((options as Record<string, unknown> | undefined)?.["defaultIntegrations"]).toBe(false);
+    // A-503: a static trace lifecycle, so the client doesn't add SpanStreaming.
+    expect((options as Record<string, unknown> | undefined)?.["traceLifecycle"]).toBe("static");
     expect((options?.integrations ?? []).map((i) => i.name).sort()).toEqual(
       ["LinkedErrors", "OnUncaughtException", "OnUnhandledRejection"].sort(),
     );

@@ -19,9 +19,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createHash, createHmac, generateKeyPairSync, pbkdf2Sync, randomBytes } from "node:crypto";
+import { get as httpGet } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { SECURITY_HEADERS } from "../../../src/platform/security/headers.js";
 import { generateBaseline, serverFixture } from "../../support/s14.js";
 import {
   buildImage,
@@ -760,6 +762,47 @@ describe.skipIf(!INFRA_INT)("TP-15.22 (I): install and restore on a real runner 
     }
     for (const state of current) expect(state).toMatch(/ running (healthy|none)$/);
   }, 120_000);
+
+  // A-502 (6): on the installed stack, each security header appears once: the API's on its own
+  // responses, Caddy's on the SPA.
+  it("TP-15.52 (b): /api/v1/meta/client-config carries F-61's four headers once each; / carries Caddy's", async () => {
+    const security = [
+      "strict-transport-security",
+      "content-security-policy",
+      "referrer-policy",
+      "x-content-type-options",
+    ] as const;
+    const raw = (urlPath: string) =>
+      new Promise<string[]>((resolve, reject) => {
+        const req = httpGet({ host: "127.0.0.1", port: 8080, path: urlPath }, (res) => {
+          res.resume();
+          res.on("end", () => {
+            resolve(res.rawHeaders);
+          });
+        });
+        req.on("error", reject);
+      });
+    const values = (headers: readonly string[], name: string) => {
+      const out: string[] = [];
+      for (let i = 0; i + 1 < headers.length; i += 2) {
+        if ((headers[i] ?? "").toLowerCase() === name) out.push(headers[i + 1] ?? "");
+      }
+      return out;
+    };
+
+    const api = await raw("/api/v1/meta/client-config");
+    for (const name of security) {
+      expect(values(api, name), name).toEqual([SECURITY_HEADERS[name]]);
+    }
+    const spa = await raw("/");
+    for (const name of security) expect(values(spa, name), name).toHaveLength(1);
+    expect(values(spa, "strict-transport-security")).toEqual([
+      "max-age=31536000; includeSubDomains",
+    ]);
+    expect(values(spa, "referrer-policy")).toEqual(["no-referrer"]);
+    expect(values(spa, "x-content-type-options")).toEqual(["nosniff"]);
+    expect(values(spa, "content-security-policy")[0]).toMatch(/^default-src 'self'/);
+  }, 60_000);
 
   it("TP-15.22 (I1): Postgres starts with its TLS key owned by 999", () => {
     const owner = sh("sudo", [

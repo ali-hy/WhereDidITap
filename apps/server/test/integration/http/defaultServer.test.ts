@@ -51,6 +51,18 @@ describe("TP-4.7: GET /api/v1/meta/client-config", () => {
     expect(String(res.headers["x-request-id"])).toMatch(/^[0-9a-f]{32}$/);
     expect(res.headers["x-budmon-api-version"]).toBe(API_VERSION);
   });
+
+  // A-502 (8): oRPC's router ignores one trailing "/", accepted as defined behaviour (§5.2).
+  it("TP-4.7 (A-502): with one trailing /, 200 with the same body, X-Budmon-API-Version and a 32-hex X-Request-Id", async () => {
+    const plain = await injectJson(app, "GET", "/api/v1/meta/client-config");
+    const slash = await injectJson(app, "GET", "/api/v1/meta/client-config/");
+
+    expect(slash.status).toBe(200);
+    expect(slash.json()).toEqual(plain.json());
+    expect(slash.headers["x-budmon-api-version"]).toBe(API_VERSION);
+    expect(slash.headers["x-budmon-api-version"]).toBe(plain.headers["x-budmon-api-version"]);
+    expect(String(slash.headers["x-request-id"])).toMatch(/^[0-9a-f]{32}$/);
+  });
 });
 
 describe("TP-4.14: no CORS", () => {

@@ -56,7 +56,7 @@ interface Service {
     bind?: { create_host_path?: boolean };
   }[];
   profiles?: string[];
-  logging?: { driver?: string };
+  logging?: { driver?: string; options?: Record<string, unknown> };
   extra_hosts?: string[] | Record<string, string>;
   healthcheck?: { test?: string[]; interval?: string; retries?: number };
 }
@@ -620,6 +620,26 @@ describe("TP-15.33x: F-175 per-service settings (main project)", () => {
       "egress",
     ]);
     expect(Object.keys(svc(main, "migrate").networks ?? {}).sort()).toEqual(["data"]);
+  });
+});
+
+// A-502 (5): every container's logs are bounded (json-file, 10 MB x 5); Mailpit logs nothing.
+describe("TP-15.51: Compose logging (A-502 (5))", () => {
+  const BOUNDED = { driver: "json-file", options: { "max-size": "10m", "max-file": "5" } };
+
+  it.each([["caddy"], ["api"], ["worker-general"], ["migrate"], ["postgres"]])(
+    "TP-15.51: main's %s logs through json-file, max-size 10m, max-file 5",
+    (name) => {
+      expect(svc(main, name).logging).toStrictEqual(BOUNDED);
+    },
+  );
+
+  it("TP-15.51: capture's worker-capture logs through json-file, max-size 10m, max-file 5", () => {
+    expect(svc(capture, "worker-capture").logging).toStrictEqual(BOUNDED);
+  });
+
+  it("TP-15.51: mailpit's logging is exactly driver none", () => {
+    expect(svc(main, "mailpit").logging).toStrictEqual({ driver: "none" });
   });
 });
 
