@@ -38,10 +38,13 @@ function checkedTags(tags: Json): Json {
   const out: Json = {};
   const route = str(tags["route"]);
   if (route !== undefined) {
-    // A-499: route keeps A-112's drop-on-failure rule; a non-path never becomes "/".
+    // A-499 (2), A-500 (3): A-112's drop-on-failure rule; a non-path never becomes "/". The
+    // pattern's reduction is written (the parser would encode a template's `{id}`), and only when
+    // it removed exactly the scheme and authority the URL parser reads.
     const part = pathPart(route);
     const value = part === "" ? "/" : part;
-    if (isRoute(value)) out["route"] = value;
+    const parsed = httpPath(route);
+    if (parsed !== null && isRoute(value) && httpPath(value) === parsed) out["route"] = value;
   }
   const job = str(tags["job"]);
   if (job !== undefined && JOB_NAME.test(job)) out["job"] = job;
@@ -81,21 +84,51 @@ function stripQuery(url: string): string {
 
 /**
  * A-495 (1) (a), (b): the URL without its query and fragment and without the leading run of
- * `scheme:` parts and an optional `//authority`. May be empty or not a path.
+ * `scheme:` parts and an optional `//authority`, by pattern. May be empty or not a path. Used only
+ * by `checkedTags`' route rule (A-500 (3)), which also checks it against `httpPath`.
  */
 function pathPart(url: string): string {
   return stripQuery(url).replace(/^(?:[A-Za-z][A-Za-z0-9+.-]*:)*(?:\/\/[^/]*)?/, "");
 }
 
 /**
- * F-217: a URL "stripped to the path", so the tailnet host never reaches Sentry: no query or
- * fragment, no scheme, host or port, and (A-499) anything that isn't a path starting with `/`
- * (an opaque `data:`/`mailto:` payload, a host without a scheme, a relative reference, or
- * nothing) becomes `/`. Never throws.
+ * A-500 (2): the path of an `http`/`https` URL as the WHATWG URL parser (the one fetch, XHR and
+ * history use) reads it, or null. An absolute URL parses on its own; a reference that starts
+ * with `/` (root- or scheme-relative) parses against a reserved base whose host never appears in
+ * the result; anything else is null. A `blob:` URL is replaced by its inner URL once, so
+ * `blob:blob:…` is null. The result starts with `/` and is the parser's serialisation (dot
+ * segments resolved, percent-encoded). Never throws.
+ */
+function httpPath(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    if (!url.startsWith("/")) return null;
+    try {
+      parsed = new URL(url, "http://x.invalid/");
+    } catch {
+      return null;
+    }
+  }
+  if (parsed.protocol === "blob:") {
+    try {
+      parsed = new URL(parsed.pathname);
+    } catch {
+      return null;
+    }
+  }
+  return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.pathname : null;
+}
+
+/**
+ * F-217 (A-500 (1)): a URL "stripped to the path", so the tailnet host never reaches Sentry: the
+ * `http`/`https` path the URL parser reads (no scheme, userinfo, host, port, query or fragment),
+ * and `/` for anything else (an opaque `data:`/`mailto:`/`javascript:` payload, another scheme, a
+ * relative reference, an invalid URL, or nothing). Never throws.
  */
 export function stripToPath(url: string): string {
-  const part = pathPart(url);
-  return part.startsWith("/") ? part : "/";
+  return httpPath(url) ?? "/";
 }
 
 const ASSET_PATH = /^assets\/[A-Za-z0-9_-][A-Za-z0-9_.-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$/;
