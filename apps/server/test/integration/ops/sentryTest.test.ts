@@ -1,8 +1,8 @@
 // F-93 `diagnostics:sentry-test --yes` through runCli (A-288): it reports one test error through
 // F-34 and flushes, printing {"sent":true}, or {"sent":false} with no SENTRY_DSN; without --yes it
-// exits 2. The Sentry endpoint is the local fake (test/support/fakeSentry.ts). TP-15.18x: the
-// automated half of TP-15.18 (AC-15.4), whose e-mail check stays manual. IDs ending in "x" are
-// test-architect additions, not LLD test-plan IDs.
+// exits 2. The event is tagged error_key SENTRY_TEST (A-502 (9)). The Sentry endpoint is the local
+// fake (test/support/fakeSentry.ts). TP-15.54: the automated half of TP-15.18 (AC-15.4), whose
+// e-mail check stays manual.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -42,8 +42,8 @@ afterAll(async () => {
   await testDb.drop();
 });
 
-describe("TP-15.18x: diagnostics:sentry-test (F-93, AC-15.4)", () => {
-  it("TP-15.18x: without --yes it exits 2 and sends nothing", async () => {
+describe("TP-15.54: diagnostics:sentry-test (F-93, AC-15.4)", () => {
+  it("TP-15.54: without --yes it exits 2 and sends nothing", async () => {
     const r = await cli(["diagnostics:sentry-test"], { ...env, SENTRY_DSN: sentry.dsn });
 
     expect(r.code, [...r.stdout, ...r.stderr].join("\n")).toBe(2);
@@ -51,31 +51,30 @@ describe("TP-15.18x: diagnostics:sentry-test (F-93, AC-15.4)", () => {
     expect(sentryEvents(sentry.bodies)).toEqual([]);
   }, 60_000);
 
-  it("TP-15.18x: --yes with no SENTRY_DSN prints {sent:false} and exits 0", async () => {
+  it("TP-15.54: --yes with no SENTRY_DSN prints {sent:false} and exits 0", async () => {
     const noDsn = { ...env };
     delete noDsn["SENTRY_DSN"];
 
     const r = await cli(["diagnostics:sentry-test", "--yes"], noDsn);
 
     expect(r.code, [...r.stdout, ...r.stderr].join("\n")).toBe(0);
-    expect(r.stdout.map((l) => JSON.parse(l) as unknown)).toEqual([{ sent: false }]);
+    expect(r.stdout).toEqual(['{"sent":false}']);
     expect(sentryEvents(sentry.bodies)).toEqual([]);
   }, 60_000);
 
   // Last, because it initialises the process's Sentry client.
-  it("TP-15.18x: --yes with a DSN prints {sent:true}, exits 0, and sends one event: class Error, no message, no request or user", async () => {
+  it("TP-15.54: --yes with a DSN prints {sent:true}, exits 0, and sends one event: class Error, tags exactly { error_key: SENTRY_TEST }, no message, request or user", async () => {
     const r = await cli(["diagnostics:sentry-test", "--yes"], { ...env, SENTRY_DSN: sentry.dsn });
 
     expect(r.code, [...r.stdout, ...r.stderr].join("\n")).toBe(0);
-    expect(r.stdout.map((l) => JSON.parse(l) as unknown)).toEqual([{ sent: true }]);
+    expect(r.stdout).toEqual(['{"sent":true}']);
     const events = sentryEvents(sentry.bodies);
     expect(events).toHaveLength(1);
     const event = events[0] ?? {};
     const values = (event["exception"] as { values?: { type?: unknown; value?: unknown }[] })
       .values;
     expect(values?.map((v) => [v.type, v.value])).toEqual([["Error", "Error"]]);
-    // F-93's route tag, cli:diagnostics:sentry-test, isn't asserted: F-30's route rule (a leading
-    // "/") drops it, which contradicts "the event carries ... the tag" (question for the planner).
+    expect(event["tags"]).toStrictEqual({ error_key: "SENTRY_TEST" });
     // TP-15.18: no request body, query string or user fields.
     expect(event["request"]).toBeUndefined();
     expect(event["user"]).toBeUndefined();
