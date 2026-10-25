@@ -1,0 +1,7 @@
+# ktlint 1.8.0 (the Gradle ktlint plugin), intellij_idea style. Compose functions are PascalCase.
+root = true
+
+[*.{kt,kts}]
+ktlint_code_style = intellij_idea
+max_line_length = 140
+ktlint_function_naming_ignore_when_annotated_with = Composable

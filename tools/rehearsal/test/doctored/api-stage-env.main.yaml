@@ -1,0 +1,5 @@
+# A-468, TP-16.6: a stage setting in api's environment; step 9 (no-stage-setting) must fail.
+services:
+  api:
+    environment:
+      INFRA_STAGE: "0"

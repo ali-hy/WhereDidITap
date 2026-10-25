@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "minor": "0",
+      "expected": "0"
+    },
+    {
+      "minor": "1",
+      "expected": "1"
+    },
+    {
+      "minor": "-1",
+      "expected": "-1"
+    },
+    {
+      "minor": "9007199254740991",
+      "expected": "9007199254740991"
+    },
+    {
+      "minor": "-9007199254740991",
+      "expected": "-9007199254740991"
+    },
+    {
+      "minor": "9007199254740992",
+      "expected": "MoneyRangeError"
+    },
+    {
+      "minor": "-9007199254740992",
+      "expected": "MoneyRangeError"
+    },
+    {
+      "minor": "12345678901234567890",
+      "expected": "MoneyRangeError"
+    }
+  ]
+}
