@@ -32,6 +32,10 @@ private val SQLSTATE = Regex("^[0-9A-Z]{5}$")
 private val SYSTEM_CODE = Regex("^E[A-Z0-9_]{1,30}$")
 private val METHOD = Regex("^[A-Z]{1,10}$")
 
+/** A-501 (4): Sentry's breadcrumb types; any other `type` is left out (null). */
+private val BREADCRUMB_TYPES =
+    setOf("default", "debug", "error", "info", "navigation", "http", "query", "transaction", "ui", "user")
+
 private fun isRoute(value: String): Boolean {
     val path = value.substringBefore('?').substringBefore('#')
     return ROUTE.matches(path) && path.split('/').none { UUID_LIKE.containsMatchIn(it) || LONG_DIGITS.containsMatchIn(it) }
@@ -112,8 +116,8 @@ class SentryScrubber : SentryOptions.BeforeSendCallback {
 
     companion object {
         /**
-         * F-35, F-260: navigation and HTTP crumbs only, with exactly category, timestamp, type and
-         * level; navigation keeps no data; an HTTP crumb also keeps data.url as the path only
+         * F-35, F-260: navigation and HTTP crumbs only, with exactly category, timestamp, level and
+         * a type from Sentry's breadcrumb types (A-501 (4)); navigation keeps no data; an HTTP crumb also keeps data.url as the path only
          * (A-498), method (`^[A-Z]{1,10}$`) and a numeric status_code, each only when valid.
          */
         fun scrubBreadcrumb(crumb: Breadcrumb): Breadcrumb? {
@@ -121,7 +125,7 @@ class SentryScrubber : SentryOptions.BeforeSendCallback {
             if (category != "navigation" && category != "http") return null
             val kept = Breadcrumb(crumb.timestamp)
             kept.category = category
-            kept.type = crumb.type
+            kept.type = crumb.type?.takeIf { it in BREADCRUMB_TYPES }
             kept.level = crumb.level
             if (category == "http") {
                 (crumb.getData("url") as? String)?.let { reduceUrl(it) }?.let { kept.setData("url", it) }

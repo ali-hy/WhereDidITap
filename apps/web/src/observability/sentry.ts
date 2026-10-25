@@ -38,13 +38,14 @@ function checkedTags(tags: Json): Json {
   const out: Json = {};
   const route = str(tags["route"]);
   if (route !== undefined) {
-    // A-499 (2), A-500 (3): A-112's drop-on-failure rule; a non-path never becomes "/". The
-    // pattern's reduction is written (the parser would encode a template's `{id}`), and only when
-    // it removed exactly the scheme and authority the URL parser reads.
+    // A-499 (2), A-501 (1): A-112's drop-on-failure rule; a non-path never becomes "/". The
+    // pattern's reduction is written only when it doesn't start with `//` and, with `{`/`}`
+    // encoded, is exactly the path the URL parser reads from `route`, so nothing the parser reads
+    // as the scheme, authority, query or fragment is in it.
     const part = pathPart(route);
     const value = part === "" ? "/" : part;
-    const parsed = httpPath(route);
-    if (parsed !== null && isRoute(value) && httpPath(value) === parsed) out["route"] = value;
+    if (isRoute(value) && !value.startsWith("//") && encodeBraces(value) === httpPath(route))
+      out["route"] = value;
   }
   const job = str(tags["job"]);
   if (job !== undefined && JOB_NAME.test(job)) out["job"] = job;
@@ -72,6 +73,27 @@ const FRAME_FUNCTION = /^(?:(?:async|new) )?[A-Za-z_$][A-Za-z0-9_$.<>[\]]{0,99}$
 const FRAME_FILENAME = /^[A-Za-z0-9_@./<>:-]{1,200}$/;
 const HEX32 = /^[0-9a-f]{32}$/;
 const HEX16 = /^[0-9a-f]{16}$/;
+/** A-501 (3): Sentry's breadcrumb types and severity levels, matched exactly. */
+const CRUMB_TYPES: ReadonlySet<string> = new Set([
+  "default",
+  "debug",
+  "error",
+  "info",
+  "navigation",
+  "http",
+  "query",
+  "transaction",
+  "ui",
+  "user",
+]);
+const CRUMB_LEVELS: ReadonlySet<string> = new Set([
+  "fatal",
+  "error",
+  "warning",
+  "log",
+  "info",
+  "debug",
+]);
 
 function isObject(v: unknown): v is Json {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -85,10 +107,19 @@ function stripQuery(url: string): string {
 /**
  * A-495 (1) (a), (b): the URL without its query and fragment and without the leading run of
  * `scheme:` parts and an optional `//authority`, by pattern. May be empty or not a path. Used only
- * by `checkedTags`' route rule (A-500 (3)), which also checks it against `httpPath`.
+ * by `checkedTags`' route rule (A-501 (1)), which keeps it only when it is exactly the parser's
+ * path.
  */
 function pathPart(url: string): string {
   return stripQuery(url).replace(/^(?:[A-Za-z][A-Za-z0-9+.-]*:)*(?:\/\/[^/]*)?/, "");
+}
+
+/**
+ * A-501 (1): a route path with `{` and `}` percent-encoded as the URL parser writes them in a
+ * path (`%7B`, `%7D`); nothing else changes.
+ */
+function encodeBraces(path: string): string {
+  return path.replace(/\{/g, "%7B").replace(/\}/g, "%7D");
 }
 
 /**
@@ -170,12 +201,21 @@ function scrubFrames(stacktrace: unknown): Json | undefined {
   return { frames };
 }
 
-/** F-35's breadcrumb rule for the web: navigation and fetch/xhr only, URLs reduced to the path. */
+/**
+ * F-35's breadcrumb rule for the web (A-500 (4), A-501 (3)): navigation and fetch/xhr only, and
+ * every kept key is value-checked, each dropped on its own: a finite `timestamp`, a `type` and
+ * `level` from Sentry's own sets, and `data` with URLs reduced to the path, `method` and a numeric
+ * `status_code`.
+ */
 export function scrubWebBreadcrumb(b: Json): Json | null {
   const category = str(b["category"]);
   if (category !== "navigation" && category !== "fetch" && category !== "xhr") return null;
   const out: Json = { category };
-  for (const k of ["timestamp", "type", "level"]) if (b[k] !== undefined) out[k] = b[k];
+  if (Number.isFinite(b["timestamp"])) out["timestamp"] = b["timestamp"];
+  const type = str(b["type"]);
+  if (type !== undefined && CRUMB_TYPES.has(type)) out["type"] = type;
+  const level = str(b["level"]);
+  if (level !== undefined && CRUMB_LEVELS.has(level)) out["level"] = level;
   const data = isObject(b["data"]) ? b["data"] : {};
   const kept: Json = {};
   for (const k of ["url", "from", "to"]) {
