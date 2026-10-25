@@ -464,3 +464,170 @@ describe("TP-11.25 (A-485): scrubWebEvent reduces frame filenames and drops fram
     },
   );
 });
+
+// ---- A-500: stripToPath parses with the WHATWG URL parser and keeps an http(s) path only ----
+
+const H = "laptop.tail1234.ts.net";
+const B64 = btoa(CANARY);
+
+describe("TP-11.25 (A-500): stripToPath is httpPath(url) ?? /", () => {
+  it.each([
+    [`data:/,${CANARY}`],
+    [`data:/;base64,${B64}`],
+    [`data://h/,${CANARY}`],
+    [`DATA:/,${CANARY}`],
+    [`javascript:/${CANARY}`],
+    [`blob:data:/,${CANARY}`],
+    ["blob:blob:https://h/x"],
+    ["ftp://h/x"],
+    ["file:///etc/x"],
+    ["chrome-extension://abc/x.js"],
+    ["https://"],
+    [""],
+    ["?q=x"],
+    ["../x"],
+    [" /x"],
+  ])("TP-11.25 (A-500): stripToPath(%j) → /", async (url) => {
+    const { stripToPath } = await loadSentry();
+
+    const result = stripToPath(url);
+
+    expect(result).toBe("/");
+  });
+
+  it.each([
+    [`https:/${H}/x`],
+    [`https:///${H}/x`],
+    [`https:${H}/x`],
+    [`https:\\\\${H}\\x`],
+    ["HTTPS://LAPTOP.tail1234.ts.net/x"],
+    [`/\\${H}/x`],
+    [`/\t/${H}/x`],
+  ])("TP-11.25 (A-500): stripToPath(%j) → /x, the parser's host dropped", async (url) => {
+    const { stripToPath } = await loadSentry();
+
+    expect(stripToPath(url)).toBe("/x");
+  });
+
+  it.each([
+    ["/api/v1/things?q=x", "/api/v1/things"],
+    ["https://h/a b", "/a%20b"],
+    ["https://h/a/../b", "/b"],
+  ])("TP-11.25 (A-500): stripToPath(%j) → %s", async (url, expected) => {
+    const { stripToPath } = await loadSentry();
+
+    expect(stripToPath(url)).toBe(expected);
+  });
+
+  it("TP-11.25 (A-500): no stripToPath result contains ts.net, the canary or its base64", async () => {
+    const { stripToPath } = await loadSentry();
+    const inputs = [
+      `data:/,${CANARY}`,
+      `data:/;base64,${B64}`,
+      `data://h/,${CANARY}`,
+      `DATA:/,${CANARY}`,
+      `javascript:/${CANARY}`,
+      `blob:data:/,${CANARY}`,
+      `https:/${H}/x`,
+      `https:///${H}/x`,
+      `https:${H}/x`,
+      `https:\\\\${H}\\x`,
+      "HTTPS://LAPTOP.tail1234.ts.net/x",
+      `/\\${H}/x`,
+      `/\t/${H}/x`,
+    ];
+
+    for (const url of inputs) {
+      const result = stripToPath(url);
+      for (const banned of ["ts.net", CANARY, B64]) {
+        expect(result, `${JSON.stringify(url)} → ${result}`).not.toContain(banned);
+      }
+    }
+  });
+
+  it("TP-11.25 (A-500): a fetch crumb with data.url data:/,<canary> keeps url exactly /", async () => {
+    const { scrubWebBreadcrumb } = await loadSentry();
+
+    const kept = scrubWebBreadcrumb({
+      category: "fetch",
+      data: { method: "GET", url: `data:/,${CANARY}` },
+    });
+
+    expect((kept as { data?: { url?: unknown } } | null)?.data?.url).toBe("/");
+    expect(JSON.stringify(kept)).not.toContain(CANARY);
+  });
+
+  it("TP-11.25 (A-500): an xhr crumb with https:///H/api/v1/things?q=<canary> keeps url exactly /api/v1/things", async () => {
+    const { scrubWebBreadcrumb } = await loadSentry();
+
+    const kept = scrubWebBreadcrumb({
+      category: "xhr",
+      data: { method: "GET", url: `https:///${H}/api/v1/things?q=${CANARY}` },
+    });
+
+    expect((kept as { data?: { url?: unknown } } | null)?.data?.url).toBe("/api/v1/things");
+    const text = JSON.stringify(kept);
+    expect(text).not.toContain(CANARY);
+    expect(text).not.toContain("ts.net");
+  });
+});
+
+describe("TP-11.25 (A-500): the route tag keeps a path only when the parser agrees", () => {
+  it("TP-11.25 (A-500): route /things/{id} stays /things/{id}", async () => {
+    const { scrubWebEvent } = await loadSentry();
+
+    expect(scrubWebEvent({ tags: { route: "/things/{id}" } })?.["tags"]).toEqual({
+      route: "/things/{id}",
+    });
+  });
+
+  it.each([[`data:/${CANARY}`], ["javascript:/x"], [`https:/${H}/x`], [`https:///${H}/x`]])(
+    "TP-11.25 (A-500): route %j gives no route tag",
+    async (route) => {
+      const { scrubWebEvent } = await loadSentry();
+
+      const scrubbed = scrubWebEvent({ tags: { route } });
+
+      const tags = (scrubbed?.["tags"] ?? {}) as Record<string, unknown>;
+      expect(Object.keys(tags)).not.toContain("route");
+      const text = JSON.stringify(scrubbed);
+      expect(text).not.toContain(CANARY);
+      expect(text).not.toContain("ts.net");
+    },
+  );
+});
+
+// ---- A-500 (4), review N-2: the crumb data allow-list ----
+
+describe("TP-11.25 (A-500 (4)): a fetch crumb keeps a valid method and a numeric status_code, each on its own", () => {
+  const base = {
+    url: "https://budmon.example/api/v1/things",
+    method: "GET",
+    status_code: 200,
+    note: CANARY,
+  };
+
+  it.each([
+    ["(m0) nothing changed", {}, ["url", "method", "status_code"]],
+    ["(m1) method get", { method: "get" }, ["url", "status_code"]],
+    ["(m2) method GET <canary>", { method: `GET ${CANARY}` }, ["url", "status_code"]],
+    ['(m3) status_code "200"', { status_code: "200" }, ["url", "method"]],
+  ] as const)(
+    "TP-11.25 (A-500 (4)): %s keeps only its valid data keys",
+    async (_label, change, keys) => {
+      const { scrubWebBreadcrumb } = await loadSentry();
+
+      const kept = scrubWebBreadcrumb({ category: "fetch", data: { ...base, ...change } });
+
+      expect(kept).not.toBeNull();
+      const data: Record<string, unknown> =
+        (kept as { data?: Record<string, unknown> } | null)?.data ?? {};
+      const expected: readonly string[] = keys;
+      expect(Object.keys(data).sort()).toEqual([...expected].sort());
+      expect(data["url"]).toBe("/api/v1/things");
+      if (expected.includes("method")) expect(data["method"]).toBe("GET");
+      if (expected.includes("status_code")) expect(data["status_code"]).toBe(200);
+      expect(JSON.stringify(kept)).not.toContain(CANARY);
+    },
+  );
+});

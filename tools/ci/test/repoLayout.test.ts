@@ -235,6 +235,19 @@ describe("TP-0.30: root ignores cover .claude (A-318)", () => {
 
     expect(lines.some((line) => line === ".claude" || line === ".claude/")).toBe(true);
   });
+
+  // A-500 (9): Room's exports are compared byte for byte (A-486), so Prettier must skip them.
+  it("TP-0.30 (A-500): .prettierignore has an apps/android/app/schemas line", () => {
+    const lines = readRootFile(".prettierignore")
+      .split("\n")
+      .map((line) => line.trim());
+
+    expect(
+      lines.some(
+        (line) => line === "apps/android/app/schemas" || line === "apps/android/app/schemas/",
+      ),
+    ).toBe(true);
+  });
 });
 
 // TP-0.35 (A-490): pnpm comes from packageManager (with corepack's hash, checked in TP-0.13x),
