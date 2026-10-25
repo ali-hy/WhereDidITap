@@ -228,12 +228,14 @@ networks:
     ipam:
       config:
         - subnet: ${EDGE_SUBNET}
+          ip_range: ${EDGE_IP_RANGE:?EDGE_IP_RANGE is not set}
   data:
     driver: bridge
     internal: true
     ipam:
       config:
         - subnet: ${DATA_SUBNET}
+          ip_range: ${DATA_IP_RANGE:?DATA_IP_RANGE is not set}
   egress:
     driver: bridge
   mail-ui:
