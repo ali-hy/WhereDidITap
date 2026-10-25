@@ -802,8 +802,69 @@ describe.skipIf(!INFRA_INT)("TP-15.22 (I): install and restore on a real runner 
     ]);
     expect(values(spa, "referrer-policy")).toEqual(["no-referrer"]);
     expect(values(spa, "x-content-type-options")).toEqual(["nosniff"]);
-    expect(values(spa, "content-security-policy")[0]).toMatch(/^default-src 'self'/);
+    // Review N-3: F-175's SPA policy exactly, as caddy.test.ts checks it.
+    expect(values(spa, "content-security-policy")).toEqual([
+      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://*.ingest.de.sentry.io https://*.ingest.sentry.io; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    ]);
   }, 60_000);
+
+  // A-505: Docker hands dynamic addresses only from each network's ip_range, so no container can
+  // take a static address that another container hasn't claimed yet.
+  it("TP-15.56 (I): edge and data use local.env's subnet and ip_range; caddy and postgres hold their static addresses; the others are inside the ranges", () => {
+    const localEnv = Object.fromEntries(
+      readFileSync(path.join(home, "releases", TAG, "local.env"), "utf8")
+        .split("\n")
+        .filter((l) => /^[A-Z_]+=/.test(l))
+        .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
+    ) as Record<string, string | undefined>;
+    const inspect = sh("docker", ["network", "inspect", "budmon-main_edge", "budmon-main_data"]);
+    expect(inspect.status, inspect.stderr).toBe(0);
+    const networks = JSON.parse(inspect.stdout) as {
+      Name: string;
+      IPAM: { Config: { Subnet?: string; IPRange?: string }[] };
+    }[];
+    const config = (name: string) => networks.find((n) => n.Name === name)?.IPAM.Config ?? [];
+    for (const [name, subnet, range] of [
+      ["budmon-main_edge", "EDGE_SUBNET", "EDGE_IP_RANGE"],
+      ["budmon-main_data", "DATA_SUBNET", "DATA_IP_RANGE"],
+    ] as const) {
+      const entries = config(name);
+      expect(entries, name).toHaveLength(1);
+      expect(entries[0]?.Subnet, name).toBe(localEnv[subnet]);
+      expect(entries[0]?.IPRange, name).toBe(localEnv[range]);
+    }
+
+    const address = (service: string, network: string) => {
+      const r = sh("docker", [
+        "inspect",
+        "-f",
+        `{{(index .NetworkSettings.Networks "${network}").IPAddress}}`,
+        container("main", service),
+      ]);
+      expect(r.status, `${service}: ${r.stderr}`).toBe(0);
+      return r.stdout.trim();
+    };
+    const toNumber = (ip: string) => ip.split(".").reduce((n, p) => n * 256 + Number(p), 0);
+    const inRange = (ip: string, cidrText: string | undefined) => {
+      const [base, bits] = (cidrText ?? "").split("/");
+      const size = 2 ** (32 - Number(bits));
+      const start = toNumber(base ?? "");
+      return toNumber(ip) >= start && toNumber(ip) < start + size;
+    };
+
+    expect(address("caddy", "budmon-main_edge")).toBe("172.30.41.2");
+    expect(address("postgres", "budmon-main_data")).toBe("172.30.40.10");
+    const dynamic: [string, string, string][] = [
+      ["api", "budmon-main_edge", "EDGE_IP_RANGE"],
+      ["api", "budmon-main_data", "DATA_IP_RANGE"],
+      ["worker-general", "budmon-main_data", "DATA_IP_RANGE"],
+      ["mailpit", "budmon-main_data", "DATA_IP_RANGE"],
+    ];
+    for (const [service, network, range] of dynamic) {
+      const ip = address(service, network);
+      expect(inRange(ip, localEnv[range]), `${service} on ${network}: ${ip}`).toBe(true);
+    }
+  });
 
   it("TP-15.22 (I1): Postgres starts with its TLS key owned by 999", () => {
     const owner = sh("sudo", [

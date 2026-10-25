@@ -64,13 +64,22 @@ interface ComposeConfig {
   services?: Record<string, Service>;
   networks?: Record<
     string,
-    { internal?: boolean; external?: boolean; name?: string; ipam?: unknown }
+    {
+      internal?: boolean;
+      external?: boolean;
+      name?: string;
+      ipam?: { config?: { subnet?: string; ip_range?: string }[] };
+    }
   >;
 }
 
 let home: string;
 
-function composeConfig(files: readonly string[], env: Record<string, string | undefined> = {}) {
+function composeConfig(
+  files: readonly string[],
+  env: Record<string, string | undefined> = {},
+  envFile: string = path.join(LOCAL, "local.env"),
+) {
   const merged: Record<string, string | undefined> = {
     ...process.env,
     BUDMON_HOME: home,
@@ -82,7 +91,7 @@ function composeConfig(files: readonly string[], env: Record<string, string | un
   const args = ["compose", "--project-directory", LOCAL];
   for (const f of files) args.push("-f", path.join(LOCAL, f));
   // `migrate` is in profile tools; config omits profile-gated services otherwise.
-  args.push("--env-file", path.join(LOCAL, "local.env"), "--profile", "tools");
+  args.push("--env-file", envFile, "--profile", "tools");
   args.push("config", "--format", "json");
   const result = spawnSync("docker", args, { encoding: "utf8", env: merged });
   return {
@@ -214,7 +223,14 @@ describe("TP-16.17: the rehearsal overlays' compose config (A-392, A-449 to A-45
           result.status === 0
             ? (JSON.parse(result.stdout) as {
                 services?: Record<string, RService>;
-                networks?: Record<string, { external?: boolean; name?: string }>;
+                networks?: Record<
+                  string,
+                  {
+                    external?: boolean;
+                    name?: string;
+                    ipam?: { config?: { subnet?: string; ip_range?: string }[] };
+                  }
+                >;
               })
             : {};
         return { services: parsed.services ?? {}, networks: parsed.networks ?? {} };
@@ -315,6 +331,16 @@ describe("TP-16.17: the rehearsal overlays' compose config (A-392, A-449 to A-45
         "sentry.rehearsal.invalid:host-gateway",
       ]),
     );
+  });
+
+  // A-505: the overlay doesn't replace the laptop's networks, so the ranges hold in the rehearsal.
+  it("TP-16.17 (a) (A-505): main's edge and data ipam.config equal TP-15.56 (b)'s", () => {
+    expect(main.networks["edge"]?.ipam?.config).toStrictEqual([
+      { subnet: "172.30.41.0/24", ip_range: "172.30.41.128/25" },
+    ]);
+    expect(main.networks["data"]?.ipam?.config).toStrictEqual([
+      { subnet: "172.30.40.0/24", ip_range: "172.30.40.128/25" },
+    ]);
   });
 
   it("TP-16.17 (A-478): in both projects capture-db is external budmon_rehearsal_capture_db, and no network is named budmon_capture_db", () => {
@@ -641,6 +667,164 @@ describe("TP-15.51: Compose logging (A-502 (5))", () => {
   it("TP-15.51: mailpit's logging is exactly driver none", () => {
     expect(svc(main, "mailpit").logging).toStrictEqual({ driver: "none" });
   });
+});
+
+// ---- TP-15.56 (A-505): every static address lies outside its network's dynamic ip_range ----
+
+/** An IPv4 address as a 32-bit number, or null. */
+function ip4(text: string): number | null {
+  const parts = text.split(".");
+  if (parts.length !== 4 || !parts.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255))
+    return null;
+  return parts.reduce((n, p) => n * 256 + Number(p), 0);
+}
+
+interface Cidr {
+  base: number;
+  prefix: number;
+  /** Zero host bits. */
+  aligned: boolean;
+}
+
+function cidr(text: string | undefined): Cidr | null {
+  const [address, bits] = (text ?? "").split("/");
+  const base = ip4(address ?? "");
+  const prefix = Number(bits);
+  if (base === null || !Number.isInteger(prefix) || prefix < 0 || prefix > 32) return null;
+  const size = 2 ** (32 - prefix);
+  return { base, prefix, aligned: base % size === 0 };
+}
+
+function inside(address: number, net: Cidr): boolean {
+  const size = 2 ** (32 - net.prefix);
+  return address >= net.base - (net.base % size) && address < net.base - (net.base % size) + size;
+}
+
+/**
+ * The TP-15.56 (c) check over resolved Compose configurations: one violation per broken rule, each
+ * naming the service and network, or the network.
+ */
+function addressViolations(configs: readonly ComposeConfig[]): string[] {
+  const violations: string[] = [];
+  for (const config of configs) {
+    for (const [name, network] of Object.entries(config.networks ?? {})) {
+      const members = Object.entries(config.services ?? {}).flatMap(([service, sv]) =>
+        sv.networks !== undefined && name in sv.networks
+          ? [{ service, address: sv.networks[name]?.ipv4_address }]
+          : [],
+      );
+      if (network.external === true) {
+        for (const m of members) {
+          if (m.address === undefined) violations.push(`${m.service} on ${name}: no ipv4_address`);
+        }
+        continue;
+      }
+      const statics = members.filter((m) => m.address !== undefined);
+      if (statics.length === 0) continue;
+      const entries = network.ipam?.config ?? [];
+      const entry = entries[0];
+      if (entries.length !== 1 || entry?.subnet === undefined || entry.ip_range === undefined) {
+        violations.push(`${name}: needs exactly one ipam.config entry with subnet and ip_range`);
+        continue;
+      }
+      const subnet = cidr(entry.subnet);
+      const range = cidr(entry.ip_range);
+      if (subnet === null || !subnet.aligned) {
+        violations.push(`${name}: subnet ${entry.subnet} isn't a CIDR`);
+        continue;
+      }
+      if (
+        range === null ||
+        !range.aligned ||
+        range.prefix < subnet.prefix ||
+        !inside(range.base, subnet)
+      ) {
+        violations.push(`${name}: ip_range ${entry.ip_range} isn't a range inside ${entry.subnet}`);
+        continue;
+      }
+      for (const m of statics) {
+        const address = ip4(m.address ?? "");
+        if (address === null || !inside(address, subnet) || inside(address, range)) {
+          violations.push(
+            `${m.service} on ${name}: ${String(m.address)} isn't in ${entry.subnet} outside ${entry.ip_range}`,
+          );
+        }
+      }
+    }
+  }
+  return violations;
+}
+
+describe("TP-15.56: static addresses lie outside each network's ip_range (A-505)", () => {
+  const CLEAN = {
+    EDGE_IP_RANGE: undefined,
+    DATA_IP_RANGE: undefined,
+    CADDY_EDGE_IP: undefined,
+    PG_DATA_IP: undefined,
+  };
+  const both = (env: Record<string, string | undefined> = {}) => {
+    const m = composeConfig(["compose.main.yaml"], { ...CLEAN, ...env });
+    const c = composeConfig(["compose.capture.yaml"], { ...CLEAN, ...env });
+    expect(m.status, m.stderr).toBe(0);
+    expect(c.status, c.stderr).toBe(0);
+    return [m.config ?? {}, c.config ?? {}];
+  };
+
+  it("TP-15.56 (a): local.env holds EDGE_IP_RANGE and DATA_IP_RANGE", () => {
+    const env = read("infra/local/local.env");
+
+    expect(env).toMatch(/^EDGE_IP_RANGE=172\.30\.41\.128\/25$/m);
+    expect(env).toMatch(/^DATA_IP_RANGE=172\.30\.40\.128\/25$/m);
+  });
+
+  it("TP-15.56 (b): edge's and data's resolved ipam.config are exactly their subnet and ip_range", () => {
+    const [m] = both();
+
+    expect(m?.networks?.["edge"]?.ipam?.config).toStrictEqual([
+      { subnet: "172.30.41.0/24", ip_range: "172.30.41.128/25" },
+    ]);
+    expect(m?.networks?.["data"]?.ipam?.config).toStrictEqual([
+      { subnet: "172.30.40.0/24", ip_range: "172.30.40.128/25" },
+    ]);
+  });
+
+  it("TP-15.56 (c): no violation over both files: ranges inside subnets, static addresses outside ranges, capture-db all static", () => {
+    expect(addressViolations(both())).toEqual([]);
+  });
+
+  it.each([
+    ["CADDY_EDGE_IP=172.30.41.130", { CADDY_EDGE_IP: "172.30.41.130" }, /^caddy on edge:/],
+    ["PG_DATA_IP=172.30.40.200", { PG_DATA_IP: "172.30.40.200" }, /^postgres on data:/],
+    ["EDGE_IP_RANGE=172.30.40.128/25", { EDGE_IP_RANGE: "172.30.40.128/25" }, /^edge: ip_range/],
+  ])("TP-15.56 (d): with %s the check reports exactly one violation", (_label, env, pattern) => {
+    const violations = addressViolations(both(env));
+
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatch(pattern);
+  });
+
+  it.each([["EDGE_IP_RANGE"], ["DATA_IP_RANGE"]])(
+    "TP-15.56 (e): compose config with a local.env lacking %s fails naming it",
+    (key) => {
+      const dir = mkdtempSync(path.join(tmpdir(), "budmon-tp15-56-"));
+      try {
+        const copy = path.join(dir, "local.env");
+        writeFileSync(
+          copy,
+          read("infra/local/local.env")
+            .split("\n")
+            .filter((l) => !l.startsWith(`${key}=`))
+            .join("\n"),
+        );
+        const r = composeConfig(["compose.main.yaml"], CLEAN, copy);
+
+        expect(r.status).not.toBe(0);
+        expect(r.stderr).toContain(`${key} is not set`);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe("TP-15.33x: the capture project (F-175)", () => {
