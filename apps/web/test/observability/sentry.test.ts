@@ -671,14 +671,31 @@ describe("TP-11.25 (A-501 (1)): the route tag is the parser's path, not a re-par
     expect(JSON.stringify(scrubbed)).not.toContain("ts.net");
   });
 
-  it.each([["/things/{id}"], ["/things"], ["/"], ["/x"], ["/a//b"]])(
-    "TP-11.25 (A-501): a kept route tag %j scrubbed again comes back unchanged",
-    async (route) => {
-      const { scrubWebEvent } = await loadSentry();
+  it.each([
+    ["/things/{id}"],
+    ["/things"],
+    ["/"],
+    ["/x"],
+    ["/a//b"],
+    // A-501 re-review N-1: two brace pairs, so every { and } must be matched, not just the first.
+    ["/things/{id}/items/{itemId}"],
+    // A-501 (1)'s "Unchanged" list.
+    ["/things/*"],
+  ])("TP-11.25 (A-501): a kept route tag %j scrubbed again comes back unchanged", async (route) => {
+    const { scrubWebEvent } = await loadSentry();
 
-      expect(scrubWebEvent({ tags: { route } })?.["tags"]).toStrictEqual({ route });
-    },
-  );
+    expect(scrubWebEvent({ tags: { route } })?.["tags"]).toStrictEqual({ route });
+  });
+
+  it("TP-11.25 (A-501): a full URL with two brace pairs keeps exactly its template path", async () => {
+    const { scrubWebEvent } = await loadSentry();
+
+    const scrubbed = scrubWebEvent({
+      tags: { route: "https://budmon.example/things/{id}/items/{itemId}?q=x" },
+    });
+
+    expect(scrubbed?.["tags"]).toStrictEqual({ route: "/things/{id}/items/{itemId}" });
+  });
 });
 
 // ---- A-501 (3), N-2: a kept crumb's timestamp, type and level are value-checked ----
