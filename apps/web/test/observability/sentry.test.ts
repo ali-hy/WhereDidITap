@@ -104,6 +104,66 @@ describe("TP-11.25: web Sentry scrubbing (F-217)", () => {
     expect(stripToPath(url)).toBe(expected);
   });
 
+  // A-499: whatever isn't a path after A-495's steps becomes "/".
+  it.each([
+    ["data:text/plain;base64,SGk="],
+    ["mailto:a@b.example"],
+    ["javascript:void(0)"],
+    ["localhost:8080/x"],
+    ["api/v1/things"],
+  ])("TP-11.25 (A-499): stripToPath(%s) → /", async (url) => {
+    const { stripToPath } = await loadSentry();
+
+    expect(stripToPath(url)).toBe("/");
+  });
+
+  it("TP-11.25 (A-499): a fetch crumb with a data: URL keeps url exactly /, and neither the canary nor its base64", async () => {
+    const { scrubWebBreadcrumb } = await loadSentry();
+    const encoded = btoa(CANARY);
+
+    const kept = scrubWebBreadcrumb({
+      category: "fetch",
+      data: { method: "GET", url: `data:text/plain;base64,${encoded}` },
+    });
+
+    expect((kept as { data?: { url?: unknown } } | null)?.data?.url).toBe("/");
+    const text = JSON.stringify(kept);
+    expect(text).not.toContain(CANARY);
+    expect(text).not.toContain(encoded);
+  });
+
+  it("TP-11.25 (A-499): request.url mailto:<canary>@b.example → request exactly { url: / }", async () => {
+    const { scrubWebEvent } = await loadSentry();
+
+    const scrubbed = scrubWebEvent({ request: { url: `mailto:${CANARY}@b.example` } });
+
+    expect(scrubbed?.["request"]).toEqual({ url: "/" });
+    const text = JSON.stringify(scrubbed);
+    expect(text).not.toContain(CANARY);
+    expect(text).not.toContain(btoa(CANARY));
+  });
+
+  it.each([["things/{id}"], ["mailto:a@b.example"]])(
+    "TP-11.25 (A-499): route %s isn't a path, so there's no route tag",
+    async (route) => {
+      const { scrubWebEvent } = await loadSentry();
+
+      const scrubbed = scrubWebEvent({ tags: { route, custom: CANARY } });
+
+      const tags = (scrubbed?.["tags"] ?? {}) as Record<string, unknown>;
+      expect(Object.keys(tags)).not.toContain("route");
+      expect(JSON.stringify(scrubbed)).not.toContain(CANARY);
+    },
+  );
+
+  it("TP-11.25 (A-499): route https://budmon.example/things?q=x → /things", async () => {
+    const { scrubWebEvent } = await loadSentry();
+
+    const scrubbed = scrubWebEvent({ tags: { route: "https://budmon.example/things?q=x" } });
+
+    expect(scrubbed?.["tags"]).toEqual({ route: "/things" });
+  });
+
   it("TP-11.32x: the transaction name loses its query", async () => {
     const { scrubWebEvent } = await loadSentry();
 

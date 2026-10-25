@@ -20,6 +20,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.StringWriter
+import java.util.Base64
 
 class SentryScrubberTest {
     // F-198's canary shape, standing in for user data.
@@ -135,7 +136,7 @@ class SentryScrubberTest {
     }
 
     @Test
-    fun `TP-13_8 (B-8) an http breadcrumb keeps url as scheme, host and path, no query or userinfo, plus method and status`() {
+    fun `TP-13_8 (B-8, A-498) an http breadcrumb keeps the url path only, no query or userinfo, plus method and status`() {
         val crumb = Breadcrumb().apply {
             type = "http"
             category = "http"
@@ -148,10 +149,69 @@ class SentryScrubberTest {
         val kept = SentryScrubber.scrubBreadcrumb(crumb)
 
         assertNotNull(kept)
-        assertEquals("https://budmon.example/api/v1/things", kept!!.getData("url"))
+        assertEquals("/api/v1/things", kept!!.getData("url"))
         assertEquals("GET", kept.getData("method"))
         assertEquals(200, kept.getData("status_code"))
         assertEquals(setOf("url", "method", "status_code"), kept.data.keys)
+    }
+
+    // ---- A-498, A-499: an http crumb's url is the path only, or absent ----
+
+    private val canaryBase64: String = Base64.getEncoder().encodeToString(canary.toByteArray())
+
+    private fun httpCrumb(url: String) = Breadcrumb().apply {
+        type = "http"
+        category = "http"
+        setData("url", url)
+        setData("method", "GET")
+        setData("status_code", 200)
+        setData("note", canary)
+    }
+
+    private fun assertNothingIdentifying(input: String, kept: Breadcrumb) {
+        val data = kept.data.toString()
+        for (banned in listOf("budmon.example", "ts.net", "localhost", "pw@", canary, canaryBase64)) {
+            assertFalse("$input: data has $banned: $data", data.contains(banned))
+        }
+    }
+
+    @Test
+    fun `TP-13_8 (A-498) u1 to u4 - http crumbs keep url, method and status_code, with the url path only`() {
+        val cases = listOf(
+            "https://user:pw@budmon.example/api/v1/things?q=$canary#frag" to "/api/v1/things",
+            "https://laptop.tail1234.ts.net:8443" to "/",
+            "http://localhost:8080/api/v1/x" to "/api/v1/x",
+            "https://budmon.example/budmon/api/v1/things" to "/budmon/api/v1/things",
+        )
+
+        for ((input, path) in cases) {
+            val kept = SentryScrubber.scrubBreadcrumb(httpCrumb(input))
+
+            assertNotNull(input, kept)
+            assertEquals(input, setOf("url", "method", "status_code"), kept!!.data.keys)
+            assertEquals(input, path, kept.getData("url"))
+            assertEquals(input, "GET", kept.getData("method"))
+            assertEquals(input, 200, kept.getData("status_code"))
+            assertNothingIdentifying(input, kept)
+        }
+    }
+
+    @Test
+    fun `TP-13_8 (A-499) u5 to u8 - a url that isn't an absolute http or https URL is dropped, method and status_code kept`() {
+        val cases = listOf(
+            "data:text/plain;base64,$canaryBase64",
+            "mailto:$canary@b.example",
+            "/api/v1/things?q=$canary",
+            "ftp://h/$canary",
+        )
+
+        for (input in cases) {
+            val kept = SentryScrubber.scrubBreadcrumb(httpCrumb(input))
+
+            assertNotNull(input, kept)
+            assertEquals(input, setOf("method", "status_code"), kept!!.data.keys)
+            assertNothingIdentifying(input, kept)
+        }
     }
 
     @Test
