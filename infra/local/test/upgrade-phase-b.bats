@@ -509,19 +509,15 @@ first_release() {
 
 # ---- TP-15.47 (j) (A-507 (1)): containers whose last start failed are removed before up -d ----
 
-# The start calls of both projects, in order, as "<project> <label>".
+# The start calls of both projects, in order, as "<project> <label>". A-508: arguments are shown
+# as recorded, never re-split, so an empty one shows as two spaces: `rm` is followed by what came
+# after `rm -f`, and `inspect` by everything from the first ID on (so the IDs must end the call).
 stack_calls() {
   awk -F'\t' '
     $1 != "docker" { next }
     $3 ~ /^container inspect / {
-      # The IDs must be the trailing arguments; an ID before a non-ID argument shows as "inspect-misplaced".
-      n = split($3, a, " "); first = n + 1
-      while (first > 1 && index(a[first - 1], "cid-") == 1) first--
-      ids = ""; p = ""
-      for (i = first; i <= n; i++) ids = ids " " a[i]
-      for (i = 1; i < first; i++) if (index(a[i], "cid-") == 1) ids = ids " inspect-misplaced"
-      if (first <= n) { p = a[first]; sub(/^cid-/, "", p); sub(/-.*/, "", p) }
-      print p " inspect" ids
+      if (match($3, / cid-[a-z]+-/)) print substr($3, RSTART + 5, RLENGTH - 6) " inspect" substr($3, RSTART)
+      else print " inspect"
       next
     }
     match($3, /-p budmon-(main|capture) /) {
@@ -535,7 +531,8 @@ stack_calls() {
 }
 
 calls_of_project() {
-  stack_calls | awk -v p="$1" '$1 == p { $1 = ""; sub(/^ /, ""); print }'
+  # A-508: strips only the leading "<project> "; the rest of the line is kept as it is.
+  stack_calls | awk -v p="$1 " 'index($0, p) == 1 { print substr($0, length(p) + 1) }'
 }
 
 joined() { tr '\n' '|' <<<"$1"; }
@@ -605,4 +602,19 @@ STOPPED_FOUR="api worker-general postgres mailpit"
   assert_success
   run calls_of_project main
   assert_line "rm caddy"
+}
+
+@test "TP-15.47 (j7): rm -f caddy failing: main's up -d still runs, start exits 31 after the removal error, and nothing of capture runs" {
+  write_state v1.2.0 v1.1.0
+  export FAILED_main=caddy RM_EXIT_main=1
+  BUDMON_REEXEC=1 run --separate-stderr "${BUDMON_HOME}/releases/v1.2.0/budmon-local" start
+  assert_failure 31
+  local removal reason
+  removal="$(grep -n -F "removal of container budmon-main-caddy-1 is already in progress" <<<"${stderr}" | head -n 1 | cut -d: -f1)"
+  reason="$(grep -n -F "starting v1.2.0 failed: docker compose up -d for budmon-main exited 1 (Compose's message is above)" <<<"${stderr}" | head -n 1 | cut -d: -f1)"
+  [ -n "${removal}" ] && [ -n "${reason}" ] && [ "${removal}" -lt "${reason}" ] || { echo "${stderr}"; return 1; }
+  run calls_of_project main
+  [ "$(joined "${output}")" = "created?|exited?|inspect cid-main-caddy|rm caddy|up|" ] || { echo "main: ${output}"; return 1; }
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ /-p budmon-capture /' '${CALLS}'"
+  assert_output ""
 }

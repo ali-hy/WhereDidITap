@@ -610,6 +610,21 @@ assert_s3_rejected_then_eof() {
   [ "$(tr '\n' ' ' <<<"${output}")" = "rm-postgres up-postgres FIRST_SETUP=1 " ] || { echo "${output}"; return 1; }
 }
 
+@test "TP-15.47 (j8): install step 11 with rm -f postgres failing exits 31 without starting Postgres; install.inprogress kept, no state" {
+  placeholder_ready_home
+  export FAILED_main=postgres CREATED_main="" RM_EXIT_main=1
+  run --separate-stderr "${SCRIPT}" install v1.0.0
+  assert_failure 31
+  [[ "${stderr}" == *"starting Postgres for first setup failed"* ]] || { echo "${stderr}"; return 1; }
+  run bash -c "awk -F'\t' '\$1==\"docker\" && \$3 ~ / rm /' '${CALLS}'"
+  [ "${#lines[@]}" -eq 1 ] || { echo "${output}"; return 1; }
+  [[ "${lines[0]}" == *"-p budmon-main "*" rm -f postgres	"* ]] || { echo "${lines[0]}"; return 1; }
+  run bash -c "awk -F'\t' '\$1==\"docker\" && (\$3 ~ / up -d postgres/ || \$3 ~ /pg_isready/)' '${CALLS}'"
+  assert_output ""
+  [ -e "${BUDMON_HOME}/install.inprogress" ] || { echo "no install.inprogress"; return 1; }
+  [ ! -e "${BUDMON_HOME}/state" ] || { echo "state written"; return 1; }
+}
+
 # ---- TP-15.50 (A-502 (4)): install reports a maintenance flag set before it ----
 
 @test "TP-15.50: install with maintenance/on already present exits 0, ends with the tailscale serve line then the maintenance notice, and keeps the flag" {

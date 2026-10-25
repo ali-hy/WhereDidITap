@@ -139,8 +139,17 @@ fill_placeholders() {
 #                                   one ID per service (FAILED_ first, then STOPPED_), `cid-<p>-<s>`;
 #                                   `container inspect` prints, per ID argument, the service for a
 #                                   FAILED_ ID and an empty line for a STOPPED_ one (default: none)
+#                                   A-508: only for `--format` followed by exactly
+#                                   {{if .State.Error}}{{index .Config.Labels "com.docker.compose.service"}}{{end}};
+#                                   with any other `--format`, or none, it prints nothing and exits 1
 #   EXITED_PS_FAIL=1                that `ps -a --status exited -q` prints nothing and exits 1
 #   INSPECT_EXIT                    `container inspect`'s exit status after printing (default 0)
+#   RM_EXIT_main, RM_EXIT_capture   A-508: a project's `rm` checks each name (every argument after
+#                                   `rm` but `-f`, as given, so "" is a name) against that project's
+#                                   long-running services, else prints `no such service: <name>` on
+#                                   stderr and exits 1, as Compose does; with every name valid it
+#                                   exits RM_EXIT_<p> (default 0), printing Docker's removal-in-progress
+#                                   message for the first name on stderr when that isn't 0
 #   UP_EXIT_main, UP_EXIT_capture   exit status of that project's `up -d` (default 0), optionally
 #   UP_EXIT_MATCH                   only for calls whose " <arguments> " match this glob; a non-zero
 #                                   status prints Compose's port-allocated message on stderr
@@ -169,7 +178,15 @@ stack_answer() {
       return 0
       ;;
     *" container inspect "*)
-      local a id_project id_service failed_list
+      local a id_project id_service failed_list format="" prev=""
+      for a in "$@"; do
+        [ "${prev}" = --format ] && format="${a}"
+        prev="${a}"
+      done
+      if [ "${format}" != '{{if .State.Error}}{{index .Config.Labels "com.docker.compose.service"}}{{end}}' ]; then
+        STACK_EXIT=1
+        return 0
+      fi
       for a in "$@"; do
         [[ "${a}" == cid-* ]] || continue
         id_project="${a#cid-}"
@@ -179,6 +196,32 @@ stack_answer() {
         if [[ " ${!failed_list:-} " == *" ${id_service} "* ]]; then echo "${id_service}"; else echo ""; fi
       done
       STACK_EXIT="${INSPECT_EXIT:-0}"
+      return 0
+      ;;
+    *" rm "*)
+      [ -n "${project}" ] || return 1
+      local services_main="caddy api worker-general postgres mailpit" services_capture="worker-capture"
+      local services_var="services_${project}" rm_var="RM_EXIT_${project}"
+      local a s after=0 known first=""
+      for a in "$@"; do
+        if [ "${after}" = 0 ]; then
+          [ "${a}" = rm ] && after=1
+          continue
+        fi
+        [ "${a}" = -f ] && continue
+        known=0
+        for s in ${!services_var}; do [ "${a}" = "${s}" ] && known=1; done
+        if [ "${known}" = 0 ]; then
+          echo "no such service: ${a}" >&2
+          STACK_EXIT=1
+          return 0
+        fi
+        [ -n "${first}" ] || first="${a}"
+      done
+      STACK_EXIT="${!rm_var:-0}"
+      if [ "${STACK_EXIT}" != 0 ]; then
+        echo "Error response from daemon: removal of container budmon-${project}-${first}-1 is already in progress" >&2
+      fi
       return 0
       ;;
     *" ps --status running --services "*)
