@@ -7,6 +7,7 @@ import { Temporal, isUuid, systemClock, utcDateOf, type Clock } from "@budmon/sh
 import { EXIT_CONFIG, loadConfigOrReport } from "../platform/config/startup.js";
 import { describeFailure } from "../platform/observability/describeFailure.js";
 import { createLogger } from "../platform/observability/logger.js";
+import { initSentry } from "../platform/observability/sentry.js";
 import type { Config } from "../platform/config/schema.js";
 import { createApiContainer, createWorkerContainer } from "../platform/container.js";
 import { serverRoot } from "../platform/config/serverRoot.js";
@@ -34,6 +35,7 @@ const USAGE = [
   "  restore:verify",
   "  erasure:replay --since <RFC 3339 instant>",
   "  fx:backfill --date <YYYY-MM-DD>",
+  "  diagnostics:sentry-test --yes",
 ].join("\n");
 /** F-93: restore:verify's report isn't ok. */
 const EXIT_RESTORE_NOT_OK = 6;
@@ -248,6 +250,46 @@ async function fxBackfill(
   }
 }
 
+/**
+ * F-93 diagnostics:sentry-test --yes (A-502 (9)): one deliberate error through F-34's reporter,
+ * tagged error_key SENTRY_TEST, then a flush. Without --yes nothing is read or sent (exit 2).
+ */
+async function sentryTest(
+  args: readonly string[],
+  env: Readonly<Record<string, string | undefined>>,
+  io: Io,
+): Promise<number> {
+  if (args.length === 0) {
+    io.stderr("diagnostics:sentry-test sends a test error to Sentry; run it with --yes");
+    return 2;
+  }
+  if (args.length !== 1 || args[0] !== "--yes") {
+    io.stderr(USAGE);
+    return EXIT_USAGE;
+  }
+  const config = loadConfigOrReport(
+    "worker",
+    { ...env, WORKER_ROLES: "general" },
+    readFileSync,
+    io.stderr,
+  );
+  if (config === null) return EXIT_CONFIG;
+  if (config.sentryDsn === undefined) {
+    io.stdout(JSON.stringify({ sent: false }));
+    return 0;
+  }
+  const reporter = initSentry({
+    dsn: config.sentryDsn,
+    environment: config.appEnv,
+    release: config.release,
+    service: "cli",
+  });
+  reporter.report(new Error("budmon sentry test"), { errorKey: "SENTRY_TEST" });
+  await reporter.flush(5000);
+  io.stdout(JSON.stringify({ sent: true }));
+  return 0;
+}
+
 export async function runCli(
   argv: readonly string[],
   env: Readonly<Record<string, string | undefined>>,
@@ -268,6 +310,7 @@ export async function runCli(
   if (command === "fx:backfill") {
     return fxBackfill(argv.slice(1), env, io, deps.clock ?? systemClock);
   }
+  if (command === "diagnostics:sentry-test") return sentryTest(argv.slice(1), env, io);
   if (command !== "jobs:dead" || (sub !== "list" && sub !== "redrive")) {
     io.stderr(`Unknown command: ${[command, sub].filter((x) => x !== undefined).join(" ")}`);
     io.stderr(USAGE);
