@@ -149,8 +149,7 @@ function labels(calls: Call[]): string[] {
 }
 
 describe("TP-16.22: previous-db's fixtures and upgrade-assertions (F-195, A-452)", () => {
-  // A-492's TP-16.22 text says v1.0.0 for the previous release, but the case's previousTag is
-  // v1.1.0 and A-492 (2) sets both variables to opts.previousTag, so v1.1.0 is expected here.
+  // A-492, A-494: the previous release's images run as opts.previousTag (v1.1.0).
   it("TP-16.22 (a) (A-492): the previous migrate runs with BUDMON_TAG and REHEARSAL_RELEASE v1.1.0; the candidate's Compose calls with rehearsal and v1.2.0", async () => {
     writeCase({ "fixtures.sql": "SELECT 1;", "b.test.ts": "", "a.test.ts": "" });
 
