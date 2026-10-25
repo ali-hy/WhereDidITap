@@ -25,10 +25,11 @@ in the platform LLD (F-178); its commands print a one-line reason for every fail
 7. **External accounts:**
    - Backblaze B2: buckets `budmon-exports` and `budmon-erasure-log` (region `eu-central-003`), a
      read-only application key for the API and a read-write key for the worker;
-   - Sentry: two projects, `budmon-server` and `budmon-web` (a DSN each; the install asks for
-     both), with e-mail alerts. In each of `budmon-server`, `budmon-web` and `budmon-android`,
-     turn on Settings → Security & Privacy → **Prevent Storing of IP Addresses** (Budmon sends
-     error events only, with no IP address);
+   - Sentry: three projects, each with e-mail alerts: `budmon-server` and `budmon-web` (the
+     install asks for their DSNs, `SENTRY_DSN` and `WEB_SENTRY_DSN`) and `budmon-android` (its DSN
+     goes into the Android build as `budmon.sentryDsn`, in `~/.budmon/android.properties`). In
+     each project, turn on Settings → Security & Privacy → **Prevent Storing of IP Addresses**
+     (Budmon sends error events only, with no IP address);
    - Google Cloud, in the project used below:
      - the Gmail OAuth client (web application) with the redirect
        `http://localhost:8080/api/v1/…` (Gmail is connected from the laptop's own browser);
@@ -106,8 +107,10 @@ with the configuration problem in its log.
 
 Android Studio and `adb` run on Windows, from a Windows-side clone used only for Android work. The
 emulator uses debug builds against the development stack (`pnpm dev`, `http://10.0.2.2:5173/`). The
-phone gets the `stage0` release build (with `~/.budmon/android.properties`) over `adb` Wi-Fi
-debugging from Windows.
+phone gets the `stage0` release build over `adb` Wi-Fi debugging from Windows, built with
+`~/.budmon/android.properties`, which holds three keys: `budmon.apiBaseUrl` (the laptop's tailnet
+origin), `budmon.googleServerClientId` (the "Budmon sign-in" web client's id) and
+`budmon.sentryDsn` (the `budmon-android` project's DSN).
 
 ## Gmail
 
@@ -127,6 +130,25 @@ laptop's browser when the connection shows "needs reconnect".
   chosen dump.
 - **A command says "release copy mismatch"** (exit 3): run it as `budmon-local …` from `~/.budmon/bin`,
   not from the clone.
+- **"another budmon-local command is running"** (exit 30): `budmon-local` runs one command at a
+  time and never waits. The message names the running command, its pid and when it started (UTC).
+  Wait for it to finish, then run yours again; `status`, `logs` and `maintenance status` work
+  meanwhile. Never delete `~/.budmon/budmon-local.lock`: the lock belongs to the running process,
+  not to the file, and deleting the file would let a second command run at the same time. If
+  `ps -p <pid>` shows that process has gone and the message stays, a process it started still
+  holds the lock: `fuser -v ~/.budmon/budmon-local.lock` (package `psmisc`) names it; let it
+  finish, or end it with `kill <pid>`.
+- **"starting … failed: docker compose up -d for budmon-main (or budmon-capture) exited …"**
+  (exit 31; also `… didn't start on the restored database (…)` and
+  `starting Postgres for first setup failed`): Docker couldn't start a container, and Compose's
+  own reason is printed just above that line. Most often a port is taken: the reason then names
+  `127.0.0.1:8080` (Caddy) or `127.0.0.1:8025` (Mailpit) and says `address already in use` or
+  `port is already allocated`. Stop whatever holds the port (another container, listed by
+  `docker ps`, or another program on the laptop), then run the same command again: it removes and
+  recreates the containers that didn't start. After a failed `upgrade`, the release that was running has been started again;
+  after a failed `restore`, the current release and its database are back. If the command had
+  turned maintenance on, it stays on (`budmon-local maintenance status`): a successful re-run
+  turns it off, and if you don't re-run it, run `budmon-local maintenance off`.
 
 ### A restore didn't finish
 

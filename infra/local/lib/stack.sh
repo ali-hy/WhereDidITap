@@ -1,17 +1,37 @@
 # shellcheck shell=bash
 # budmon-local (F-178): starting, checking and switching the stack; phase B and restore.
 
-# A-502 (2): one project's `up -d`, after removing its containers that never started (for
-# example on a taken port), so a resumed command recreates them. No `-v`: bind mounts and volumes
-# stay. Returns the first non-zero status of the `rm` and the `up -d`; Compose's own stderr
-# reaches the terminal unchanged.
-up_project() {
-  local tag="$1" project="$2" created status=0 code=0
+# A-507 (1): the services of budmon-<project> whose container didn't start, one per line: those
+# `created` (never ran), then those `exited` with a non-empty State.Error (a start that failed
+# after the container had run before). A normal stop or a crash leaves State.Error empty, so those
+# containers are never listed. A failing `ps` counts as none; inspect's exit status is ignored.
+unstarted_services() {
+  local tag="$1" project="$2" created ids
   created="$(compose_for "${tag}" "${project}" ps -a --status created --services 2>/dev/null \
     </dev/null)" || created=""
-  if [ -n "${created}" ]; then
+  ids="$(compose_for "${tag}" "${project}" ps -a --status exited -q 2>/dev/null </dev/null)" || ids=""
+  {
+    printf '%s\n' "${created}"
+    if [ -n "${ids}" ]; then
+      local id_list=()
+      mapfile -t id_list <<<"${ids}"
+      docker container inspect \
+        --format '{{if .State.Error}}{{index .Config.Labels "com.docker.compose.service"}}{{end}}' \
+        "${id_list[@]}" 2>/dev/null </dev/null || true
+    fi
+  } | grep -v '^[[:space:]]*$' || true
+}
+
+# A-502 (2), A-507 (1): one project's `up -d`, after removing its containers that didn't start
+# (for example on a taken port), so a re-run recreates them. No `-v`: bind mounts and volumes stay.
+# Returns the first non-zero status of the `rm` and the `up -d`; Compose's own stderr reaches the
+# terminal unchanged.
+up_project() {
+  local tag="$1" project="$2" unstarted status=0 code=0
+  unstarted="$(unstarted_services "${tag}" "${project}")"
+  if [ -n "${unstarted}" ]; then
     local services=()
-    mapfile -t services <<<"${created}"
+    mapfile -t services <<<"${unstarted}"
     compose_for "${tag}" "${project}" rm -f "${services[@]}" </dev/null || status=$?
   fi
   compose_for "${tag}" "${project}" up -d </dev/null || code=$?

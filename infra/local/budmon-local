@@ -184,11 +184,10 @@ cmd_install() {
     chmod 0600 "${marker}"
   fi
   if ! pg_has_version; then
-    # A-502 (2): a postgres container that never started is recreated, not left behind.
-    local created status=0
-    created="$(compose_for "${tag}" main ps -a --status created --services 2>/dev/null \
-      </dev/null)" || created=""
-    if grep -qx postgres <<<"${created}"; then
+    # A-502 (2), A-507 (1): a postgres container that didn't start is recreated, not left behind.
+    local unstarted status=0
+    unstarted="$(unstarted_services "${tag}" main)"
+    if grep -qx postgres <<<"${unstarted}"; then
       compose_for "${tag}" main rm -f postgres </dev/null || status=$?
     fi
     if [ "${status}" = 0 ]; then
