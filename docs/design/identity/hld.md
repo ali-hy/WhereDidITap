@@ -1,18 +1,18 @@
 ---
 module: identity
 doc: hld
-status: approved # draft | in-review | approved
-version: 0.7
+status: in-review # draft | in-review | approved
+version: 0.8
 author: planner
-approved_by: the user (project owner), delegated auto-approval
-approved_on: 2026-10-07
+approved_by: (v0.6) the user (project owner), delegated auto-approval; v0.8 awaits approval
+approved_on: 2026-10-07 (v0.6)
 ---
 
 # Identity: High-Level Design
 
 Who a Budmon user is, how they get in (invitation, password, Google, two-step verification), how they stay in (sessions), their preferences, and their control over their own data (export, deletion). It also gives every other module the authenticated principal, user lookups, and the extension points that deletion and export need.
 
-Sources: [spec summary](../../product/spec-summary.md) v0.10 §4.1 (`IDN`), §3 (XC-n), §4.13 (`ADM`, identity's dependants), §5 to §8; the user's answers in [round 4](../../product/notes/2026-10-04-round-4-answers.md) (R4), [round 5](../../product/notes/2026-10-04-round-5-answers.md) (R5), [round 6](../../product/notes/2026-10-05-round-6-answers.md) (R6), [platform decisions](../../product/notes/2026-10-05-platform-decisions.md) (PD); the [codebase review](../../product/codebase-review.md) (CR); the approved [platform HLD](../platform/hld.md) v1.3 (cited as **P-D-n**, **P-§n**) and [platform LLD](../platform/lld.md) v1.30, as built on `feat/platform` (cited as **P-F-n**; v0.7 re-checked every citation against it).
+Sources: [spec summary](../../product/spec-summary.md) v0.10 §4.1 (`IDN`), §3 (XC-n), §4.13 (`ADM`, identity's dependants), §5 to §8; the user's answers in [round 4](../../product/notes/2026-10-04-round-4-answers.md) (R4), [round 5](../../product/notes/2026-10-04-round-5-answers.md) (R5), [round 6](../../product/notes/2026-10-05-round-6-answers.md) (R6), [platform decisions](../../product/notes/2026-10-05-platform-decisions.md) (PD); the [codebase review](../../product/codebase-review.md) (CR); the approved [platform HLD](../platform/hld.md) v1.3 (cited as **P-D-n**, **P-§n**) and [platform LLD](../platform/lld.md) v1.29 as built on `feat/platform` plus the docs-only v1.30 and v1.31 (A-509 to A-511, built by identity's slices) (cited as **P-F-n**; v0.7 re-checked every citation against it).
 
 ## Changelog
 
@@ -26,6 +26,7 @@ Sources: [spec summary](../../product/spec-summary.md) v0.10 §4.1 (`IDN`), §3 
 | 0.5     | 2026-10-07 | **Approved** under the owner's standing auto-approval ("auto approve the hlds as well just keep going man", 2026-10-07) after plan review: rounds 1–3 plus a final focused check, whose last finding (refresh tolerance keyed on issue time) is applied exactly as the reviewer specified. The five recommended defaults remain flagged "needs user confirmation". No content change. |
 | 0.6     | 2026-10-07 | Amended during the LLD's design (identity LLD v0.5, DV-9; plan review round 2, Q-1 (a) under the owner's standing delegation): D-3's in-window discarded token now gets a new token while the current token is its unused sibling, instead of always `REFRESH_INVALID`, so concurrent refreshes never sign the user out. The decision line and the F-2 sequence diagram's matching branch are updated ("new tokens if the current token is its unused sibling, else 401 without revocation"); detection of theft unchanged. Status stays `approved` (delegated amendment); **needs user confirmation**. |
 | 0.7     | 2026-11-03 | **Re-baseline of platform citations** (identity LLD v0.7). One decision gains a clause: **D-24** — a browser that has never signed in skips the boot probe (a `localStorage` marker), because the built platform requires a first page load with no console errors (platform A-466) and the probe's two 401s would be logged as errors (planner decision; no product change). Sources now cite platform HLD v1.3 and platform LLD v1.30 as built; §5.6 records that PA-1 to PA-6 landed as platform A-1 to A-6; the §9 risk about unapplied platform amendments is replaced by the drift risk; "P-F-2" (a platform HLD flow, not a platform LLD function) is cited as the platform HLD's flow F-2. The recommended defaults (D-2, D-10, D-19, D-20, D-25) and D-3's v0.6 amendment stay flagged "needs user confirmation". Status stays `approved` under the owner's standing delegation (2026-10-07); this is a re-baseline revision. |
+| 0.8     | 2026-11-03 | Plan review of the v0.7 re-baseline (REVISE). **P-6:** status `in-review`; v0.6's approval no longer covers the document, and v0.8 awaits approval (the owner's, or the main conversation's under the 2026-10-07 delegation; Q-1 is with the owner). **S-15:** §12 records the App Links deferral as a stage-1 gate item. **S-19:** the platform baseline reads "v1.29 as built plus the docs-only v1.30 and v1.31". No decision changed in v0.8. |
 
 ## 1. Context and requirements
 
@@ -1260,7 +1261,7 @@ sequenceDiagram
 | A thief holds the refresh token and the legitimate client never refreshes again (device lost, app uninstalled). | The thief's branch lives until the idle or absolute expiry. | Inherent to bearer refresh tokens; bounded by 30 days idle and 90 days absolute (D-2); the user sees the device in the session list and can sign it out; detection triggers as soon as both sides refresh (D-3). A related case: a thief holding the **immediate predecessor** can redeem it through the benign path. Unless that happens within 60 seconds of the legitimate rotation, the legitimate device's discarded token revokes the session and emails the user the next time it refreshes. An active device refreshes at once, because the thief's redemption replaced its access token (D-3). Residual risk: a redemption within a minute of the legitimate rotation goes undetected, bounded by D-2 and visible in the session list. |
 | Mailpit or SMTP libraries log addresses. | PLT-BR-1 broken in stage 0. | Mailpit `--quiet` with logging driver `none`; the rehearsal's email canary path (PA-2). |
 | A ban erases at once, so `accounts`' default handover (ADM-US-8: the longest-standing member becomes admin) runs before the owner can choose another admin or freeze the account. | The owner's override comes too late for banned users. | Flagged for the `admin` design: its ban screen should list the user's sole-admin shared accounts and take the owner's choice before calling `banEmail`, or `banEmail` should take per-account choices that `accounts`' participant applies. Identity passes `requestedBy = ban` to participants so they can tell. |
-| Platform names drift again between this design and identity's build. | Identity's LLD names the wrong functions or paths. | Resolved for now: PA-1 to PA-6 landed as platform A-1 to A-6, and identity LLD v0.7 re-checked every citation against the built platform (platform LLD v1.30). A later platform change that touches a name identity uses needs an identity amendment. |
+| Platform names drift again between this design and identity's build. | Identity's LLD names the wrong functions or paths. | Resolved for now: PA-1 to PA-6 landed as platform A-1 to A-6, and identity LLD v0.7 re-checked every citation against the built platform (platform LLD v1.29 as built, plus the docs-only v1.30 and v1.31). A later platform change that touches a name identity uses needs an identity amendment. |
 
 ## 10. Assumptions
 
@@ -1301,3 +1302,4 @@ None. v0.1's Q-1 to Q-3 and the reviewer's two questions were settled under the 
 - Breached-password checks against an online service.
 - Copyable invitation links, and finding a user through an invite link (IDN-US-5's second option, D-20).
 - Server-rendered emails in more languages (catalogs only, no code change, P-D-37).
+- **Stage-1 gate item:** Android App Links for `https://budmon.com/invite` (D-23; identity LLD F-219, deferred by LD-11 because stage 0 has no domain and no stage-1 app build). The stage-1 LLD's gate checklist must carry it, next to the Google redirect and email-provider items.

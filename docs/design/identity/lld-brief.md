@@ -1,14 +1,14 @@
 ---
 module: identity
 doc: lld-brief
-summarises: lld.md v0.7
+summarises: lld.md v0.8
 ---
 
 # Identity: LLD brief
 
 A human-readable summary of [the LLD](./lld.md) for review and approval. The LLD is the contract the agents build from; this brief is what the owner reads. If the two ever disagree, the LLD wins and the brief is out of date.
 
-**What's new in v0.7:** nothing about what identity does for you changed. The design was written against an early draft of the platform; since then the platform was built, with about 500 fixes and clarifications. v0.7 checks every place identity relies on the platform against the platform as it was actually built, and corrects the names, files and test helpers it uses. The approval stands under your standing delegation; this is a "re-baseline" revision. Item 7 and item 8 below list what moved.
+**What's new in v0.7 and v0.8:** the design was written against an early draft of the platform; since then the platform was built, with about 500 fixes and clarifications. v0.7 checked every place identity relies on the platform against the platform as it was actually built, and corrected the names, files and test helpers it uses. The plan reviewer then asked for changes, which v0.8 makes: mostly the build order (each slice now adds only what it builds), how the automatic browser tests get the situations they need, and a few platform tests that must change once identity is plugged in. Most of what identity does for you is unchanged, but four things are small visible changes: items 8b, 11 and 12, and one wording effect in item 7. **This version is in review**: it needs approval again (item 18).
 
 ## 1. What this builds
 
@@ -41,18 +41,20 @@ Deliberately left out: changing your email address, passkeys, other sign-in prov
 | 4 | **The capture worker can read the whole `users` row**, including email and name; it still can't see any password, session or code (DV-4). | The platform only supports table-level grants. Column-level grants would be a platform change. | §3.2 |
 | 5 | **Lifetimes are constants in code**, not settings (DV-1). | Changing "30 days" means a small code change, not an environment variable. | F-1 |
 | 6 | **A few extra error cases** beyond the HLD's list (DV-5): for example "your Budmon account is connected to a different Google account", "the owner can't delete their own account", and "your account is already being deleted" (cancelling is refused once the 7 days are up). | They make edge cases explicit; wording is in §8.1. | §6 |
-| 7 | **Re-checked against the platform as built (v0.7).** The main corrections: identity plugs into the platform's real "plug-in points" (the job list, the handler list, the table permissions, the seed list, the public-procedure list, the router and the containers); email settings come ready-parsed from the platform's configuration; Google's PKCE step reuses the platform's helper; the bootstrap command follows the platform's command rules (usage errors before any settings are read, exit 78 for bad settings); web texts follow the platform's lint rules (`{appName}` for the product name, page titles from each page's heading, error message names like `error.invalidCredentials`); the Android app wires into the platform's network client and screen host. Nothing you'd see changes because of these. | Identity's build can start from today's platform without guessing. | §1.1, changelog v0.7 |
-| 8 | **Platform requests.** All twelve earlier requests (PA-1 to PA-12) are built into the platform. v0.7 adds three small ones: **PA-13**, landed as platform amendment **A-509** (docs only): the automatic browser-test stack lets a module add its settings and test helpers, so identity's tests can use a fake Google, a test mailbox and their own pretend network addresses. **PA-15**, landed as **A-510** (docs only): once identity's home page takes over `/`, the platform's placeholder page moves to a test-only address so two platform browser tests keep working. **PA-14** is a platform gap identity fixes in its first slice, with no design change: the platform's design says the server image includes each module's data files, but the built image doesn't yet copy them (identity is the first module with one, the list of common passwords). | All small; the code for them is written in identity's first slices. | §1.1 |
-| 8b | **A browser that has never signed in doesn't ask the server about a session** (HLD D-24 amended in v0.7, planner decision). The web app keeps a small "has signed in here" marker in the browser. Without it, the sign-in page shows at once. Before, every first visit made two failing requests, which browsers log as errors, and the built platform's checks require a first visit with none. The marker only decides whether to ask; the server still decides whether you're signed in. If the marker is missing while you are signed in (for example after clearing site storage), you just sign in again. | A small change to an approved decision, made on your behalf; no product change. | HLD D-24, F-152, TP-1.38 |
+| 7 | **Re-checked against the platform as built (v0.7).** The main corrections: identity plugs into the platform's real "plug-in points" (the job list, the handler list, the table permissions, the seed list, the public-procedure list, the router and the containers); email settings come ready-parsed from the platform's configuration; Google's PKCE step reuses the platform's helper; the bootstrap command follows the platform's command rules (usage errors before any settings are read, exit 78 for bad settings); web texts follow the platform's lint rules (`{appName}` for the product name, page titles from each page's heading, error message names like `error.invalidCredentials`); the Android app wires into the platform's network client and screen host. **One visible effect:** when a form field fails one of identity's own checks (for example an unsupported language or time zone), the web shows the platform's generic "Enter a valid value." under that field rather than a specific message, because the platform's form helper words only its five standard checks. Otherwise nothing you'd see changes. | Identity's build can start from today's platform without guessing. | §1.1, changelog v0.7 |
+| 8 | **Platform requests.** All twelve earlier requests (PA-1 to PA-12) are built into the platform. v0.7 adds three small ones: **PA-13**, landed as platform amendment **A-509** (docs only): the automatic browser-test stack lets a module add its settings and test helpers, so identity's tests can use a fake Google, a test mailbox and their own pretend network addresses. **PA-15**, landed as **A-510** (docs only): once identity's home page takes over `/`, the platform's placeholder page moves to a test-only address so two platform browser tests keep working. v0.8 adds **PA-16**, landed as **A-511** (docs only): about ten of the platform's own tests check the platform with no module plugged in (for example "the seed list has exactly one entry", or "a deletion replay with no erasure handler stops"); each now says what it expects once identity is plugged in, from the identity slice that changes it. **PA-14** is a platform gap identity fixes in its sign-up slice (S-1), with no design change: the platform's design says the server image includes each module's data files, but the built image doesn't yet copy them (identity is the first module with one, the list of common passwords). | All small; the code for them is written in identity's first slices. | §1.1 |
+| 8b | **A browser that has never signed in doesn't ask the server about a session** (HLD D-24 amended in v0.7, planner decision). The web app keeps a small "has signed in here" marker in the browser. Without it, the sign-in page shows at once. Before, every first visit made two failing requests, which browsers log as errors, and the built platform's checks require a first visit with none. The marker only decides whether to ask; the server still decides whether you're signed in. If the marker is missing while you are signed in (for example after clearing site storage), you just sign in again. | A small change to an approved decision, made on your behalf. **Needs user confirmation.** | HLD D-24, F-152, TP-1.38 |
 | 9 | **Reset links open in the phone's browser for the MVP** (LD-9). Your delegated decision Q-1 (a); **needs user confirmation**. | The Android app doesn't open reset links itself. | §1 LD-9 |
 | 10 | **Two tabs refreshing at once never sign you out** (DV-9). The reviewer's option (a), taken under your delegation. The approved HLD's D-3 was amended to match, as HLD v0.6 (a one-line change). **Needs user confirmation**, like the other delegated items. Theft detection is unchanged. | It changes an approved document on your behalf. | §1 DV-9, F-25, HLD v0.6 |
-| 11 | **Invitation links open in the Android app only from stage 1** (LD-11, new in v0.7). The HLD already said "from stage 1"; v0.7 makes it explicit that this build doesn't add it, because the platform has no stage-1 app build yet and the laptop has no domain to verify. On the phone you paste the link (or open it in the browser). | No change to what the HLD promised; it's for the stage-1 work. | §1 LD-11, F-219 |
-| 12 | **The Android app stays usable offline after a restart** (new in v0.7). If the phone starts without a connection, you stay signed in (offline entries keep working) and your profile loads once you're back online. Nothing about you is stored on the phone beyond the encrypted sign-in tokens. | Fills a gap the earlier design left open. | F-207 |
+| 11 | **Invitation links open in the Android app only from stage 1** (LD-11, new in v0.7). The HLD already said "from stage 1"; v0.7 makes it explicit that this build doesn't add it, because the platform has no stage-1 app build yet and the laptop has no domain to verify. On the phone you paste the link (or open it in the browser). | No change to what the HLD promised; it's tracked as a stage-1 gate item (HLD §12). **Needs user confirmation.** | §1 LD-11, F-219 |
+| 12 | **The Android app stays usable offline after a restart** (new in v0.7). If the phone starts without a connection, you stay signed in (offline entries keep working) and your profile loads once you're back online. If the stored sign-in has already expired, the app goes straight to the sign-in screen. Nothing about you is stored on the phone beyond the encrypted sign-in tokens. | Fills a gap the earlier design left open. **Needs user confirmation.** | F-207, TP-3.49 |
 | 13 | **Google sign-in errors land on the sign-in page.** When Google returns to Budmon with an unknown or expired request, you land on `/sign-in` with "Google sign-in didn't complete. Try again." (as the HLD says). Errors on a known request return to the page that started it. | What you'll see when something goes wrong mid-way. | F-82 |
 | 14 | **Admin can record its audit entry in the same step** as each owner action (delete, ban, reset two-step, and so on), and the user-cap email reaches you even when the inviter's account is gone. | Fits the admin portal built next. | F-125, F-32 |
 | 15 | **Other recorded deviations:** no separate "event fan-out" job (DV-6); Edge checked by you rather than automatically (DV-7); the module's files are flat in one folder so the platform's checks cover them (DV-8). | Low impact; listed for completeness. | §1 |
 | 16 | **Manual checks only you can do** (TP-M.1 to TP-M.6): signing in on the laptop and phone, real Google sign-in (web from the laptop; Android), a real authenticator app, the bootstrap command on Windows, Mailpit emails, and sign-in in Edge. The Android tests themselves run in GitHub's `android` job, because the build environment has no Android SDK. | The build environment has no Windows, Android SDK, real Google or real SMTP. | §10.1 |
+| 16b | **Signing out on the web needs the server.** If the sign-out request fails (no connection, server down), you stay signed in and see an error, rather than the page pretending you're signed out while the session stays valid. The web app can't remove its sign-in cookies by itself (they're hidden from page scripts on purpose). | Safer for a shared computer; you just try again. Planner decision. | F-152 |
 | 17 | **Before the first invitation (stage-1 gate):** register the Google sign-in client and Android client IDs, choose the email provider, and set the `budmon.com` redirect. On the laptop now: answer `budmon-local install`'s Google prompts and set the client secret with `budmon-local secret set main/api/GOOGLE_SIGNIN_CLIENT_SECRET`. | Configuration only; no code change. | §7.1, §7.2 |
+| 18 | **Approval of v0.8.** The plan reviewer asks whether your standing delegation (2026-10-07) covers approving this re-baseline, since it slightly changes an approved decision (8b) and adds items 11 and 12. Recommended: yes, the main conversation approves v0.8 after the re-review, with 8b, 11 and 12 on your confirmation list. The other option is that you review those three first. | Only you approve design documents. | Plan review Q-1 |
 
 ## 3. Data
 
@@ -120,32 +122,33 @@ Nothing that grants access is stored in a usable form. Passwords are hashed; tok
 
 | Slice | Delivers | How you'd see it working | Depends on |
 | ----- | -------- | ------------------------ | ---------- |
-| S-0 | Foundations and wiring into the platform | Tests pass, the platform's own tests still pass with identity present, emails appear in Mailpit in development | The platform as built (v1.30) |
-| S-1 | Sign-up from an invitation with a password | An emailed invitation creates an account on web and Android | S-0 |
+| S-0 | Foundations and wiring into the platform (no screens or API calls yet) | Tests pass; the platform's own tests pass, with the changes A-511 describes; the email job sends through a test mailbox | The platform as built (v1.29), plus the docs-only v1.30 and v1.31 |
+| S-1 | Sign-up from an invitation with a password, the web app's start-up and Android's session state | An invitation link creates an account on web and Android; a first visit shows the sign-in page without errors | S-0 |
 | S-2 | Owner bootstrap | `budmon-local bootstrap-owner` prints a link that makes you the owner | S-1 |
 | S-3 | Sign-in, sessions, "confirm it's you" | You stay signed in; the devices list works; sign-out works | S-1 |
 | S-4 | Two-step verification | Your authenticator app's codes are asked for at sign-in | S-3 |
 | S-5 | Password reset and changes | "Forgot password?" emails a working link | S-4 |
 | S-6 | Google Sign-In | "Continue with Google" works on the laptop's browser and on Android | S-4 |
 | S-7 | Profile and preferences | Language changes instantly; base currency asks first | S-3 |
-| S-8 | Invitations | You invite someone; they receive the email and join | S-3 |
+| S-8 | Invitations | You invite someone; they receive the email (Mailpit) and join | S-3 |
+| R-1 | Checkpoint (no new code): the release rehearsal's three identity steps | The rehearsal's owner, email and Google steps run and leak nothing | S-2, S-5, S-6, S-8 |
 | S-9 | Finding a user | Exact-email lookup for sharing | S-3 |
 | S-10 | Data export | A ZIP with CSV and JSON downloads, named `budmon-export-<date>.zip` | S-3 |
 | S-11 | Account deletion | Delete, undo within 7 days, full erasure after | S-8, S-10 |
 | S-12 | Owner services | Ready for the admin portal | S-11 |
 
-Every slice now lists its tests by part (server, web, Android, release rehearsal, manual), so each part is covered before the slice is done.
+Every slice lists its tests by part (server, web, Android, manual), and every slice with an Android part is done only when GitHub's `android` job is green. The plug-in points grow with the slices: a slice adds only the jobs, procedures and hooks it actually builds, so each slice can start and pass its tests on its own. The release-rehearsal cases wait for checkpoint R-1, the first point where all three identity steps can pass; before it, no rehearsal is run with identity.
 
 ## 7. Testing
 
-About 225 test cases:
+About 230 test cases:
 
 | Type | Count | What |
 | ---- | ----- | ---- |
 | Integration | ~140 | Real Postgres, in-process HTTP, the jobs, a fake Google with real signed tokens, and an in-memory mailbox |
 | Unit | ~35 | Server and web |
-| Android | 12 | Run in GitHub's `android` job |
-| End-to-end | ~35 | Playwright in Chromium (and right-to-left), with a fake Google and a test mailbox; three cases in the release rehearsal |
+| Android | 13 | Run in GitHub's `android` job |
+| End-to-end | ~38 | Playwright in Chromium (and right-to-left), with a fake Google, a test mailbox and test-only helpers for situations a fresh test can't reach (an old session that needs "confirm it's you", a full Budmon, deletion blockers); three cases in the release rehearsal, at checkpoint R-1 |
 | Manual | 6 | The owner, on the laptop and phone |
 
 What the tests cover:
@@ -155,8 +158,8 @@ What the tests cover:
 - **Privacy "canary" tests:** fake emails, passwords and tokens go through every flow, and the logs, traces, error reports and job records must never contain them.
 - **The credential-table rule:** the capture worker's database role is refused on every credential table.
 - **Erasure:** a guard test fails if any future table references users without being erased.
-- **The platform still works:** the platform's whole test suite runs unchanged with identity's tables and its link from the platform's idempotency records to users.
-- **The release rehearsal:** the three identity steps (owner bootstrap, emails, Google) run inside the platform's rehearsal. Before the first release there are no committed migrations, so QA runs it locally with a throwaway one (the platform's procedure), and the "broken on purpose" rehearsal runs on the pull request exercise it too.
+- **The platform still works:** the platform's whole test suite runs with identity present. About ten platform tests that assumed "no module plugged in" change as platform amendment A-511 states, each in the identity slice that affects it; every other platform test runs unchanged.
+- **The release rehearsal:** the three identity steps (owner bootstrap, emails, Google) run inside the platform's rehearsal, from checkpoint R-1 (after S-8), because the email step needs invitations (S-8) and resets (S-5), and the Google step runs only after it. Before the first release there are no committed migrations, so QA runs it locally with a throwaway one (the platform's procedure), and the "broken on purpose" rehearsal runs on the pull request exercise it too.
 
 Not covered automatically: real Google, real SMTP, Android on a device, Windows and Edge. These are the manual cases TP-M.1 to TP-M.6.
 
@@ -164,7 +167,7 @@ Not covered automatically: real Google, real SMTP, Android on a device, Windows 
 
 - **Google on the laptop:** until there's a domain, web Google sign-in works only in a browser on the laptop itself; the phone's browser shows a note. The Android app's Google sign-in isn't affected.
 - **Mailpit in stage 0:** emails stay on the laptop (readable at `http://127.0.0.1:8025`). Fine while you're the only user.
-- **Platform alignment:** identity is now aligned with the platform as built (v1.30). A later platform change to a name identity uses needs an identity amendment.
+- **Platform alignment:** identity is now aligned with the platform as built (v1.29) and its docs-only amendments A-509 to A-511 (v1.30, v1.31), which identity's slices build. A later platform change to a name identity uses needs an identity amendment.
 - **Two technical checks happen early in the build:** that the server can set several sign-in cookies in one answer through the API framework (TP-0.33), and that browsers keep `Secure` cookies on `http://localhost` (TP-0.30). If either fails, the planner decides the fix as an amendment before later slices start.
 - **Later modules must join erasure and export:** every module that stores user data registers how it's erased and exported. The guard test catches the ones that forget.
 - **Lost authenticator and lost codes:** only you, as owner, can help (by turning two-step off for that user). The user is emailed when you do.

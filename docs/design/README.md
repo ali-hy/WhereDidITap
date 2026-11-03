@@ -37,5 +37,5 @@ Templates (including `lld-brief.md`) are in [`_templates/`](./_templates) and [`
 
 | Module | HLD | LLD |
 | ------ | --- | --- |
-| `platform` | [hld.md](./platform/hld.md) (approved, v1.3) | [lld.md](./platform/lld.md) (approved, v1.30); [brief](./platform/lld-brief.md) |
-| `identity` | [hld.md](./identity/hld.md) (approved, v0.7, re-baseline) | [lld.md](./identity/lld.md) (approved, v0.7, re-baseline on platform LLD v1.30); [brief](./identity/lld-brief.md) |
+| `platform` | [hld.md](./platform/hld.md) (approved, v1.3) | [lld.md](./platform/lld.md) (approved, v1.31; A-509 to A-511 are docs-only amendments for identity); [brief](./platform/lld-brief.md) |
+| `identity` | [hld.md](./identity/hld.md) (in-review, v0.8; v0.6 was approved) | [lld.md](./identity/lld.md) (in-review, v0.8, re-baseline on platform LLD v1.29 as built plus the docs-only v1.30 and v1.31; v0.6 was approved); [brief](./identity/lld-brief.md) |
