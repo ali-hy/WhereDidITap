@@ -1,14 +1,14 @@
 ---
 module: identity
 doc: lld-brief
-summarises: lld.md v0.9
+summarises: lld.md v0.10
 ---
 
 # Identity: LLD brief
 
 A human-readable summary of [the LLD](./lld.md) for review and approval. The LLD is the contract the agents build from; this brief is what the owner reads. If the two ever disagree, the LLD wins and the brief is out of date.
 
-**What's new in v0.7 to v0.9:** the design was written against an early draft of the platform; since then the platform was built, with about 500 fixes and clarifications. v0.7 checked every place identity relies on the platform against the platform as it was actually built, and corrected the names, files and test helpers it uses. The plan reviewer then asked for changes, which v0.8 and v0.9 make: mostly the build order (each slice now adds only what it builds), how the automatic browser tests get the situations they need, a few platform tests that must change once identity is plugged in, and (v0.9) who switches the web app's language after sign-in, what a browser with an outdated "signed in here" marker sees, and how the Android app recovers when the server can't be reached. Most of what identity does for you is unchanged, but four things are small visible changes: items 8b, 11 and 12, and one wording effect in item 7. **This version is a draft** until the plan reviewer passes it; then it needs approval again (item 18).
+**What's new in v0.7 to v0.10:** the design was written against an early draft of the platform; since then the platform was built, with about 500 fixes and clarifications. v0.7 checked every place identity relies on the platform against the platform as it was actually built, and corrected the names, files and test helpers it uses. The plan reviewer then asked for changes, which v0.8 to v0.10 make: mostly the build order (each slice now adds only what it builds), how the automatic browser tests get the situations they need, a few platform tests that must change once identity is plugged in, and (v0.9) who switches the web app's language after sign-in, what a browser with an outdated "signed in here" marker sees, and how the Android app recovers when the server can't be reached. Most of what identity does for you is unchanged, but four things are small visible changes: items 8b, 11 and 12, and one wording effect in item 7. **This version is in review:** it passed plan review and now needs approval (item 18).
 
 ## 1. What this builds
 
@@ -54,7 +54,7 @@ Deliberately left out: changing your email address, passkeys, other sign-in prov
 | 16 | **Manual checks only you can do** (TP-M.1 to TP-M.6): signing in on the laptop and phone, real Google sign-in (web from the laptop; Android), a real authenticator app, the bootstrap command on Windows, Mailpit emails, and sign-in in Edge. The Android tests themselves run in GitHub's `android` job, because the build environment has no Android SDK. | The build environment has no Windows, Android SDK, real Google or real SMTP. | §10.1 |
 | 16b | **Signing out on the web needs the server.** If the sign-out request fails (no connection, server down), you stay signed in and see an error, rather than the page pretending you're signed out while the session stays valid. The web app can't remove its sign-in cookies by itself (they're hidden from page scripts on purpose). | Safer for a shared computer; you just try again. Planner decision. | F-152 |
 | 17 | **Before the first invitation (stage-1 gate):** register the Google sign-in client and Android client IDs, choose the email provider, and set the `budmon.com` redirect. On the laptop now: answer `budmon-local install`'s Google prompts and set the client secret with `budmon-local secret set main/api/GOOGLE_SIGNIN_CLIENT_SECRET`. | Configuration only; no code change. | §7.1, §7.2 |
-| 18 | **Approval of this re-baseline (now v0.9).** The plan reviewer asks whether your standing delegation (2026-10-07) covers approving this re-baseline, since it slightly changes an approved decision (8b) and adds items 11 and 12. Recommended: yes, the main conversation approves it once a re-review passes, with 8b, 11 and 12 on your confirmation list. The other option is that you review those three first. | Only you approve design documents. | Plan review Q-1 |
+| 18 | **Approval of this re-baseline (now v0.9).** The plan reviewer asks whether your standing delegation (2026-10-07) covers approving this re-baseline, since it slightly changes an approved decision (8b) and adds items 11 and 12. Recommended: yes, the main conversation approves it now that the re-review has passed, with 8b, 11 and 12 on your confirmation list. The other option is that you review those three first. | Only you approve design documents. | Plan review Q-1 |
 
 ## 3. Data
 
