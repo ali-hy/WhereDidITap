@@ -1,0 +1,187 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "minor": "12345",
+      "from": {
+        "currency": "EGP",
+        "unitsPerUsd": "48.5",
+        "minorUnits": 2
+      },
+      "to": {
+        "currency": "JPY",
+        "unitsPerUsd": "149.25",
+        "minorUnits": 0
+      },
+      "expected": "380"
+    },
+    {
+      "minor": "100000",
+      "from": {
+        "currency": "JPY",
+        "unitsPerUsd": "149.25",
+        "minorUnits": 0
+      },
+      "to": {
+        "currency": "KWD",
+        "unitsPerUsd": "0.3071",
+        "minorUnits": 3
+      },
+      "expected": "205762"
+    },
+    {
+      "minor": "12345",
+      "from": {
+        "currency": "USD",
+        "unitsPerUsd": "1",
+        "minorUnits": 2
+      },
+      "to": {
+        "currency": "EGP",
+        "unitsPerUsd": "48.5",
+        "minorUnits": 2
+      },
+      "expected": "598732"
+    },
+    {
+      "minor": "9000000000000000",
+      "from": {
+        "currency": "EGP",
+        "unitsPerUsd": "48.5",
+        "minorUnits": 2
+      },
+      "to": {
+        "currency": "USD",
+        "unitsPerUsd": "1",
+        "minorUnits": 2
+      },
+      "expected": "185567010309278"
+    },
+    {
+      "minor": "-12345",
+      "from": {
+        "currency": "EGP",
+        "unitsPerUsd": "48.5",
+        "minorUnits": 2
+      },
+      "to": {
+        "currency": "JPY",
+        "unitsPerUsd": "149.25",
+        "minorUnits": 0
+      },
+      "expected": "-380"
+    },
+    {
+      "minor": "1",
+      "from": {
+        "currency": "USD",
+        "unitsPerUsd": "1",
+        "minorUnits": 2
+      },
+      "to": {
+        "currency": "JPY",
+        "unitsPerUsd": "149.25",
+        "minorUnits": 0
+      },
+      "expected": "1"
+    },
+    {
+      "minor": "50",
+      "from": {
+        "currency": "EUR",
+        "unitsPerUsd": "0.92345",
+        "minorUnits": 2
+      },
+      "to": {
+        "currency": "USD",
+        "unitsPerUsd": "1",
+        "minorUnits": 2
+      },
+      "expected": "54"
+    },
+    {
+      "minor": "1",
+      "from": {
+        "currency": "JPY",
+        "unitsPerUsd": "149.25",
+        "minorUnits": 0
+      },
+      "to": {
+        "currency": "KWD",
+        "unitsPerUsd": "0.3071",
+        "minorUnits": 3
+      },
+      "expected": "2"
+    },
+    {
+      "minor": "0",
+      "from": {
+        "currency": "EGP",
+        "unitsPerUsd": "48.5",
+        "minorUnits": 2
+      },
+      "to": {
+        "currency": "USD",
+        "unitsPerUsd": "1",
+        "minorUnits": 2
+      },
+      "expected": "0"
+    },
+    {
+      "minor": "2425",
+      "from": {
+        "currency": "EGP",
+        "unitsPerUsd": "48.5",
+        "minorUnits": 2
+      },
+      "to": {
+        "currency": "USD",
+        "unitsPerUsd": "1",
+        "minorUnits": 2
+      },
+      "expected": "50"
+    },
+    {
+      "minor": "1",
+      "from": {
+        "currency": "USD",
+        "unitsPerUsd": "1",
+        "minorUnits": 2
+      },
+      "to": {
+        "currency": "JPY",
+        "unitsPerUsd": "250",
+        "minorUnits": 0
+      },
+      "expected": "2"
+    },
+    {
+      "minor": "3",
+      "from": {
+        "currency": "USD",
+        "unitsPerUsd": "1",
+        "minorUnits": 2
+      },
+      "to": {
+        "currency": "JPY",
+        "unitsPerUsd": "250",
+        "minorUnits": 0
+      },
+      "expected": "8"
+    },
+    {
+      "minor": "-1",
+      "from": {
+        "currency": "USD",
+        "unitsPerUsd": "1",
+        "minorUnits": 2
+      },
+      "to": {
+        "currency": "JPY",
+        "unitsPerUsd": "250",
+        "minorUnits": 0
+      },
+      "expected": "-2"
+    }
+  ]
+}

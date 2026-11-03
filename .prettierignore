@@ -1,0 +1,9 @@
+node_modules
+dist
+build
+coverage
+pnpm-lock.yaml
+docs
+.claude
+packages/contract/openapi.json
+apps/android/app/schemas

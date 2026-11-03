@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "minor": "123450",
+      "currency": "EGP",
+      "minorUnits": 2,
+      "locale": "en-US",
+      "expected": "EGP 1,234.50"
+    },
+    {
+      "minor": "-123450",
+      "currency": "EGP",
+      "minorUnits": 2,
+      "locale": "en-US",
+      "expected": "-EGP 1,234.50"
+    },
+    {
+      "minor": "123450",
+      "currency": "EGP",
+      "minorUnits": 2,
+      "locale": "de-DE",
+      "expected": "1.234,50 EGP"
+    },
+    {
+      "minor": "-123450",
+      "currency": "EGP",
+      "minorUnits": 2,
+      "locale": "de-DE",
+      "expected": "-1.234,50 EGP"
+    },
+    {
+      "minor": "1235",
+      "currency": "JPY",
+      "minorUnits": 0,
+      "locale": "en-US",
+      "expected": "JPY 1,235"
+    },
+    {
+      "minor": "-1235",
+      "currency": "JPY",
+      "minorUnits": 0,
+      "locale": "en-US",
+      "expected": "-JPY 1,235"
+    },
+    {
+      "minor": "1235",
+      "currency": "JPY",
+      "minorUnits": 0,
+      "locale": "de-DE",
+      "expected": "1.235 JPY"
+    },
+    {
+      "minor": "-1235",
+      "currency": "JPY",
+      "minorUnits": 0,
+      "locale": "de-DE",
+      "expected": "-1.235 JPY"
+    },
+    {
+      "minor": "1234567",
+      "currency": "KWD",
+      "minorUnits": 3,
+      "locale": "en-US",
+      "expected": "KWD 1,234.567"
+    },
+    {
+      "minor": "-1234567",
+      "currency": "KWD",
+      "minorUnits": 3,
+      "locale": "en-US",
+      "expected": "-KWD 1,234.567"
+    },
+    {
+      "minor": "1234567",
+      "currency": "KWD",
+      "minorUnits": 3,
+      "locale": "de-DE",
+      "expected": "1.234,567 KWD"
+    },
+    {
+      "minor": "-1234567",
+      "currency": "KWD",
+      "minorUnits": 3,
+      "locale": "de-DE",
+      "expected": "-1.234,567 KWD"
+    },
+    {
+      "minor": "0",
+      "currency": "EGP",
+      "minorUnits": 2,
+      "locale": "en-US",
+      "expected": "EGP 0.00"
+    },
+    {
+      "minor": "5",
+      "currency": "EGP",
+      "minorUnits": 2,
+      "locale": "en-US",
+      "expected": "EGP 0.05"
+    },
+    {
+      "minor": "-5",
+      "currency": "KWD",
+      "minorUnits": 3,
+      "locale": "de-DE",
+      "expected": "-0,005 KWD"
+    },
+    {
+      "minor": "9007199254740993",
+      "currency": "EGP",
+      "minorUnits": 2,
+      "locale": "en-US",
+      "expected": "EGP 90,071,992,547,409.93"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "api-stage-env": "no-stage-setting",
+  "api-capture-secret": "cross-role-secrets",
+  "api-capture-key": "cross-role-secrets",
+  "capture-on-data": "cross-role-secrets",
+  "mailpit-logged": "mailpit-quiet"
+}

@@ -1,0 +1,9 @@
+# A-393: the build context for images/server and images/web is the repository root.
+**/node_modules
+.git
+.data
+.tools
+.claude
+**/dist
+apps/android
+docs

@@ -93,3 +93,11 @@ Hetzner's cheap tier became unavailable (whole CX/CAX line marked unavailable si
 ## Auto-approval of design documents (2026-10-07)
 
 User: "auto approve the hlds as well just keep going man. I want you to skip the human in the loop (me) and just keep going". From now on, HLDs and LLDs that pass plan review are approved on the owner's behalf by the main conversation, and the pipeline continues (platform build, then identity design and build) without waiting for the owner. Open questions take the recommended option and are flagged "needs user confirmation" in the PR.
+
+## Owner confirmations (2026-10-09)
+
+User, replying to the list of build-time amendments needing confirmation: "These sound good". Confirmed:
+
+- A-227 to A-230: worker-capture is restricted to its own pg-boss queues by grants and row-level security (it can only send general work to queues flagged `sendableFromCapture`).
+- A-188: client IP addresses are never logged; the rate limiter stores only an HMAC of the subject.
+- A-191: the rate-limit text users see ("Too many attempts. Try again in # minute(s).") is client-side; the server's "Too many requests" is a developer message.
