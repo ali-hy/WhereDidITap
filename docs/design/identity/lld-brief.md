@@ -1,12 +1,14 @@
 ---
 module: identity
 doc: lld-brief
-summarises: lld.md v0.6
+summarises: lld.md v0.7
 ---
 
 # Identity: LLD brief
 
 A human-readable summary of [the LLD](./lld.md) for review and approval. The LLD is the contract the agents build from; this brief is what the owner reads. If the two ever disagree, the LLD wins and the brief is out of date.
+
+**What's new in v0.7:** nothing about what identity does for you changed. The design was written against an early draft of the platform; since then the platform was built, with about 500 fixes and clarifications. v0.7 checks every place identity relies on the platform against the platform as it was actually built, and corrects the names, files and test helpers it uses. The approval stands under your standing delegation; this is a "re-baseline" revision. Item 7 and item 8 below list what moved.
 
 ## 1. What this builds
 
@@ -27,7 +29,7 @@ When identity is done, Budmon has real users:
 - **For other modules:** the "who is calling" check on every request, a way to look up a user by exact email, attribution names, and hooks that let each module take part in data export and account erasure.
 - **For the admin portal (built next):** ready-made operations for the owner: list users and invitations, set the user cap and allowances, delete or ban users, and reset someone's two-step verification. The portal's screens and audit log are `admin`'s.
 
-Deliberately left out: changing your email address, passkeys, other sign-in providers, a "recent security activity" screen (events are recorded, not shown), and copyable invitation links.
+Deliberately left out: changing your email address, passkeys, other sign-in providers, a "recent security activity" screen (events are recorded, not shown), copyable invitation links, and (until there's a domain) opening invitation links straight in the Android app.
 
 ## 2. Needs your attention
 
@@ -39,15 +41,18 @@ Deliberately left out: changing your email address, passkeys, other sign-in prov
 | 4 | **The capture worker can read the whole `users` row**, including email and name; it still can't see any password, session or code (DV-4). | The platform only supports table-level grants. Column-level grants would be a platform change. | §3.2 |
 | 5 | **Lifetimes are constants in code**, not settings (DV-1). | Changing "30 days" means a small code change, not an environment variable. | F-1 |
 | 6 | **A few extra error cases** beyond the HLD's list (DV-5): for example "your Budmon account is connected to a different Google account", "the owner can't delete their own account", and "your account is already being deleted" (cancelling is refused once the 7 days are up). | They make edge cases explicit; wording is in §8.1. | §6 |
-| 7 | **Built on the platform LLD v0.13.** Your earlier requests PA-1 to PA-6 are in it as amendments A-1 to A-6, and identity uses their exact names. The `budmon-local bootstrap-owner` command and Android's Google client-ID setting are the platform's, not identity's. | Nothing to align later. | §1 |
-| 8 | **Six platform requests have landed** in the platform LLD v0.13. PA-7 to PA-11 are A-22 to A-26: a proper file name for export downloads; a "delete all" for Android's offline queue; Google sign-in and the email privacy check in the release rehearsal (with a separate rehearsal owner address); and named spots where modules plug in. **PA-12 is A-33:** the rehearsal's Google sign-in step identifies itself as the web app, using the build number it reads from the deployed `/version.json`, so identity's protection against cross-site sign-in requests lets it through. Identity's own first slice still adds the `identity` slot to the platform's containers. | Nothing left waiting on the platform. | §1.1 |
+| 7 | **Re-checked against the platform as built (v0.7).** The main corrections: identity plugs into the platform's real "plug-in points" (the job list, the handler list, the table permissions, the seed list, the public-procedure list, the router and the containers); email settings come ready-parsed from the platform's configuration; Google's PKCE step reuses the platform's helper; the bootstrap command follows the platform's command rules (usage errors before any settings are read, exit 78 for bad settings); web texts follow the platform's lint rules (`{appName}` for the product name, page titles from each page's heading, error message names like `error.invalidCredentials`); the Android app wires into the platform's network client and screen host. Nothing you'd see changes because of these. | Identity's build can start from today's platform without guessing. | §1.1, changelog v0.7 |
+| 8 | **Platform requests.** All twelve earlier requests (PA-1 to PA-12) are built into the platform. v0.7 adds three small ones: **PA-13**, landed as platform amendment **A-509** (docs only): the automatic browser-test stack lets a module add its settings and test helpers, so identity's tests can use a fake Google, a test mailbox and their own pretend network addresses. **PA-15**, landed as **A-510** (docs only): once identity's home page takes over `/`, the platform's placeholder page moves to a test-only address so two platform browser tests keep working. **PA-14** is a platform gap identity fixes in its first slice, with no design change: the platform's design says the server image includes each module's data files, but the built image doesn't yet copy them (identity is the first module with one, the list of common passwords). | All small; the code for them is written in identity's first slices. | §1.1 |
+| 8b | **A browser that has never signed in doesn't ask the server about a session** (HLD D-24 amended in v0.7, planner decision). The web app keeps a small "has signed in here" marker in the browser. Without it, the sign-in page shows at once. Before, every first visit made two failing requests, which browsers log as errors, and the built platform's checks require a first visit with none. The marker only decides whether to ask; the server still decides whether you're signed in. If the marker is missing while you are signed in (for example after clearing site storage), you just sign in again. | A small change to an approved decision, made on your behalf; no product change. | HLD D-24, F-152, TP-1.38 |
 | 9 | **Reset links open in the phone's browser for the MVP** (LD-9). Your delegated decision Q-1 (a); **needs user confirmation**. | The Android app doesn't open reset links itself. | §1 LD-9 |
 | 10 | **Two tabs refreshing at once never sign you out** (DV-9). The reviewer's option (a), taken under your delegation. The approved HLD's D-3 was amended to match, as HLD v0.6 (a one-line change). **Needs user confirmation**, like the other delegated items. Theft detection is unchanged. | It changes an approved document on your behalf. | §1 DV-9, F-25, HLD v0.6 |
-| 11 | **Google sign-in errors land on the sign-in page.** When Google returns to Budmon with an unknown or expired request, you land on `/sign-in` with "Google sign-in didn't complete. Try again." (as the HLD says). Errors on a known request return to the page that started it. | What you'll see when something goes wrong mid-way. | F-82 |
-| 12 | **Admin can record its audit entry in the same step** as each owner action (delete, ban, reset two-step, and so on), and the user-cap email reaches you even when the inviter's account is gone. | Fits the admin portal built next. | F-125, F-32 |
-| 13 | **Other recorded deviations:** no separate "event fan-out" job (DV-6); Edge checked by you rather than automatically (DV-7); the module's files are flat in one folder so the platform's checks cover them (DV-8). | Low impact; listed for completeness. | §1 |
-| 14 | **Manual checks only you can do** (TP-M.1 to TP-M.6): signing in on the laptop and phone, real Google sign-in (web from the laptop; Android), a real authenticator app, the bootstrap command on Windows, Mailpit emails, and sign-in in Edge. | The build environment has no Windows, Android SDK, real Google or real SMTP. | §10.1 |
-| 15 | **Before the first invitation (stage-1 gate):** register the Google sign-in client and Android client IDs, choose the email provider, and set the `budmon.com` redirect. | Configuration only; no code change. | §7.1, §7.2 |
+| 11 | **Invitation links open in the Android app only from stage 1** (LD-11, new in v0.7). The HLD already said "from stage 1"; v0.7 makes it explicit that this build doesn't add it, because the platform has no stage-1 app build yet and the laptop has no domain to verify. On the phone you paste the link (or open it in the browser). | No change to what the HLD promised; it's for the stage-1 work. | §1 LD-11, F-219 |
+| 12 | **The Android app stays usable offline after a restart** (new in v0.7). If the phone starts without a connection, you stay signed in (offline entries keep working) and your profile loads once you're back online. Nothing about you is stored on the phone beyond the encrypted sign-in tokens. | Fills a gap the earlier design left open. | F-207 |
+| 13 | **Google sign-in errors land on the sign-in page.** When Google returns to Budmon with an unknown or expired request, you land on `/sign-in` with "Google sign-in didn't complete. Try again." (as the HLD says). Errors on a known request return to the page that started it. | What you'll see when something goes wrong mid-way. | F-82 |
+| 14 | **Admin can record its audit entry in the same step** as each owner action (delete, ban, reset two-step, and so on), and the user-cap email reaches you even when the inviter's account is gone. | Fits the admin portal built next. | F-125, F-32 |
+| 15 | **Other recorded deviations:** no separate "event fan-out" job (DV-6); Edge checked by you rather than automatically (DV-7); the module's files are flat in one folder so the platform's checks cover them (DV-8). | Low impact; listed for completeness. | §1 |
+| 16 | **Manual checks only you can do** (TP-M.1 to TP-M.6): signing in on the laptop and phone, real Google sign-in (web from the laptop; Android), a real authenticator app, the bootstrap command on Windows, Mailpit emails, and sign-in in Edge. The Android tests themselves run in GitHub's `android` job, because the build environment has no Android SDK. | The build environment has no Windows, Android SDK, real Google or real SMTP. | §10.1 |
+| 17 | **Before the first invitation (stage-1 gate):** register the Google sign-in client and Android client IDs, choose the email provider, and set the `budmon.com` redirect. On the laptop now: answer `budmon-local install`'s Google prompts and set the client secret with `budmon-local secret set main/api/GOOGLE_SIGNIN_CLIENT_SECRET`. | Configuration only; no code change. | §7.1, §7.2 |
 
 ## 3. Data
 
@@ -71,6 +76,8 @@ Fifteen new tables, all owned by identity. "Credential" tables are never readabl
 
 Nothing that grants access is stored in a usable form. Passwords are hashed; tokens are hashed; recovery codes are keyed hashes; the authenticator secret is encrypted.
 
+**How the tables reach the laptop:** like the platform's, they arrive in the first release's single database migration, generated on the release branch. The identity branch itself carries no migration files (the platform's rule), and the generated SQL needs no hand edits.
+
 ## 4. API and screens
 
 **API** (all under `/api/v1`, about 50 procedures):
@@ -90,14 +97,15 @@ Nothing that grants access is stored in a usable form. Passwords are hashed; tok
 - **Invitations** (`/invitations/…`): list, allowance, send, resend, cancel; preview and accept (public).
 - **Others:** look up a user by exact email; data exports (list, request, download link); account deletion (check, request, cancel).
 - **One route outside the API description:** Google's return address. It only ever redirects back into the app.
+- **Test-only helper addresses** (`/api/v1/__test/…`) exist only in the automatic browser-test stack, never on the laptop.
 
-**Screens** (web and Android): sign in; two-step code; forgot password and new password; invitation landing, account set-up and invitation problems; Android's "paste your invitation link"; settings home; profile and preferences; sign-in and security (password, Google, two-step, devices); two-step setup with QR code and recovery codes; invite people; your data (export); delete account; the "account will be deleted" banner; the "confirm it's you" dialog; the first-run home ("Welcome to Budmon, {name}."); and a public privacy notice at `/privacy` (its full text is in the LLD, §8.3). Every screen has its empty, loading, error and long-content states, and every message is listed word for word in the LLD.
+**Screens** (web and Android): sign in; two-step code; forgot password and new password; invitation landing, account set-up and invitation problems; Android's "paste your invitation link"; settings home; profile and preferences; sign-in and security (password, Google, two-step, devices); two-step setup with QR code and recovery codes; invite people; your data (export); delete account; the "account will be deleted" banner; the "confirm it's you" dialog; the first-run home ("Welcome to Budmon, {name}."); and a public privacy notice at `/privacy` (its full text is in the LLD, §8.3). Every screen has its empty, loading, error and long-content states, every message is listed word for word in the LLD, and every web page's browser-tab title follows its heading.
 
 ## 5. Functions at a glance
 
 | Area | Functions | Responsibility | Worth a look |
 | ---- | --------- | -------------- | ------------ |
-| Foundations | F-1 to F-39 (about 35) | Constants, token and cookie helpers, repositories, session creation, the per-request sign-in check, limits, email sending and templates, jobs, wiring. | **F-24** the per-request check (cookies only from the web app; bearer only from Android). **F-32** invitation and reset links are created inside the email job, so the link never sits anywhere else. **F-39** password hashing with a cap on parallel work. |
+| Foundations | F-1 to F-39 (about 36) | Constants, token and cookie helpers, metrics, repositories, session creation, the per-request sign-in check, limits, email sending and templates, jobs, wiring into the platform. | **F-24** the per-request check (cookies only from the web app; bearer only from Android). **F-32** invitation and reset links are created inside the email job, so the link never sits anywhere else. **F-34** how identity plugs into the platform's containers. **F-39** password hashing with a cap on parallel work. |
 | Sign-up and bootstrap | F-40 to F-47 | Invitation preview and acceptance; the owner bootstrap command and its laptop wrapper. | **F-41** the user cap is re-checked when someone accepts. **F-46/F-47** the owner link is printed only to your terminal and never reaches logs. |
 | Sign-in, sessions, step-up | F-50 to F-59, F-25, F-130 | Password sign-in, two-step at sign-in, refresh, devices list, "confirm it's you", hourly clean-up. | **F-25** the refresh rules that catch a stolen refresh token without signing out honest users. **F-50** the limits that stop guessing without letting a stranger lock you out. |
 | Two-step | F-60 to F-68 | Authenticator codes, recovery codes, setup, turning off, new codes, new phone. | **F-62** authenticator codes are limited per person, recovery codes aren't, so a password thief can't lock you out. |
@@ -106,13 +114,13 @@ Nothing that grants access is stored in a usable form. Passwords are hashed; tok
 | Profile, invitations, lookup | F-90, F-95 to F-106 | Preferences, invitations with allowance and cap, exact-email lookup, names for other modules. | **F-95** the exact order of refusal reasons. |
 | Export and deletion | F-110 to F-119 | ZIP export; deletion with grace, erasure across modules, replay after a restore. | **F-118** erasure writes its log record first and is safe to repeat. |
 | Owner services | F-125 | Operations for the admin portal. | **Ban** closes the account at once and erases it within minutes. |
-| Web and Android | F-150 to F-173, F-200 to F-220 | Screens, silent session renewal, encrypted token storage on Android, Credential Manager. | **F-150/F-203** single-flight renewal on both apps. **F-205** unsynced offline entries never sync into another person's account. |
+| Web and Android | F-150 to F-174, F-200 to F-220 | Screens, silent session renewal, error wording, encrypted token storage on Android, Credential Manager. | **F-150/F-203** single-flight renewal on both apps. **F-205** unsynced offline entries never sync into another person's account. |
 
 ## 6. Build plan
 
 | Slice | Delivers | How you'd see it working | Depends on |
 | ----- | -------- | ------------------------ | ---------- |
-| S-0 | Foundations | Tests pass; emails appear in Mailpit in development | Platform v0.13 (A-1 to A-6, A-22 to A-26) |
+| S-0 | Foundations and wiring into the platform | Tests pass, the platform's own tests still pass with identity present, emails appear in Mailpit in development | The platform as built (v1.30) |
 | S-1 | Sign-up from an invitation with a password | An emailed invitation creates an account on web and Android | S-0 |
 | S-2 | Owner bootstrap | `budmon-local bootstrap-owner` prints a link that makes you the owner | S-1 |
 | S-3 | Sign-in, sessions, "confirm it's you" | You stay signed in; the devices list works; sign-out works | S-1 |
@@ -126,15 +134,18 @@ Nothing that grants access is stored in a usable form. Passwords are hashed; tok
 | S-11 | Account deletion | Delete, undo within 7 days, full erasure after | S-8, S-10 |
 | S-12 | Owner services | Ready for the admin portal | S-11 |
 
+Every slice now lists its tests by part (server, web, Android, release rehearsal, manual), so each part is covered before the slice is done.
+
 ## 7. Testing
 
-About 216 test cases:
+About 225 test cases:
 
 | Type | Count | What |
 | ---- | ----- | ---- |
-| Integration | ~135 | Real Postgres, in-process HTTP, the jobs, a fake Google with real signed tokens, and an in-memory mailbox |
-| Unit | ~30 | Server, web and Android |
-| End-to-end | ~30 | Playwright in Chromium, with a fake Google and a test mailbox; the stage-0 rehearsal |
+| Integration | ~140 | Real Postgres, in-process HTTP, the jobs, a fake Google with real signed tokens, and an in-memory mailbox |
+| Unit | ~35 | Server and web |
+| Android | 12 | Run in GitHub's `android` job |
+| End-to-end | ~35 | Playwright in Chromium (and right-to-left), with a fake Google and a test mailbox; three cases in the release rehearsal |
 | Manual | 6 | The owner, on the laptop and phone |
 
 What the tests cover:
@@ -144,6 +155,8 @@ What the tests cover:
 - **Privacy "canary" tests:** fake emails, passwords and tokens go through every flow, and the logs, traces, error reports and job records must never contain them.
 - **The credential-table rule:** the capture worker's database role is refused on every credential table.
 - **Erasure:** a guard test fails if any future table references users without being erased.
+- **The platform still works:** the platform's whole test suite runs unchanged with identity's tables and its link from the platform's idempotency records to users.
+- **The release rehearsal:** the three identity steps (owner bootstrap, emails, Google) run inside the platform's rehearsal. Before the first release there are no committed migrations, so QA runs it locally with a throwaway one (the platform's procedure), and the "broken on purpose" rehearsal runs on the pull request exercise it too.
 
 Not covered automatically: real Google, real SMTP, Android on a device, Windows and Edge. These are the manual cases TP-M.1 to TP-M.6.
 
@@ -151,6 +164,7 @@ Not covered automatically: real Google, real SMTP, Android on a device, Windows 
 
 - **Google on the laptop:** until there's a domain, web Google sign-in works only in a browser on the laptop itself; the phone's browser shows a note. The Android app's Google sign-in isn't affected.
 - **Mailpit in stage 0:** emails stay on the laptop (readable at `http://127.0.0.1:8025`). Fine while you're the only user.
-- **Platform alignment:** identity is aligned with platform v0.13. Any later change to the platform's names would need an identity amendment.
+- **Platform alignment:** identity is now aligned with the platform as built (v1.30). A later platform change to a name identity uses needs an identity amendment.
+- **Two technical checks happen early in the build:** that the server can set several sign-in cookies in one answer through the API framework (TP-0.33), and that browsers keep `Secure` cookies on `http://localhost` (TP-0.30). If either fails, the planner decides the fix as an amendment before later slices start.
 - **Later modules must join erasure and export:** every module that stores user data registers how it's erased and exported. The guard test catches the ones that forget.
 - **Lost authenticator and lost codes:** only you, as owner, can help (by turning two-step off for that user). The user is emailed when you do.
