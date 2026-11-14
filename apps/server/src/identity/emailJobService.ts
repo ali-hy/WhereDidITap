@@ -47,9 +47,10 @@ const EVENT_KINDS: ReadonlySet<EmailKind> = new Set<EmailKind>([
   "google_unlinked",
 ]);
 
-/** Set when a stored zone was rejected, so the job logs once per email. */
+/** Set when a stored zone or locale was rejected, so the job logs once per email. */
 interface ZoneNote {
   invalidZone: boolean;
+  invalidLocale: boolean;
 }
 
 const isValidZone = (timeZone: string): boolean => {
@@ -60,6 +61,17 @@ const isValidZone = (timeZone: string): boolean => {
     return false;
   }
 };
+
+/** Pseudo-locales and unsupported tags format as `en`; a malformed tag is also noted. */
+function dateLocale(locale: string, note: ZoneNote): string {
+  if (PSEUDO_LOCALES.includes(locale)) return "en";
+  try {
+    return Intl.DateTimeFormat.supportedLocalesOf(locale).length > 0 ? locale : "en";
+  } catch {
+    note.invalidLocale = true;
+    return "en";
+  }
+}
 
 /**
  * Dates in the recipient's locale and zone; pseudo-locales format as English.
@@ -72,8 +84,7 @@ function formatDate(
   withTime: boolean,
   note: ZoneNote,
 ): string {
-  const wanted = PSEUDO_LOCALES.includes(locale) ? "en" : locale;
-  const tag = Intl.DateTimeFormat.supportedLocalesOf(wanted).length > 0 ? wanted : "en";
+  const tag = dateLocale(locale, note);
   if (isValidZone(timeZone)) {
     const options: Intl.DateTimeFormatOptions = {
       dateStyle: "medium",
@@ -212,7 +223,7 @@ export async function handleEmailSend(
   const now = deps.clock.now();
   const nowDate = new Date(now.epochMilliseconds);
   const { kind, refId } = payload;
-  const note: ZoneNote = { invalidZone: false };
+  const note: ZoneNote = { invalidZone: false, invalidLocale: false };
   let invitationId = null as string | null;
 
   const message = await (async (): Promise<Message | null> => {
@@ -360,6 +371,7 @@ export async function handleEmailSend(
   })();
 
   if (note.invalidZone) ctx.logger.warn("email_time_zone_invalid", { reason: kind });
+  if (note.invalidLocale) ctx.logger.warn("email_locale_invalid", { reason: kind });
   if (message === null) {
     ctx.logger.info("email_skipped", { reason: kind });
     return;
