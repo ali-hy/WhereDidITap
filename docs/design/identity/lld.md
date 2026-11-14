@@ -1,12 +1,12 @@
 ---
 module: identity
 doc: lld
-status: draft # draft | in-review | approved
+status: approved # draft | in-review | approved
 version: 0.12
 hld_version: 0.10
 author: planner
-approved_by: (v0.6) main conversation on the owner's behalf (delegation 2026-10-07, "auto approve the hlds as well just keep going"); v0.12 awaits plan re-review and approval
-approved_on: 2026-10-07 (v0.6)
+approved_by: main conversation on the owner's behalf (delegation 2026-10-07, "auto approve the hlds as well just keep going"); the owner reviewed and confirmed every flagged decision on 2026-11-14; plan re-review passed 2026-11-14
+approved_on: 2026-11-14
 ---
 
 # Identity: Low-Level Design
