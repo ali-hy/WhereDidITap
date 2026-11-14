@@ -1,5 +1,6 @@
 // F-32 for every email kind outside TP-0.17 (invitation) and TP-0.18 (password_reset/_set), from
-// §7.2's per-kind table (A-17). TP-0.42 (a), (b) and (d) (A-20, A-21), plus extra cases TP-0.42x.
+// §7.2's per-kind table (A-17). TP-0.42 (a), (b), (d) (A-20, A-21), (e) and (f) (A-22), plus extra
+// cases TP-0.42x.
 // TP-0.42 (c), F-118's two direct sends, is S-11's part. IDs ending in "x" are test-architect
 // additions, not LLD test-plan IDs.
 import { Temporal, uuidv7Generator } from "@budmon/shared";
@@ -600,3 +601,88 @@ describe("TP-0.42 (d): a time_zone Intl rejects is shown as UTC (A-20, A-21)", (
     expectZoneWarning("export_ready");
   });
 });
+
+// --- TP-0.42 (e) and (f): a stored locale Intl can't format with (A-22)
+
+async function setLocale(userId: string, locale: string): Promise<void> {
+  await h.executeSql("UPDATE users SET locale = $2 WHERE id = $1", [userId, locale]);
+}
+
+const warnings = (event: string) => w.jobLog.filter((l) => l.event === event);
+
+/** [part, stored locale, whether A-22 warns]. */
+const LOCALE_CASES: [string, string, boolean][] = [
+  ["(e)", "en-12", true],
+  ["(f)", "xx", false],
+];
+
+describe("TP-0.42 (e), (f): a stored locale that is invalid or unsupported formats dates as en (A-22)", () => {
+  it.each(LOCALE_CASES)(
+    "TP-0.42 %s: locale %s: password_changed is sent with the event time as en in Cairo (D+T); warned: %s",
+    async (_part, locale, warned) => {
+      const user = await cairoUser();
+      const { payload, eventAt } = await viaF20(user, "password_changed", "password_changed");
+      await setLocale(user.id, locale);
+
+      await expect(send(payload)).resolves.toBeUndefined();
+
+      expectOneEmail({
+        to: user.email,
+        subject: "Your Budmon password was changed",
+        intro: `Your password was changed on ${DT(eventAt)}.`,
+        outro: SECURITY_OUTRO,
+        link: SECURITY_LINK,
+      });
+      expectLocaleOutcome("password_changed", locale, warned);
+    },
+  );
+
+  it.each(LOCALE_CASES)(
+    "TP-0.42 %s: locale %s: export_ready is sent with expires_at as an en date in Cairo (D); warned: %s",
+    async (_part, locale, warned) => {
+      const user = await cairoUser();
+      const exportId = unknownId();
+      const expiresAt = new Date("2026-11-09T23:00:00.000Z");
+      await exportsRepo.insertQueued(h, {
+        id: exportId,
+        userId: user.id,
+        requestedAt: toDate(NOW),
+      });
+      await exportsRepo.markReady(h, exportId, {
+        objectKey: `exports/${exportId}.zip`,
+        byteSize: 10,
+        completedAt: toDate(NOW),
+        expiresAt,
+      });
+      await setLocale(user.id, locale);
+
+      await expect(send({ kind: "export_ready", refId: exportId })).resolves.toBeUndefined();
+
+      expectOneEmail({
+        to: user.email,
+        subject: "Your Budmon export is ready",
+        intro: "Your export is ready. Download it before Nov 10, 2026.",
+        link: { url: `${ORIGIN}/settings/data`, button: "Go to your data" },
+      });
+      expectLocaleOutcome("export_ready", locale, warned);
+    },
+  );
+});
+
+/** (e): one warn email_locale_invalid { reason: kind }, the tag never logged; (f): no warning. */
+function expectLocaleOutcome(kind: string, locale: string, warned: boolean): void {
+  expect(warnings("email_time_zone_invalid")).toEqual([]);
+  expect(w.jobLog.filter((l) => l.event === "email_skipped" || l.event === "email_failed")).toEqual(
+    [],
+  );
+  const lines = warnings("email_locale_invalid");
+  if (!warned) {
+    expect(lines).toEqual([]);
+    return;
+  }
+  expect(lines).toHaveLength(1);
+  expect(lines[0]?.level).toBe("warn");
+  expect((lines[0]?.fields as { fields: unknown }).fields).toEqual({ reason: kind });
+  expect(JSON.stringify(w.jobLog)).not.toContain(locale);
+  expect(JSON.stringify(w.obs.capture.records())).not.toContain(locale);
+}
