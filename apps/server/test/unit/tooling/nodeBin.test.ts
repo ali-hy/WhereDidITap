@@ -125,6 +125,22 @@ describe("TP-2.71: resolveNodeBin (F-22b)", () => {
     expect(error).toMatchObject({ packageName: "tool", reason: "no_bin" });
   });
 
+  it("TP-2.71x: a readFile that throws ENOENT throws NodeBinMissingError no_bin", () => {
+    const deps = fakeDeps({});
+    deps.readFile.mockImplementation(() => {
+      throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
+    });
+
+    const error = thrown(() => resolveNodeBin(FROM, "tool", undefined, deps));
+
+    expect(error).toBeInstanceOf(NodeBinMissingError);
+    expect(error).toMatchObject({
+      packageName: "tool",
+      reason: "no_bin",
+      message: "tool has no tool bin",
+    });
+  });
+
   it("TP-2.71 (h): with the default deps, tsx from apps/server and vite from apps/web resolve to their installed bin scripts", () => {
     const tsx = resolveNodeBin(path.join(REPO, "apps", "server"), "tsx");
     const vite = resolveNodeBin(path.join(REPO, "apps", "web"), "vite");
