@@ -9,12 +9,12 @@ export const identityMessages = defineMessages({
   },
   errorAccountClosed: {
     id: "error.accountClosed",
-    defaultMessage: "This {appName} account has been closed.",
+    defaultMessage: "This account has been closed.",
   },
   errorGoogleAccountUnknown: {
     id: "error.googleAccountUnknown",
     defaultMessage:
-      "There's no {appName} account for {email}. {appName} is invite-only: ask someone who uses {appName} to invite you.",
+      "There's no account for {email}. You need an invitation: ask someone who already has an account to invite you.",
   },
   errorGoogleEmailUnverified: {
     id: "error.googleEmailUnverified",
@@ -23,20 +23,20 @@ export const identityMessages = defineMessages({
   },
   errorGoogleAccountInUse: {
     id: "error.googleAccountInUse",
-    defaultMessage: "This Google account is already used by another {appName} account.",
+    defaultMessage: "This Google account is already used by another account.",
   },
   errorGoogleOtherAccountLinked: {
     id: "error.googleOtherAccountLinked",
     defaultMessage:
-      "Your {appName} account is connected to a different Google account. Use that one, or your password.",
+      "Your account is connected to a different Google account. Use that one, or your password.",
   },
   errorGoogleAccountNotAllowed: {
     id: "error.googleAccountNotAllowed",
-    defaultMessage: "This Google account can't be used with {appName}.",
+    defaultMessage: "This Google account can't be used here.",
   },
   errorGoogleAccountMismatch: {
     id: "error.googleAccountMismatch",
-    defaultMessage: "Choose the Google account connected to {appName} ({email}).",
+    defaultMessage: "Choose the Google account you connected ({email}).",
   },
   errorGoogleSigninFailed: {
     id: "error.googleSigninFailed",
@@ -56,11 +56,11 @@ export const identityMessages = defineMessages({
   },
   errorUserCapReached: {
     id: "error.userCapReached",
-    defaultMessage: "{appName} is full right now, so no new invitations can be sent.",
+    defaultMessage: "There's no room for new people right now, so no new invitations can be sent.",
   },
   errorAlreadyAUser: {
     id: "error.alreadyAUser",
-    defaultMessage: "{email} already uses {appName}.",
+    defaultMessage: "{email} already has an account.",
   },
   errorInvitationPending: {
     id: "error.invitationPending",

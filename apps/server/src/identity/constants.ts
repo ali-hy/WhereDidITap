@@ -3,6 +3,9 @@ import { Temporal } from "@budmon/shared";
 
 const { Duration } = Temporal;
 
+/** The brand, exactly so (A-26). Emails get it as `{appName}`; no message holds it literally. */
+export const APP_NAME = "wDit";
+
 export const ACCESS_TTL = Duration.from({ minutes: 15 });
 export const REFRESH_IDLE_TTL = Duration.from({ hours: 30 * 24 });
 export const REFRESH_RACE_WINDOW = Duration.from({ seconds: 60 });

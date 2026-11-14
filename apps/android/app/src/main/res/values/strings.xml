@@ -2,22 +2,22 @@
 <!-- §8.2: the platform's strings. Error strings share the web catalogue's IDs and texts (§8.1), with
      dots as underscores; the product name stays literal (A-401: Android strings aren't ICU). -->
 <resources>
-    <string name="app_name" translatable="false">Budmon</string>
+    <string name="app_name" translatable="false">wDit</string>
     <string name="home_placeholder">Nothing here yet.</string>
 
     <!-- S-1 UpdateRequiredScreen -->
-    <string name="update_required_title">Update Budmon to continue</string>
+    <string name="update_required_title">Update wDit to continue</string>
     <string name="update_required_body">This version is no longer supported. Updating takes about a minute.</string>
     <plurals name="update_required_pending">
         <item quantity="one">%1$s entry you saved offline is kept and will sync after you update.</item>
         <item quantity="other">%1$s entries you saved offline are kept and will sync after you update.</item>
     </plurals>
-    <string name="update_required_button">Update Budmon</string>
+    <string name="update_required_button">Update wDit</string>
     <string name="update_required_offline">Record an entry offline</string>
     <string name="update_download_failed">Couldn\'t open the download. Ask the person who invited you for the latest version.</string>
 
     <!-- C-4 UpdateCard -->
-    <string name="update_available">A new version of Budmon is available.</string>
+    <string name="update_available">A new version of wDit is available.</string>
     <string name="update_action">Update</string>
     <string name="update_later">Later</string>
 
@@ -66,25 +66,25 @@
         <item quantity="one">Too many attempts. Try again in %d minute.</item>
         <item quantity="other">Too many attempts. Try again in %d minutes.</item>
     </plurals>
-    <string name="error_unavailable">Budmon is temporarily unavailable. Try again in a few minutes.</string>
+    <string name="error_unavailable">wDit is temporarily unavailable. Try again in a few minutes.</string>
     <string name="error_not_found">This item doesn\'t exist or you no longer have access to it.</string>
     <string name="error_forbidden">You don\'t have permission to do this.</string>
 
     <!-- Identity errors (F-220, §8.1) -->
     <string name="error_invalid_credentials">Email or password is incorrect.</string>
-    <string name="error_account_closed">This Budmon account has been closed.</string>
-    <string name="error_google_account_unknown">There\'s no Budmon account for %1$s. Budmon is invite-only: ask someone who uses Budmon to invite you.</string>
+    <string name="error_account_closed">This account has been closed.</string>
+    <string name="error_google_account_unknown">There\'s no account for %1$s. You need an invitation: ask someone who already has an account to invite you.</string>
     <string name="error_google_email_unverified">Google hasn\'t confirmed this email address. Sign in with your password, or use your invitation.</string>
-    <string name="error_google_account_in_use">This Google account is already used by another Budmon account.</string>
-    <string name="error_google_other_account_linked">Your Budmon account is connected to a different Google account. Use that one, or your password.</string>
-    <string name="error_google_account_not_allowed">This Google account can\'t be used with Budmon.</string>
-    <string name="error_google_account_mismatch">Choose the Google account connected to Budmon (%1$s).</string>
+    <string name="error_google_account_in_use">This Google account is already used by another account.</string>
+    <string name="error_google_other_account_linked">Your account is connected to a different Google account. Use that one, or your password.</string>
+    <string name="error_google_account_not_allowed">This Google account can\'t be used here.</string>
+    <string name="error_google_account_mismatch">Choose the Google account you connected (%1$s).</string>
     <string name="error_google_signin_failed">Google sign-in didn\'t complete. Try again.</string>
     <string name="error_google_unavailable">Couldn\'t reach Google. Try again, or use your password.</string>
     <string name="error_invite_allowance_exhausted">You\'ve used all your invitations. The administrator can give you more.</string>
     <string name="error_invitations_disabled">Sending invitations isn\'t available for your account.</string>
-    <string name="error_user_cap_reached">Budmon is full right now, so no new invitations can be sent.</string>
-    <string name="error_already_a_user">%1$s already uses Budmon.</string>
+    <string name="error_user_cap_reached">There\'s no room for new people right now, so no new invitations can be sent.</string>
+    <string name="error_already_a_user">%1$s already has an account.</string>
     <string name="error_invitation_pending">%1$s already has a pending invitation.</string>
     <string name="error_email_not_invitable">This address can\'t be invited.</string>
     <string name="error_resend_limit_reached">You can resend this invitation again tomorrow.</string>

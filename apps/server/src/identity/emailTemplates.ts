@@ -2,6 +2,7 @@
 // verbatim and never passes through a message.
 import { directionOf } from "@budmon/shared";
 import { renderMessage } from "../i18n/render.js";
+import { APP_NAME } from "./constants.js";
 
 export const EMAIL_KINDS = [
   "invitation",
@@ -50,9 +51,12 @@ function escapeHtml(text: string): string {
     .replaceAll("'", "&#39;");
 }
 
+/** The brand is Latin, so the HTML part drops its bidi isolate. */
+const unwrapBrand = (text: string): string => text.replaceAll(`⁨${APP_NAME}⁩`, APP_NAME);
+
 /** Blank-line separated paragraphs, each escaped and wrapped in <p>. */
 function paragraphs(text: string): string {
-  return text
+  return unwrapBrand(text)
     .split(/\n{2,}/)
     .map((p) => `<p>${escapeHtml(p)}</p>`)
     .join("");
@@ -62,9 +66,11 @@ export function renderEmail(
   c: EmailContent,
   locale: string,
 ): { subject: string; text: string; html: string } {
-  const subject = renderMessage(locale, c.subjectId, c.values).replace(ISOLATES, "");
-  const intro = renderMessage(locale, c.introId, c.values);
-  const outro = c.outroId === undefined ? null : renderMessage(locale, c.outroId, c.values);
+  // appName comes last, so a caller can't override it;
+  const values = { ...c.values, appName: APP_NAME };
+  const subject = renderMessage(locale, c.subjectId, values).replace(ISOLATES, "");
+  const intro = renderMessage(locale, c.introId, values);
+  const outro = c.outroId === undefined ? null : renderMessage(locale, c.outroId, values);
 
   const textParts = [intro];
   if (c.link !== undefined) textParts.push(c.link.url);
