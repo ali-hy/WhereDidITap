@@ -18,6 +18,10 @@ export interface ButtonProps {
   href?: string;
   onClick?: (e: MouseEvent) => void;
   "aria-describedby"?: string;
+  /** The rendered button, for callers that move focus to it. */
+  ref?: (el: HTMLButtonElement) => void;
+  /** Marks the error page's Try again for focus handling (A-456). */
+  "data-fallback-retry"?: boolean;
 }
 
 const VARIANT: Readonly<Record<ButtonProps["variant"], string>> = {
@@ -63,7 +67,7 @@ export function Button(props: ButtonProps): JSX.Element {
           <Show when={local.icon}>{(name) => <Icon name={name()} class="size-5 shrink-0" />}</Show>
         }
       >
-        <Icon name="refresh" class="size-5 shrink-0 animate-spin" />
+        <Icon name="refresh" class="size-5 shrink-0 animate-spin motion-reduce:animate-none" />
       </Show>
       {local.children}
     </>
@@ -73,6 +77,8 @@ export function Button(props: ButtonProps): JSX.Element {
       when={local.href}
       fallback={
         <button
+          ref={rest.ref}
+          data-fallback-retry={rest["data-fallback-retry"] === true ? "" : undefined}
           type={local.type ?? "button"}
           class={classes()}
           disabled={local.disabled === true}

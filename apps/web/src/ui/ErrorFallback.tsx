@@ -5,8 +5,7 @@ import type { AppError } from "../api/errors.js";
 import { messages } from "../i18n/messages.js";
 import { useI18n } from "../i18n/useI18n.js";
 import { setDocumentTitle } from "./a11y.js";
-import { Button, buttonClasses } from "./Button.js";
-import { Icon } from "./icons/Icon.js";
+import { Button } from "./Button.js";
 
 /** Marks where the reference goes inside the translated sentence (private use, never shown). */
 const SLOT = "";
@@ -73,23 +72,19 @@ export function ErrorFallback(props: {
       </p>
       <Show when={props.requestId}>{(id) => reference(id)}</Show>
       <div class="mt-6 flex flex-wrap gap-3">
-        <button
-          ref={button}
-          type="button"
+        <Button
+          variant="primary"
+          icon="refresh"
+          busy={busy()}
+          ref={(el) => {
+            button = el;
+          }}
           data-fallback-retry
-          class={buttonClasses({ variant: "primary" })}
           aria-describedby={statusId}
-          aria-busy={busy() ? "true" : undefined}
-          disabled={busy()}
           onClick={() => void retry()}
         >
-          {/* B-6: the icon spins while the retry runs (§8.1 S-2); still under reduced motion. */}
-          <Icon
-            name="refresh"
-            class={`size-5 shrink-0 ${busy() ? "animate-spin motion-reduce:animate-none" : ""}`}
-          />
           {t(messages.errorFallbackRetry)}
-        </button>
+        </Button>
         <Button variant="secondary" href="/">
           {t(messages.errorFallbackHome)}
         </Button>
