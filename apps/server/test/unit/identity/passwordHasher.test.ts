@@ -85,6 +85,101 @@ describe("TP-0.6: PasswordHasher", () => {
   });
 });
 
+/** Records unhandled rejections while `fn` runs. */
+async function unhandledDuring(fn: () => Promise<void>): Promise<unknown[]> {
+  const seen: unknown[] = [];
+  const onRejection = (reason: unknown) => seen.push(reason);
+  process.on("unhandledRejection", onRejection);
+  try {
+    await fn();
+    await settle();
+  } finally {
+    process.off("unhandledRejection", onRejection);
+  }
+  return seen;
+}
+
+describe("TP-0.6 (A-19): a dummy hash that fails", () => {
+  it("TP-0.6: the start-up dummy rejects once: no unhandled rejection; verify(null, 'x') is false after a second hash", async () => {
+    const hashSecret = vi
+      .fn<(plain: string) => Promise<string>>()
+      .mockRejectedValueOnce(new Error("argon2 failed"))
+      .mockResolvedValue(PLATFORM_PHC);
+    const verifySecret = vi.fn<(phc: string, plain: string) => Promise<boolean>>(() =>
+      Promise.resolve(true),
+    );
+    let ok: boolean | undefined;
+
+    const unhandled = await unhandledDuring(async () => {
+      const hasher = createPasswordHasher({ hashSecret, verifySecret });
+      await settle();
+      expect(hashSecret).toHaveBeenCalledTimes(1);
+
+      ok = await hasher.verify(null, "x");
+    });
+
+    expect(unhandled).toEqual([]);
+    expect(ok).toBe(false);
+    expect(hashSecret).toHaveBeenCalledTimes(2);
+    expect(verifySecret).toHaveBeenCalledTimes(1);
+    expect(verifySecret.mock.calls[0]?.[0]).toBe(PLATFORM_PHC);
+  });
+
+  it("TP-0.6: a dummy hash that always rejects with E: two verify(null, 'x') calls reject with E; 3 hashes, no verify", async () => {
+    const E = new Error("argon2 unavailable");
+    const hashSecret = vi.fn<(plain: string) => Promise<string>>(() => Promise.reject(E));
+    const verifySecret = vi.fn<(phc: string, plain: string) => Promise<boolean>>(() =>
+      Promise.resolve(false),
+    );
+
+    const unhandled = await unhandledDuring(async () => {
+      const hasher = createPasswordHasher({ hashSecret, verifySecret });
+      await settle();
+
+      await expect(hasher.verify(null, "x")).rejects.toBe(E);
+      await expect(hasher.verify(null, "x")).rejects.toBe(E);
+    });
+
+    expect(unhandled).toEqual([]);
+    expect(hashSecret).toHaveBeenCalledTimes(3);
+    expect(verifySecret).not.toHaveBeenCalled();
+  });
+
+  it("TP-0.6: with maxConcurrency 1 and a held hash, the dummy computation waits for the slot", async () => {
+    let releaseHeld: ((phc: string) => void) | undefined;
+    const hashSecret = vi
+      .fn<(plain: string) => Promise<string>>()
+      .mockRejectedValueOnce(new Error("argon2 failed"))
+      .mockImplementationOnce(
+        () =>
+          new Promise<string>((resolve) => {
+            releaseHeld = resolve;
+          }),
+      )
+      .mockResolvedValue(PLATFORM_PHC);
+    const verifySecret = vi.fn<(phc: string, plain: string) => Promise<boolean>>(() =>
+      Promise.resolve(true),
+    );
+    const hasher = createPasswordHasher({ hashSecret, verifySecret, maxConcurrency: 1 });
+    await settle();
+    expect(hashSecret).toHaveBeenCalledTimes(1);
+
+    const held = hasher.hash("p");
+    await settle();
+    const unknownUser = hasher.verify(null, "x");
+    await settle();
+
+    expect(hashSecret).toHaveBeenCalledTimes(2);
+    expect(hashSecret.mock.calls[1]?.[0]).toBe("p");
+
+    releaseHeld?.("$argon2id$held");
+    await expect(held).resolves.toBe("$argon2id$held");
+    await expect(unknownUser).resolves.toBe(false);
+    expect(hashSecret).toHaveBeenCalledTimes(3);
+    expect(hashSecret.mock.calls[2]?.[0]).toMatch(/^dummy-/);
+  });
+});
+
 describe("TP-0.6x: PasswordHasher details", () => {
   it("TP-0.6x: hash and verify pass the NFC-normalised password to P-F-66", async () => {
     const hashSecret = vi.fn<(plain: string) => Promise<string>>(() =>

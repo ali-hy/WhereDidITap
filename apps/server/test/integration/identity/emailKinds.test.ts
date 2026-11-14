@@ -1,5 +1,5 @@
 // F-32 for every email kind outside TP-0.17 (invitation) and TP-0.18 (password_reset/_set), from
-// §7.2's per-kind table (A-17). TP-0.42 (a) and (b), plus extra cases TP-0.42x.
+// §7.2's per-kind table (A-17). TP-0.42 (a), (b) and (d) (A-20, A-21), plus extra cases TP-0.42x.
 // TP-0.42 (c), F-118's two direct sends, is S-11's part. IDs ending in "x" are test-architect
 // additions, not LLD test-plan IDs.
 import { Temporal, uuidv7Generator } from "@budmon/shared";
@@ -513,5 +513,90 @@ describe("TP-0.42 (b): each skip condition of §7.2's table", () => {
     await send({ kind: "invitation_cap_failed", refId: unknownId(), recipient: "owner" });
 
     expectSkipped("invitation_cap_failed");
+  });
+});
+
+// --- TP-0.42 (d): a stored zone Intl rejects (A-20, A-21)
+
+const BAD_ZONE = "Mars/Olympus";
+/** A-21's D+T fallback: component options in UTC with the zone name ("Nov 2, 2026, 10:00 AM UTC"). */
+const UTC_DT = (d: Date): string =>
+  new Intl.DateTimeFormat("en", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  }).format(d);
+/** A-21's D fallback: dateStyle medium in UTC, no zone name. */
+const UTC_D = (d: Date): string =>
+  new Intl.DateTimeFormat("en", { dateStyle: "medium", timeZone: "UTC" }).format(d);
+
+async function setBadZone(userId: string): Promise<void> {
+  await h.executeSql("UPDATE users SET time_zone = $2 WHERE id = $1", [userId, BAD_ZONE]);
+}
+
+/** Exactly one warn email_time_zone_invalid with exactly { reason: kind }; the zone is never logged. */
+function expectZoneWarning(kind: string): void {
+  const warned = w.jobLog.filter((l) => l.event === "email_time_zone_invalid");
+  expect(warned).toHaveLength(1);
+  expect(warned[0]?.level).toBe("warn");
+  expect((warned[0]?.fields as { fields: unknown }).fields).toEqual({ reason: kind });
+  expect(JSON.stringify(w.jobLog)).not.toContain(BAD_ZONE);
+  expect(JSON.stringify(w.obs.capture.records())).not.toContain(BAD_ZONE);
+}
+
+describe("TP-0.42 (d): a time_zone Intl rejects is shown as UTC (A-20, A-21)", () => {
+  it("TP-0.42: the fallback formats give A-21's example strings", () => {
+    const at = new Date("2026-11-02T10:00:00.000Z");
+
+    expect(UTC_DT(at)).toBe("Nov 2, 2026, 10:00 AM UTC");
+    expect(UTC_D(at)).toBe("Nov 2, 2026");
+  });
+
+  it("TP-0.42: password_changed is sent with the event time in UTC, its zone name shown, and one warning", async () => {
+    const user = await cairoUser();
+    const { payload, eventAt } = await viaF20(user, "password_changed", "password_changed");
+    await setBadZone(user.id);
+
+    await send(payload);
+
+    expectOneEmail({
+      to: user.email,
+      subject: "Your Budmon password was changed",
+      intro: `Your password was changed on ${UTC_DT(eventAt)}.`,
+      outro: SECURITY_OUTRO,
+      link: SECURITY_LINK,
+    });
+    expect(plain(w.sender.sent[0]?.text ?? "")).toContain(" UTC.");
+    expectZoneWarning("password_changed");
+  });
+
+  it("TP-0.42: export_ready is sent with expires_at as a UTC date only, and one warning", async () => {
+    const user = await cairoUser();
+    const exportId = unknownId();
+    // 23:00 UTC: Cairo would already show the next day.
+    const expiresAt = new Date("2026-11-09T23:00:00.000Z");
+    await exportsRepo.insertQueued(h, { id: exportId, userId: user.id, requestedAt: toDate(NOW) });
+    await exportsRepo.markReady(h, exportId, {
+      objectKey: `exports/${exportId}.zip`,
+      byteSize: 10,
+      completedAt: toDate(NOW),
+      expiresAt,
+    });
+    await setBadZone(user.id);
+
+    await send({ kind: "export_ready", refId: exportId });
+
+    expect(UTC_D(expiresAt)).toBe("Nov 9, 2026");
+    expectOneEmail({
+      to: user.email,
+      subject: "Your Budmon export is ready",
+      intro: "Your export is ready. Download it before Nov 9, 2026.",
+      link: { url: `${ORIGIN}/settings/data`, button: "Go to your data" },
+    });
+    expectZoneWarning("export_ready");
   });
 });
