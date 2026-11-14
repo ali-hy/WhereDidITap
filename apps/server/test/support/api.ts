@@ -13,7 +13,11 @@ import type { FastifyInstance } from "fastify";
 import { vi, type Mock } from "vitest";
 import { loadConfig } from "../../src/platform/config/loadConfig.js";
 import type { Config } from "../../src/platform/config/schema.js";
-import { createApiContainer, type ApiContainer } from "../../src/platform/container.js";
+import {
+  createApiContainer,
+  type ApiContainer,
+  type ApiContainerOverrides,
+} from "../../src/platform/container.js";
 import type { Principal } from "../../src/platform/http/context.js";
 import {
   createMemoryErrorReporter,
@@ -126,7 +130,8 @@ export interface BuiltContainer {
  * a silent observed logger, reporter and metrics unless `overrides` replaces them.
  */
 export async function buildApiContainer(
-  overrides: Partial<ApiContainer> = {},
+  // Identity LLD §10.1 (review S-6): ApiContainerOverrides (F-34) adds identityOverrides.
+  overrides: ApiContainerOverrides = {},
   env: Record<string, string | undefined> = {},
   fixture: () => Fixture = devApi,
   role: LoginRole = "budmon_app",

@@ -2,6 +2,7 @@
 // rate-limit purge, plus extra cases TP-6.20x. IDs ending in "x" are test-architect additions, not
 // LLD test-plan IDs.
 import { Temporal } from "@budmon/shared";
+import { createTestUser } from "@budmon/test-support";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { type JobContext, type JobHandler } from "../../support/jobs.js";
 import { resetBetweenTests } from "../../support/testDatabase.js";
@@ -52,14 +53,18 @@ async function count(sql: string): Promise<number> {
 describe("TP-6.12: maintenance purges (F-80)", () => {
   it("TP-6.12: 6000 expired and 1 live idempotency record: the purge deletes 6000 and logs idempotency_purged; the live one remains", async () => {
     const h = built.testDb.database.handle;
+    // A-511 (3): the rows' user_id is a real user (identity's FK on idempotency_records).
+    const userId = await createTestUser(built.testDb);
     await h.executeSql(
       `INSERT INTO idempotency_records (user_id, idempotency_key, procedure, request_hash, expires_at)
-       SELECT gen_random_uuid(), gen_random_uuid(), 'p', decode(repeat('00', 32), 'hex'), now() - interval '1 day'
+       SELECT $1::uuid, gen_random_uuid(), 'p', decode(repeat('00', 32), 'hex'), now() - interval '1 day'
        FROM generate_series(1, 6000)`,
+      [userId],
     );
     await h.executeSql(
       `INSERT INTO idempotency_records (user_id, idempotency_key, procedure, request_hash, expires_at)
-       VALUES (gen_random_uuid(), gen_random_uuid(), 'live', decode(repeat('00', 32), 'hex'), now() + interval '1 day')`,
+       VALUES ($1::uuid, gen_random_uuid(), 'live', decode(repeat('00', 32), 'hex'), now() + interval '1 day')`,
+      [userId],
     );
     const linesBefore = built.obs.capture.records().length;
 

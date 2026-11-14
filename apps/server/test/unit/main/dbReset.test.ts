@@ -277,8 +277,9 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
   // A-72: until S-9 the seeder list was empty and seedAll returned at once. From S-9
   // (platform.fx-rates) it loads the worker configuration and builds a container, so an
   // environment without a worker configuration is refused before any container is built.
-  it("TP-2.29 (g): with S-9's platform.fx-rates seeder, the real seedAll loads the worker configuration: an empty environment is a ConfigError and no container is built (A-72)", async () => {
-    expect(seeders.map((s) => s.name)).toEqual(["platform.fx-rates"]);
+  // A-511 (1): platform seeders first, then each module's (identity's S-0 adds identity.dev-owner).
+  it("TP-2.29 (g): with the platform's and identity's seeders, the real seedAll loads the worker configuration: an empty environment is a ConfigError and no container is built (A-72, A-511)", async () => {
+    expect(seeders.map((s) => s.name)).toEqual(["platform.fx-rates", "identity.dev-owner"]);
 
     await expect(seedAll({})).rejects.toBeInstanceOf(ConfigError);
 

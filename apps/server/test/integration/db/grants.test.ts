@@ -36,7 +36,9 @@ async function schemaStepError(operation: Promise<unknown>): Promise<SchemaStepE
 }
 
 describe("TP-2.49x: §3.3's platform grants", () => {
-  it("TP-2.49x: tableGrants lists exactly the four platform tables with §3.3's privileges", () => {
+  // A-511 (2): with modules wired, the four platform entries keep §3.3's privileges exactly
+  // (asserted by key) and every table in the template's public schema has an entry.
+  it("TP-2.49x: tableGrants keeps §3.3's privileges for the four platform tables", () => {
     const normalised = Object.fromEntries(
       Object.entries(tableGrants).map(([table, g]) => [
         table,
@@ -44,7 +46,7 @@ describe("TP-2.49x: §3.3's platform grants", () => {
       ]),
     );
 
-    expect(normalised).toEqual({
+    expect(normalised).toMatchObject({
       currencies: { app: ["SELECT"], capture: ["SELECT"], credential: false },
       exchange_rates: { app: ["INSERT", "SELECT"], capture: ["SELECT"], credential: false },
       idempotency_records: {
@@ -58,6 +60,16 @@ describe("TP-2.49x: §3.3's platform grants", () => {
         credential: false,
       },
     });
+  });
+
+  it("TP-2.49x: every table in the template's public schema has a tableGrants entry", async () => {
+    const { rows } = await migrator.handle.executeSql(
+      "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename",
+    );
+    const tables = rows.map((r) => String(r["tablename"]));
+
+    expect(tables.length).toBeGreaterThan(0);
+    expect(tables.filter((t) => tableGrants[t] === undefined)).toEqual([]);
   });
 
   it("TP-2.49x: the template's privileges match tableGrants for both roles", async () => {

@@ -1,4 +1,5 @@
-// F-55 step 4b, F-59 appRouter and F-96's module members (A-26). TP-4.22.
+// F-55 step 4b, F-59 appRouter and F-96's module members (A-26). TP-4.22, with A-511 (4)'s
+// expectation once identity is wired.
 import { contract } from "@budmon/contract";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -31,12 +32,15 @@ describe("TP-4.22 (a): the default container and router", () => {
     });
   });
 
-  it("TP-4.22 (a): the container's moduleRoutes is [] and its authHook is noAuthHook", async () => {
+  // A-511 (4): with identity wired (S-0), authHook is the module's; moduleRoutes stays [] until
+  // identity's S-6 adds the Google callback route.
+  it("TP-4.22 (a): the container's moduleRoutes is [] and its authHook is the wired module's, not noAuthHook", async () => {
     const built = await buildApiContainer();
     cleanups.push(() => built.close());
 
     expect(built.container.moduleRoutes).toEqual([]);
-    expect(built.container.authHook).toBe(noAuthHook);
+    expect(built.container.authHook).not.toBe(noAuthHook);
+    expect(built.container.authHook).toBe(built.container.identity.authHook);
   });
 
   it("TP-4.22 (a): appRouter's keys are the contract's keys", () => {
