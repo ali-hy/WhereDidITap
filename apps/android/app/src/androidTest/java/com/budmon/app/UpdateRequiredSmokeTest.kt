@@ -75,8 +75,8 @@ class UpdateRequiredSmokeTest {
     @Test
     fun tp_13_13_launch_with_a_raised_minimum_shows_UpdateRequiredScreen() {
         compose.waitUntil(15_000) {
-            compose.onAllNodes(hasText("Update Budmon to continue")).fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodes(hasText("Update wDit to continue")).fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithText("Update Budmon to continue").assertExists()
+        compose.onNodeWithText("Update wDit to continue").assertExists()
     }
 }

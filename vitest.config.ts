@@ -86,6 +86,8 @@ export default defineConfig({
           environment: "node",
           include: [
             "tools/*/test/**/*.test.ts",
+            // P-A-513 (1): the contrast report lives beside the token recipes.
+            "tools/tokens/*.test.ts",
             "infra/budmonctl/test/**/*.test.ts",
             "packages/config/test/**/*.test.ts",
             // S-3: @budmon/test-support's own tests (F-198, TP-16.1).

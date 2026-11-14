@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadToaster, loadUpdateNotifier, plain } from "../support/s11b.js";
 import { renderWithI18n } from "../support/render.js";
 
-const AVAILABLE = "Budmon has been updated. Reload to get the latest version.";
+const AVAILABLE = "wDit has been updated. Reload to get the latest version.";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -174,7 +174,7 @@ describe("TP-11.12: update required banner (F-210, A-325)", () => {
 
     const banner = await screen.findByRole("alert");
     expect(plain(banner.textContent)).toContain(
-      "This version of Budmon is out of date. Reload to continue.",
+      "This version of wDit is out of date. Reload to continue.",
     );
     expect(within(banner).getByRole("button", { name: "Reload" })).toBeTruthy();
     // Persistent: still there a long time later.

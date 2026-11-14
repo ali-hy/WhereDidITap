@@ -58,7 +58,7 @@ class PlatformUiTest {
     fun `TP-13_7 UpdateRequiredScreen with pending 0 has no pending note`() {
         set { UpdateRequiredScreen(pending = 0, downloadUrl = "https://x/app.apk", onOpenDownload = { true }) }
 
-        compose.onNodeWithText("Update Budmon to continue").assertIsDisplayed()
+        compose.onNodeWithText("Update wDit to continue").assertIsDisplayed()
         compose.onNodeWithText("This version is no longer supported. Updating takes about a minute.").assertIsDisplayed()
         compose.onNodeWithText("sync after you update", substring = true).assertDoesNotExist()
     }
@@ -79,7 +79,7 @@ class PlatformUiTest {
     fun `TP-13_7 a failing download shows update_download_failed`() {
         set { UpdateRequiredScreen(pending = 0, downloadUrl = "https://x/app.apk", onOpenDownload = { false }) }
 
-        compose.onNodeWithText("Update Budmon").performClick()
+        compose.onNodeWithText("Update wDit").performClick()
 
         compose.onNodeWithText("Couldn't open the download. Ask the person who invited you for the latest version.").assertIsDisplayed()
     }
@@ -88,7 +88,7 @@ class PlatformUiTest {
     fun `TP-13_7 a null downloadUrl shows update_download_failed on Update`() {
         set { UpdateRequiredScreen(pending = 0, downloadUrl = null, onOpenDownload = { true }) }
 
-        compose.onNodeWithText("Update Budmon").performClick()
+        compose.onNodeWithText("Update wDit").performClick()
 
         compose.onNodeWithText("Couldn't open the download", substring = true).assertIsDisplayed()
     }
@@ -147,8 +147,8 @@ class PlatformUiTest {
         set(fontScale = 2f) { UpdateRequiredScreen(pending = 1500, downloadUrl = "https://x/app.apk", onOpenDownload = { true }) }
 
         assertTextsInsideRoot()
-        compose.onNodeWithText("Update Budmon to continue").assertIsDisplayed()
-        compose.onNodeWithText("Update Budmon").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Update wDit to continue").assertIsDisplayed()
+        compose.onNodeWithText("Update wDit").performScrollTo().assertIsDisplayed()
         compose
             .onNodeWithText("999+ entries you saved offline are kept and will sync after you update.")
             .performScrollTo()
@@ -162,8 +162,8 @@ class PlatformUiTest {
         }
 
         assertTextsInsideRoot()
-        compose.onNodeWithText("Update Budmon to continue").assertIsDisplayed()
-        compose.onNodeWithText("Update Budmon").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Update wDit to continue").assertIsDisplayed()
+        compose.onNodeWithText("Update wDit").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("3 entries you saved offline are kept and will sync after you update.").assertExists()
     }
 

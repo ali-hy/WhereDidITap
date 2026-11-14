@@ -23,7 +23,7 @@ describe("TP-11.12: update required banner from the global signal (F-210, A-325)
     expect(clientUpdateRequired()).toBe(true);
     const banner = await screen.findByRole("alert");
     expect(plain(banner.textContent)).toContain(
-      "This version of Budmon is out of date. Reload to continue.",
+      "This version of wDit is out of date. Reload to continue.",
     );
     expect(within(banner).getByRole("button", { name: "Reload" })).toBeTruthy();
   });

@@ -1,11 +1,12 @@
 // F-31 renderEmail and §7.2's server catalog additions (identity LLD §4.1, §7.2). TP-0.16, plus
-// extra cases TP-0.16x.
+// extra cases TP-0.16x. The name is `{appName}`, which F-31 sets to F-1's APP_NAME (A-23, A-26).
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { renderMessage } from "../../../src/i18n/render.js";
 import en from "../../../src/i18n/messages/en.json" with { type: "json" };
 import { renderEmail, type EmailContent } from "../../../src/identity/emailTemplates.js";
 
+const APP = "wDit";
 const ISOLATES = /[⁦-⁩]/g;
 const strip = (s: string): string => s.replace(ISOLATES, "");
 const TOKEN = "bmi_Ab-_cdEFghIJklMNopQRstUVwxYZ0123456789-_a";
@@ -22,11 +23,23 @@ function invitation(inviter = "Ahmed", url = URL_): EmailContent {
 }
 
 describe("TP-0.16: renderEmail (invitation)", () => {
-  it('TP-0.16: the subject is exactly "Ahmed invited you to Budmon", with no U+2066 to U+2069', () => {
+  it('TP-0.16: the subject is exactly "Ahmed invited you to wDit", with no U+2066 to U+2069', () => {
     const { subject } = renderEmail(invitation(), "en");
 
-    expect(subject).toBe("Ahmed invited you to Budmon");
+    expect(subject).toBe("Ahmed invited you to wDit");
     expect(subject).not.toMatch(ISOLATES);
+  });
+
+  it("TP-0.16 (A-23, A-26): a caller's appName value is ignored; F-1's APP_NAME is used", () => {
+    const c = invitation();
+    c.values = { ...c.values, appName: "Evil Corp" };
+
+    const { subject, text, html } = renderEmail(c, "en");
+
+    expect(subject).toBe("Ahmed invited you to wDit");
+    expect(strip(text)).toContain("to wDit, an app for keeping track of your money.");
+    expect(text).not.toContain("Evil Corp");
+    expect(html).not.toContain("Evil Corp");
   });
 
   it("TP-0.16: the text body keeps the isolates around values and has the URL on its own line, with no isolate around or inside it", () => {
@@ -45,8 +58,9 @@ describe("TP-0.16: renderEmail (invitation)", () => {
 
     const { text } = renderEmail(c, "en");
 
+    const values = { ...c.values, appName: APP };
     expect(text).toBe(
-      `${renderMessage("en", c.introId, c.values)}\n\n${URL_}\n\n${renderMessage("en", c.outroId ?? "", c.values)}`,
+      `${renderMessage("en", c.introId, values)}\n\n${URL_}\n\n${renderMessage("en", c.outroId ?? "", values)}`,
     );
   });
 
@@ -97,7 +111,7 @@ describe("TP-0.16x: renderEmail structure", () => {
 
     const { text, html, subject } = renderEmail(c, "en");
 
-    expect(subject).toBe("Your Budmon account won't be deleted");
+    expect(subject).toBe("Your wDit account won't be deleted");
     expect(text).toBe("Your account won't be deleted. Reconnect your Gmail and SMS in Sources.");
     expect(html).not.toContain("<a ");
   });
@@ -112,7 +126,7 @@ describe("TP-0.16x: renderEmail structure", () => {
     const { html } = renderEmail(c, "en");
 
     expect(html).toContain(
-      "<p>Everything you owned in Budmon has been erased. Copies in backups are gone within 14 days.</p>",
+      "<p>Everything you owned in wDit has been erased. Copies in backups are gone within 14 days.</p>",
     );
   });
 
@@ -166,9 +180,9 @@ const SECURITY_KINDS = [
 ];
 const catalog = en as Record<string, string>;
 
-/** renderMessage in English without the isolates. */
+/** renderMessage in English without the isolates, with appName as F-31 sets it. */
 const english = (id: string, values: Record<string, string> = {}): string =>
-  strip(renderMessage("en", id, values));
+  strip(renderMessage("en", id, { ...values, appName: APP }));
 
 describe("TP-0.16x: §7.2's server catalog", () => {
   it.each([...EMAIL_KINDS_WITH_LINK, ...EMAIL_KINDS_WITHOUT_LINK])(
@@ -192,6 +206,30 @@ describe("TP-0.16x: §7.2's server catalog", () => {
       "If this wasn't you, change your password and review your security settings.",
     );
     expect(english(`email.${kind}.button`)).toBe("Review your security settings");
+  });
+
+  // HLD §4.9's subjects for the kinds dated by their security event (A-26).
+  it.each([
+    ["password_changed", "Your wDit password was changed"],
+    ["password_added", "A password was added to your wDit account"],
+    ["two_step_enabled", "Two-step verification was turned on"],
+    ["two_step_disabled", "Two-step verification was turned off"],
+    ["authenticator_replaced", "Your two-step verification app was changed"],
+    ["recovery_codes_regenerated", "New recovery codes were created"],
+    ["recovery_code_used", "A recovery code was used to sign in"],
+    ["two_step_failed", "Someone tried to sign in to wDit and didn't pass two-step verification"],
+    ["google_linked", "Google sign-in was connected to your wDit account"],
+    ["google_unlinked", "Google sign-in was disconnected from your wDit account"],
+  ])("TP-0.16x (A-26): email.%s.subject is %j", (kind, subject) => {
+    expect(english(`email.${kind}.subject`)).toBe(subject);
+  });
+
+  it("TP-0.16x (A-23, A-26): no message holds the name literally; it comes only from {appName}", () => {
+    const literal = Object.entries(catalog)
+      .filter(([, text]) => /budmon|wdit/i.test(text))
+      .map(([id]) => id);
+    expect(literal).toEqual([]);
+    expect(catalog["email.invitation.subject"]).toContain("{appName}");
   });
 
   // A-11: the event sentence of each "{event} on {date}." kind; two_step_failed has none.
@@ -223,17 +261,17 @@ describe("TP-0.16x: §7.2's server catalog", () => {
   );
 
   it.each([
-    ["email.invitation.subject", { inviter: "I" }, "I invited you to Budmon"],
+    ["email.invitation.subject", { inviter: "I" }, "I invited you to wDit"],
     [
       "email.invitation.intro",
       { inviter: "I", email: "E", contextLine: " C" },
-      "I invited E to Budmon, an app for keeping track of your money. C",
+      "I invited E to wDit, an app for keeping track of your money. C",
     ],
     ["email.invitation.outro", { date: "D" }, "This invitation expires on D."],
     ["email.invitation.button", {}, "Accept invitation"],
-    ["email.invitation.subjectNoInviter", {}, "Your Budmon invitation"],
-    ["email.invitation.introNoInviter", { email: "E" }, "You've been invited to Budmon as E."],
-    ["email.password_reset.subject", {}, "Reset your Budmon password"],
+    ["email.invitation.subjectNoInviter", {}, "Your wDit invitation"],
+    ["email.invitation.introNoInviter", { email: "E" }, "You've been invited to wDit as E."],
+    ["email.password_reset.subject", {}, "Reset your wDit password"],
     ["email.password_reset.intro", { email: "E" }, "Someone asked to reset the password for E."],
     [
       "email.password_reset.outro",
@@ -241,7 +279,7 @@ describe("TP-0.16x: §7.2's server catalog", () => {
       "This link expires in 30 minutes. If you didn't ask for this, you can ignore this email.",
     ],
     ["email.password_reset.button", {}, "Choose a new password"],
-    ["email.password_set.subject", {}, "Set a password for Budmon"],
+    ["email.password_set.subject", {}, "Set a password for wDit"],
     [
       "email.password_set.intro",
       {},
@@ -266,28 +304,28 @@ describe("TP-0.16x: §7.2's server catalog", () => {
     [
       "email.two_step_reset_by_owner.intro",
       { email: "E", date: "D" },
-      "The Budmon administrator turned off two-step verification for E on D.",
+      "The wDit administrator turned off two-step verification for E on D.",
     ],
     [
       "email.two_step_reset_by_owner.outro",
       {},
       "If you didn't ask for this, contact the administrator now.",
     ],
-    ["email.session_reuse_signed_out.subject", { device: "V" }, "We signed you out of Budmon on V"],
+    ["email.session_reuse_signed_out.subject", { device: "V" }, "We signed you out of wDit on V"],
     [
       "email.session_reuse_signed_out.intro",
       { device: "V", date: "D" },
       "For your security, we signed V out on D, because its sign-in was used twice.",
     ],
     ["email.session_reuse_signed_out.outro", {}, "If that was you, sign in again on that device."],
-    ["email.export_ready.subject", {}, "Your Budmon export is ready"],
+    ["email.export_ready.subject", {}, "Your wDit export is ready"],
     ["email.export_ready.intro", { date: "D" }, "Your export is ready. Download it before D."],
     ["email.export_ready.button", {}, "Go to your data"],
-    ["email.deletion_scheduled.subject", { date: "D" }, "Your Budmon account will be deleted on D"],
+    ["email.deletion_scheduled.subject", { date: "D" }, "Your wDit account will be deleted on D"],
     [
       "email.deletion_scheduled.intro",
       { date: "D" },
-      "Your account and everything you own in Budmon will be erased on D.",
+      "Your account and everything you own in wDit will be erased on D.",
     ],
     [
       "email.deletion_scheduled.outro",
@@ -295,25 +333,25 @@ describe("TP-0.16x: §7.2's server catalog", () => {
       "Sign in before then to keep your account or to download your data.",
     ],
     ["email.deletion_scheduled.button", {}, "Sign in"],
-    ["email.deletion_cancelled.subject", {}, "Your Budmon account won't be deleted"],
-    ["email.account_closed_owner.subject", {}, "Your Budmon account has been closed"],
+    ["email.deletion_cancelled.subject", {}, "Your wDit account won't be deleted"],
+    ["email.account_closed_owner.subject", {}, "Your wDit account has been closed"],
     [
       "email.account_closed_owner.intro",
       { now: "N", date: "D" },
-      "The Budmon administrator closed your account on N. Your data will be erased on D.",
+      "The wDit administrator closed your account on N. Your data will be erased on D.",
     ],
-    ["email.account_closed_ban.subject", {}, "Your Budmon account has been closed"],
+    ["email.account_closed_ban.subject", {}, "Your wDit account has been closed"],
     [
       "email.account_closed_ban.intro",
       {},
-      "The Budmon administrator closed your account. Your data has been erased.",
+      "The wDit administrator closed your account. Your data has been erased.",
     ],
-    ["email.account_deleted.subject", {}, "Your Budmon account has been deleted"],
-    ["email.invitation_cap_failed.subject", { email: "E" }, "E couldn't join Budmon"],
+    ["email.account_deleted.subject", {}, "Your wDit account has been deleted"],
+    ["email.invitation_cap_failed.subject", { email: "E" }, "E couldn't join wDit"],
     [
       "email.invitation_cap_failed.intro",
       { email: "E" },
-      "Budmon has reached its user limit, so E couldn't create an account. The administrator has been told.",
+      "wDit has reached its user limit, so E couldn't create an account. The administrator has been told.",
     ],
   ])("TP-0.16x: %s renders §7.2's English", (id, values, expected) => {
     expect(english(id, values as Record<string, string>)).toBe(expected);

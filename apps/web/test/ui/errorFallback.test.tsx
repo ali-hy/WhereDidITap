@@ -171,13 +171,13 @@ describe("TP-11.7 (A-457): the body without a reference", () => {
 });
 
 describe("TP-11.7 (A-464): the document title", () => {
-  it("TP-11.7 (A-464): document.title is the h1 – Budmon, and it follows setLocale", async () => {
+  it("TP-11.7 (A-464): document.title is the h1 – wDit, and it follows setLocale", async () => {
     const { ErrorFallback } = await loadErrorFallback();
     const { i18n } = renderWithI18n(() => (
       <ErrorFallback error={{ kind: "unknown" }} onRetry={() => Promise.resolve()} />
     ));
     await screen.findByRole("heading", { level: 1 });
-    const english = "Something went wrong on our side – Budmon";
+    const english = "Something went wrong on our side – wDit";
 
     await waitFor(() => {
       expect(document.title).toBe(english);

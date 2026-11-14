@@ -268,11 +268,11 @@ describe("TP-11.6 (A-321): future instants", () => {
 
 // A-401: t adds appName to every call, so the brand is isolated like any simple argument.
 describe("TP-11.6 (A-401): the brand in catalog texts", () => {
-  it("TP-11.6 (A-401): t(update.web.available) with no values gives the text with Budmon isolated", () => {
+  it("TP-11.6 (A-401): t(update.web.available) with no values gives the text with wDit isolated", () => {
     const i18n = provider();
 
     expect(i18n.t(messages.updateWebAvailable)).toBe(
-      "\u2068Budmon\u2069 has been updated. Reload to get the latest version.",
+      "\u2068wDit\u2069 has been updated. Reload to get the latest version.",
     );
   });
 
@@ -280,6 +280,6 @@ describe("TP-11.6 (A-401): the brand in catalog texts", () => {
     const i18n = provider();
     await i18n.setLocale("en-XA");
 
-    expect(i18n.t(messages.updateWebAvailable)).toContain("\u2068Budmon\u2069");
+    expect(i18n.t(messages.updateWebAvailable)).toContain("\u2068wDit\u2069");
   });
 });

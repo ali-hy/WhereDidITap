@@ -22,7 +22,7 @@ test("TP-11.15 (A-333): on load focus stays on body and #live-polite is empty; n
   page,
 }) => {
   await page.goto("/");
-  await expect(page.locator("main h1")).toHaveText(catalogText("Budmon"));
+  await expect(page.locator("main h1")).toHaveText(catalogText("wDit"));
   await expect(page.locator("body")).toBeFocused();
   await expect(page.locator("#live-polite")).toHaveText("");
 
@@ -31,7 +31,7 @@ test("TP-11.15 (A-333): on load focus stays on body and #live-polite is empty; n
 
   await page.getByRole("link", { name: "Go to home" }).click();
   await expect(page).toHaveURL(/\/$/);
-  await expectFocusedHeading(page, "Budmon");
+  await expectFocusedHeading(page, "wDit");
   await expect(page.getByText("Nothing here yet.")).toBeVisible();
 });
 
@@ -40,7 +40,7 @@ test("TP-11.15 (A-402): a search-only change on / leaves focus and #live-polite 
   page,
 }) => {
   await page.goto("/");
-  await expect(page.locator("main h1")).toHaveText(catalogText("Budmon"));
+  await expect(page.locator("main h1")).toHaveText(catalogText("wDit"));
   // A state where a wrongly fired focus move or announcement would show.
   await page.evaluate(() => {
     (document.activeElement as HTMLElement | null)?.blur();

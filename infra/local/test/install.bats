@@ -255,7 +255,8 @@ CONF
   assert_line "GOOGLE_SIGNIN_CALLBACK_ORIGIN=http://localhost:8080"
   assert_line "GOOGLE_SIGNIN_APP_ORIGINS=https://laptop.tailnet.ts.net,http://localhost:8080"
   assert_line "SMTP_URL=smtp://mailpit:1025"
-  assert_line "EMAIL_FROM=Budmon <no-reply@budmon.local>"
+  # P-A-513 (7), identity A-26: the From display name is the brand.
+  assert_line "EMAIL_FROM=wDit <no-reply@budmon.local>"
   # A-423: asked last with no default; blank is a placeholder.
   [[ "${stderr}" == *"EMAIL_FROM ["*"]: WEB_SENTRY_DSN []: "* ]] || { echo "${stderr}"; return 1; }
   assert_line "WEB_SENTRY_DSN=__FILL_ME__"

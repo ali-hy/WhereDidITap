@@ -138,13 +138,13 @@ const EVENT_KINDS: [EmailKind, SecurityEventKind, string, string][] = [
   [
     "password_changed",
     "password_changed",
-    "Your Budmon password was changed",
+    "Your wDit password was changed",
     "Your password was changed",
   ],
   [
     "password_added",
     "password_added",
-    "A password was added to your Budmon account",
+    "A password was added to your wDit account",
     "A password was added to your account",
   ],
   [
@@ -180,13 +180,13 @@ const EVENT_KINDS: [EmailKind, SecurityEventKind, string, string][] = [
   [
     "google_linked",
     "google_linked",
-    "Google sign-in was connected to your Budmon account",
+    "Google sign-in was connected to your wDit account",
     "Google sign-in was connected to your account",
   ],
   [
     "google_unlinked",
     "google_unlinked",
-    "Google sign-in was disconnected from your Budmon account",
+    "Google sign-in was disconnected from your wDit account",
     "Google sign-in was disconnected from your account",
   ],
 ];
@@ -225,7 +225,7 @@ describe("TP-0.42 (a): one email per kind, exactly as §7.2's row", () => {
 
     expectOneEmail({
       to: user.email,
-      subject: "Someone tried to sign in to Budmon and didn't pass two-step verification",
+      subject: "Someone tried to sign in to wDit and didn't pass two-step verification",
       intro: `Someone got past the first sign-in step for your account but not your two-step code, on ${DT(eventAt)}.`,
       outro: SECURITY_OUTRO,
       link: SECURITY_LINK,
@@ -245,7 +245,7 @@ describe("TP-0.42 (a): one email per kind, exactly as §7.2's row", () => {
     expectOneEmail({
       to: user.email,
       subject: "Two-step verification was turned off by the administrator",
-      intro: `The Budmon administrator turned off two-step verification for mona@example.com on ${DT(eventAt)}.`,
+      intro: `The wDit administrator turned off two-step verification for mona@example.com on ${DT(eventAt)}.`,
       outro: "If you didn't ask for this, contact the administrator now.",
       link: SECURITY_LINK,
     });
@@ -268,7 +268,7 @@ describe("TP-0.42 (a): one email per kind, exactly as §7.2's row", () => {
 
     expectOneEmail({
       to: user.email,
-      subject: "We signed you out of Budmon on Android · Test",
+      subject: "We signed you out of wDit on Android · Test",
       intro: `For your security, we signed Android · Test out on ${DT(toDate(revokedAt))}, because its sign-in was used twice.`,
       outro: "If that was you, sign in again on that device.",
       link: SECURITY_LINK,
@@ -293,7 +293,7 @@ describe("TP-0.42 (a): one email per kind, exactly as §7.2's row", () => {
     expect(D(expiresAt)).toBe("Nov 10, 2026");
     expectOneEmail({
       to: user.email,
-      subject: "Your Budmon export is ready",
+      subject: "Your wDit export is ready",
       intro: "Your export is ready. Download it before Nov 10, 2026.",
       link: { url: `${ORIGIN}/settings/data`, button: "Go to your data" },
     });
@@ -312,8 +312,8 @@ describe("TP-0.42 (a): one email per kind, exactly as §7.2's row", () => {
 
     expectOneEmail({
       to: user.email,
-      subject: `Your Budmon account will be deleted on ${DT(scheduledFor)}`,
-      intro: `Your account and everything you own in Budmon will be erased on ${DT(scheduledFor)}.`,
+      subject: `Your wDit account will be deleted on ${DT(scheduledFor)}`,
+      intro: `Your account and everything you own in wDit will be erased on ${DT(scheduledFor)}.`,
       outro: "Sign in before then to keep your account or to download your data.",
       link: { url: `${ORIGIN}/sign-in`, button: "Sign in" },
     });
@@ -326,7 +326,7 @@ describe("TP-0.42 (a): one email per kind, exactly as §7.2's row", () => {
 
     expectOneEmail({
       to: user.email,
-      subject: "Your Budmon account won't be deleted",
+      subject: "Your wDit account won't be deleted",
       intro: "Your account won't be deleted. Reconnect your Gmail and SMS in Sources.",
     });
   });
@@ -347,8 +347,8 @@ describe("TP-0.42 (a): one email per kind, exactly as §7.2's row", () => {
 
     expectOneEmail({
       to: user.email,
-      subject: "Your Budmon account has been closed",
-      intro: `The Budmon administrator closed your account on ${DT(requestedAt)}. Your data will be erased on ${DT(scheduledFor)}.`,
+      subject: "Your wDit account has been closed",
+      intro: `The wDit administrator closed your account on ${DT(requestedAt)}. Your data will be erased on ${DT(scheduledFor)}.`,
     });
   });
 
@@ -364,9 +364,9 @@ describe("TP-0.42 (a): one email per kind, exactly as §7.2's row", () => {
 
     expectOneEmail({
       to: inviter.email,
-      subject: "newbie@example.com couldn't join Budmon",
+      subject: "newbie@example.com couldn't join wDit",
       intro:
-        "Budmon has reached its user limit, so newbie@example.com couldn't create an account. The administrator has been told.",
+        "wDit has reached its user limit, so newbie@example.com couldn't create an account. The administrator has been told.",
     });
   });
 
@@ -388,9 +388,9 @@ describe("TP-0.42 (a): one email per kind, exactly as §7.2's row", () => {
 
     expectOneEmail({
       to: owner.email,
-      subject: "newbie@example.com couldn't join Budmon",
+      subject: "newbie@example.com couldn't join wDit",
       intro:
-        "Budmon has reached its user limit, so newbie@example.com couldn't create an account. The administrator has been told.",
+        "wDit has reached its user limit, so newbie@example.com couldn't create an account. The administrator has been told.",
     });
   });
 });
@@ -566,7 +566,7 @@ describe("TP-0.42 (d): a time_zone Intl rejects is shown as UTC (A-20, A-21)", (
 
     expectOneEmail({
       to: user.email,
-      subject: "Your Budmon password was changed",
+      subject: "Your wDit password was changed",
       intro: `Your password was changed on ${UTC_DT(eventAt)}.`,
       outro: SECURITY_OUTRO,
       link: SECURITY_LINK,
@@ -594,7 +594,7 @@ describe("TP-0.42 (d): a time_zone Intl rejects is shown as UTC (A-20, A-21)", (
     expect(UTC_D(expiresAt)).toBe("Nov 9, 2026");
     expectOneEmail({
       to: user.email,
-      subject: "Your Budmon export is ready",
+      subject: "Your wDit export is ready",
       intro: "Your export is ready. Download it before Nov 9, 2026.",
       link: { url: `${ORIGIN}/settings/data`, button: "Go to your data" },
     });
@@ -628,7 +628,7 @@ describe("TP-0.42 (e), (f): a stored locale that is invalid or unsupported forma
 
       expectOneEmail({
         to: user.email,
-        subject: "Your Budmon password was changed",
+        subject: "Your wDit password was changed",
         intro: `Your password was changed on ${DT(eventAt)}.`,
         outro: SECURITY_OUTRO,
         link: SECURITY_LINK,
@@ -660,7 +660,7 @@ describe("TP-0.42 (e), (f): a stored locale that is invalid or unsupported forma
 
       expectOneEmail({
         to: user.email,
-        subject: "Your Budmon export is ready",
+        subject: "Your wDit export is ready",
         intro: "Your export is ready. Download it before Nov 10, 2026.",
         link: { url: `${ORIGIN}/settings/data`, button: "Go to your data" },
       });

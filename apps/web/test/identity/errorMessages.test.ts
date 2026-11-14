@@ -100,14 +100,14 @@ describe("TP-0.38: identityErrorMessage", () => {
   });
 });
 
-/** §8.1's identity error IDs and their English text. */
+/** §8.1's identity error IDs and their English text (name-free, A-23). */
 const IDENTITY_ERROR_TEXT: [string, string, string][] = [
   ["INVALID_CREDENTIALS", "error.invalidCredentials", "Email or password is incorrect."],
-  ["ACCOUNT_CLOSED", "error.accountClosed", "This {appName} account has been closed."],
+  ["ACCOUNT_CLOSED", "error.accountClosed", "This account has been closed."],
   [
     "GOOGLE_ACCOUNT_UNKNOWN",
     "error.googleAccountUnknown",
-    "There's no {appName} account for {email}. {appName} is invite-only: ask someone who uses {appName} to invite you.",
+    "There's no account for {email}. You need an invitation: ask someone who already has an account to invite you.",
   ],
   [
     "GOOGLE_EMAIL_UNVERIFIED",
@@ -117,22 +117,22 @@ const IDENTITY_ERROR_TEXT: [string, string, string][] = [
   [
     "GOOGLE_ACCOUNT_IN_USE",
     "error.googleAccountInUse",
-    "This Google account is already used by another {appName} account.",
+    "This Google account is already used by another account.",
   ],
   [
     "GOOGLE_OTHER_ACCOUNT_LINKED",
     "error.googleOtherAccountLinked",
-    "Your {appName} account is connected to a different Google account. Use that one, or your password.",
+    "Your account is connected to a different Google account. Use that one, or your password.",
   ],
   [
     "GOOGLE_ACCOUNT_NOT_ALLOWED",
     "error.googleAccountNotAllowed",
-    "This Google account can't be used with {appName}.",
+    "This Google account can't be used here.",
   ],
   [
     "GOOGLE_ACCOUNT_MISMATCH",
     "error.googleAccountMismatch",
-    "Choose the Google account connected to {appName} ({email}).",
+    "Choose the Google account you connected ({email}).",
   ],
   [
     "GOOGLE_SIGNIN_FAILED",
@@ -157,9 +157,9 @@ const IDENTITY_ERROR_TEXT: [string, string, string][] = [
   [
     "USER_CAP_REACHED",
     "error.userCapReached",
-    "{appName} is full right now, so no new invitations can be sent.",
+    "There's no room for new people right now, so no new invitations can be sent.",
   ],
-  ["ALREADY_A_USER", "error.alreadyAUser", "{email} already uses {appName}."],
+  ["ALREADY_A_USER", "error.alreadyAUser", "{email} already has an account."],
   ["INVITATION_PENDING", "error.invitationPending", "{email} already has a pending invitation."],
   ["EMAIL_NOT_INVITABLE", "error.emailNotInvitable", "This address can't be invited."],
   [

@@ -51,7 +51,7 @@ class IdentityErrorMessagesTest {
     fun `TP-0_43 ALREADY_A_USER with an email, then without`() {
         val error = defined("ALREADY_A_USER", 409)
 
-        assertEquals("a@x.test already uses Budmon.", resolve(IdentityErrorMessages.forError(error, Operation.Create, "a@x.test")))
+        assertEquals("a@x.test already has an account.", resolve(IdentityErrorMessages.forError(error, Operation.Create, "a@x.test")))
         val fallback = IdentityErrorMessages.forError(error, Operation.Create)
         assertEquals(ErrorMessages.forError(error, Operation.Create), fallback)
         assertFalse(resolve(fallback).contains("%1\$s"))
@@ -76,7 +76,7 @@ class IdentityErrorMessagesTest {
         val without = defined("GOOGLE_ACCOUNT_MISMATCH", 400)
 
         assertEquals(
-            "Choose the Google account connected to Budmon (a@x.test).",
+            "Choose the Google account you connected (a@x.test).",
             resolve(IdentityErrorMessages.forError(withEmail, Operation.Mutation)),
         )
         val fallback = IdentityErrorMessages.forError(without, Operation.Mutation)
@@ -93,7 +93,7 @@ class IdentityErrorMessagesTest {
             resolve(IdentityErrorMessages.forError(defined("INVALID_CREDENTIALS", 401), Operation.Mutation)),
         )
         assertEquals(
-            "There's no Budmon account for a@x.test. Budmon is invite-only: ask someone who uses Budmon to invite you.",
+            "There's no account for a@x.test. You need an invitation: ask someone who already has an account to invite you.",
             resolve(
                 IdentityErrorMessages.forError(
                     defined("GOOGLE_ACCOUNT_UNKNOWN", 404, "email" to "a@x.test"),
@@ -136,25 +136,25 @@ class IdentityErrorMessagesTest {
         }
     }
 
-    /** §8.2's identity error strings in English, with the email supplied where one is shown. */
+    /** §8.2's identity error strings in English (name-free, A-23), with the email supplied where one is shown. */
     private val english = listOf(
         "INVALID_CREDENTIALS" to "Email or password is incorrect.",
-        "ACCOUNT_CLOSED" to "This Budmon account has been closed.",
+        "ACCOUNT_CLOSED" to "This account has been closed.",
         "GOOGLE_ACCOUNT_UNKNOWN" to
-            "There's no Budmon account for a@x.test. Budmon is invite-only: ask someone who uses Budmon to invite you.",
+            "There's no account for a@x.test. You need an invitation: ask someone who already has an account to invite you.",
         "GOOGLE_EMAIL_UNVERIFIED" to
             "Google hasn't confirmed this email address. Sign in with your password, or use your invitation.",
-        "GOOGLE_ACCOUNT_IN_USE" to "This Google account is already used by another Budmon account.",
+        "GOOGLE_ACCOUNT_IN_USE" to "This Google account is already used by another account.",
         "GOOGLE_OTHER_ACCOUNT_LINKED" to
-            "Your Budmon account is connected to a different Google account. Use that one, or your password.",
-        "GOOGLE_ACCOUNT_NOT_ALLOWED" to "This Google account can't be used with Budmon.",
-        "GOOGLE_ACCOUNT_MISMATCH" to "Choose the Google account connected to Budmon (a@x.test).",
+            "Your account is connected to a different Google account. Use that one, or your password.",
+        "GOOGLE_ACCOUNT_NOT_ALLOWED" to "This Google account can't be used here.",
+        "GOOGLE_ACCOUNT_MISMATCH" to "Choose the Google account you connected (a@x.test).",
         "GOOGLE_SIGNIN_FAILED" to "Google sign-in didn't complete. Try again.",
         "GOOGLE_UNAVAILABLE" to "Couldn't reach Google. Try again, or use your password.",
         "INVITE_ALLOWANCE_EXHAUSTED" to "You've used all your invitations. The administrator can give you more.",
         "INVITATIONS_DISABLED" to "Sending invitations isn't available for your account.",
-        "USER_CAP_REACHED" to "Budmon is full right now, so no new invitations can be sent.",
-        "ALREADY_A_USER" to "a@x.test already uses Budmon.",
+        "USER_CAP_REACHED" to "There's no room for new people right now, so no new invitations can be sent.",
+        "ALREADY_A_USER" to "a@x.test already has an account.",
         "INVITATION_PENDING" to "a@x.test already has a pending invitation.",
         "EMAIL_NOT_INVITABLE" to "This address can't be invited.",
         "RESEND_LIMIT_REACHED" to "You can resend this invitation again tomorrow.",

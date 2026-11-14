@@ -85,7 +85,7 @@ describe("TP-0.17: the invitation email job", () => {
     expect(w.sender.sent).toHaveLength(1);
     const sent = w.sender.sent[0];
     expect(sent?.to).toBe(email);
-    expect(sent?.subject).toBe("Ahmed invited you to Budmon");
+    expect(sent?.subject).toBe("Ahmed invited you to wDit");
     const token = linkToken(sent?.text ?? "", "/invite");
     const row = await invitationRow(invitationId);
     expect((row["token_hash"] as Buffer).equals(hashToken(token))).toBe(true);
@@ -179,7 +179,7 @@ describe("TP-0.17x: invitation email details", () => {
     expect(w.sender.sent).toEqual([]);
   });
 
-  it('TP-0.17x: without an inviter the subject is "Your Budmon invitation"', async () => {
+  it('TP-0.17x: without an inviter the subject is "Your wDit invitation"', async () => {
     const { invitationId } = await invitationFactory(h, {
       email: "boot@example.com",
       now: NOW,
@@ -188,7 +188,7 @@ describe("TP-0.17x: invitation email details", () => {
 
     await run("invitation", invitationId);
 
-    expect(w.sender.sent[0]?.subject).toBe("Your Budmon invitation");
+    expect(w.sender.sent[0]?.subject).toBe("Your wDit invitation");
   });
 
   it("TP-0.17x: a successful send counts identity_emails_total{error_key=none}", async () => {
@@ -224,8 +224,8 @@ describe("TP-0.18: the password reset email job", () => {
     await run("password_reset", b.resetId);
 
     expect(w.sender.sent.map((m) => [m.to, m.subject])).toEqual([
-      [withPassword.email, "Reset your Budmon password"],
-      [googleOnly.email, "Set a password for Budmon"],
+      [withPassword.email, "Reset your wDit password"],
+      [googleOnly.email, "Set a password for wDit"],
     ]);
   });
 

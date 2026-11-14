@@ -62,6 +62,10 @@ describe("TP-0.41x: F-1's constants", () => {
     expect((C as Record<string, unknown>)["SESSION_ABSOLUTE_TTL"]).toBeUndefined();
   });
 
+  it('TP-0.41x (A-23, A-26): APP_NAME is the brand, exactly "wDit"', () => {
+    expect((C as Record<string, unknown>)["APP_NAME"]).toBe("wDit");
+  });
+
   it("TP-0.41x: the locales are LD-10's", () => {
     expect([...C.SUPPORTED_LOCALES]).toEqual(["en"]);
     expect([...C.PSEUDO_LOCALES]).toEqual(["en-XA", "ar-XB"]);
