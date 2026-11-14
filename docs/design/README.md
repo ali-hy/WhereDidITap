@@ -24,6 +24,7 @@ Budmon is built by a pipeline of agents (`.claude/agents/`), run through three c
 - **HLD** (`<module>/hld.md`): the big decisions, i.e. tables, user experience (journeys, screens, states), protocols and integrations.
 - **LLD** (`<module>/lld.md`): the implementation contract: exact schemas, a **function catalog** (every function's file, signature, behaviour, errors and dependencies), API contract, **slices** (the build order, one story each) and the test plan. The test architect writes tests from it before any code exists, so it has to be exact.
 - **LLD brief** (`<module>/lld-brief.md`): a short, human-readable summary of the LLD for the owner to review and approve: what it builds, what needs a decision, data, API, a summary of the function catalog, the build plan, testing and risks. It's kept in sync with every LLD change; if they disagree, the LLD wins.
+- **UX guidelines** ([`ux-guidelines.md`](./ux-guidelines.md)): the visual style shared by every module (colour tokens and themes, type, spacing, shape, components, feedback states, icons, RTL and accessibility details) and how it maps onto Tailwind and Compose.
 
 ## Status and approval
 
