@@ -31,6 +31,25 @@ beforeEach(async () => {
   await resetBetweenTests(testDb);
 });
 
+/** Identity's 15 tables (§3.1). */
+const IDENTITY_TABLES = [
+  "auth_challenges",
+  "data_exports",
+  "email_bans",
+  "google_identities",
+  "identity_settings",
+  "invitations",
+  "known_devices",
+  "password_credentials",
+  "password_resets",
+  "recovery_codes",
+  "security_events",
+  "session_refresh_tokens",
+  "sessions",
+  "two_step_credentials",
+  "users",
+] as const;
+
 /** The pg error a statement fails with (code and constraint), or null when it succeeds. */
 async function failure(
   sql: string,
@@ -119,6 +138,20 @@ describe("TP-0.7: schema constraints", () => {
         [userId],
       ),
     ).toEqual({ code: "23514", constraint: "two_step_pending_shape" });
+  });
+
+  it("TP-0.7 (A-15): every timestamptz column of identity's 15 tables has precision 3", async () => {
+    const { rows } = await testDb.database.handle.executeSql(
+      "SELECT table_name, column_name, datetime_precision FROM information_schema.columns WHERE table_schema = 'public' AND data_type = 'timestamp with time zone' AND table_name = ANY($1)",
+      [[...IDENTITY_TABLES]],
+    );
+    const columns = rows.map((r) => ({
+      column: `${String(r["table_name"])}.${String(r["column_name"])}`,
+      precision: Number(r["datetime_precision"]),
+    }));
+
+    expect(new Set(columns.map((c) => c.column.split(".")[0]))).toEqual(new Set(IDENTITY_TABLES));
+    expect(columns.filter((c) => c.precision !== 3)).toEqual([]);
   });
 
   it("TP-0.7: sessions has exactly §3.1's 16 columns, and no absolute_expires_at", async () => {

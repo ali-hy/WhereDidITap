@@ -20,6 +20,8 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.io.IOException
+import java.security.ProviderException
 import java.time.Instant
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -75,6 +77,25 @@ class TokenStoreTest {
         assertNull(store.outboxOwnerUserId())
         assertNull(store.read())
     }
+
+    @Test
+    fun `TP-0_29 (f) a store whose Keystore throws IOException or ProviderException - read() is null, then everything is reset`() =
+        runTest {
+            for (failure in listOf(IOException("keystore load failed"), ProviderException("keystore provider failed"))) {
+                store.save(session)
+                store.saveLastEmail("ali@example.com")
+                store.saveDeviceToken("ali@example.com", device)
+                store.setOutboxOwnerUserId(session.userId)
+                val broken = TokenStore(context, TokenCipher { throw failure })
+
+                assertNull(failure.toString(), broken.read())
+
+                assertNull(failure.toString(), store.read())
+                assertNull(failure.toString(), store.deviceTokenFor("ali@example.com"))
+                assertNull(failure.toString(), store.lastEmail())
+                assertNull(failure.toString(), store.outboxOwnerUserId())
+            }
+        }
 
     @Test
     fun `TP-0_29x lastEmail through a K2 store also resets the store (A-8 every decrypting accessor)`() = runTest {

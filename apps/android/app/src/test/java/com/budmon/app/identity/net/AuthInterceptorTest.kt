@@ -105,6 +105,15 @@ class AuthInterceptorTest {
     }
 
     @Test
+    fun `TP-0_29x a request to the same port under another host name carries no bearer`() {
+        runBlocking { store.save(session()) }
+        val otherHost = if (baseUrl.host == "127.0.0.1") "localhost" else "127.0.0.1"
+        val url = apiRoot(baseUrl).resolve("me")!!.newBuilder().host(otherHost).build()
+
+        assertNull(authorizationOf(Request.Builder().url(url).build()))
+    }
+
+    @Test
     fun `TP-0_29 (e) without a stored session nothing is added`() {
         assertNull(authorizationOf(at("me")))
     }

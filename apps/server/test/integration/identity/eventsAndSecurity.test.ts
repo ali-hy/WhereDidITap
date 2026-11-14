@@ -90,6 +90,11 @@ const emailJobs = async (refId: string) =>
     (r) => (r.data as { refId?: unknown }).refId === refId,
   );
 
+const eventIds = async (userId: string) =>
+  (await h.executeSql("SELECT id FROM security_events WHERE user_id = $1", [userId])).rows.map(
+    (r) => String(r["id"]),
+  );
+
 const eventRows = async (userId: string) =>
   (
     await h.executeSql(
@@ -117,7 +122,7 @@ describe("TP-0.22: recordSecurityEvent", () => {
     expect(await emailJobs(user.id)).toEqual([]);
   });
 
-  it("TP-0.22: with an email, committed: one row and one identity.email-send job (refId = user id)", async () => {
+  it("TP-0.22: with an email, committed: one row and one job { kind, refId: user id, eventId } (A-17)", async () => {
     const user = await userFactory(h);
 
     await withTransaction(deps.database, (tx) =>
@@ -131,9 +136,33 @@ describe("TP-0.22: recordSecurityEvent", () => {
     expect(await eventRows(user.id)).toEqual([
       { kind: "password_changed", session_id: null, client_kind: null },
     ]);
+    const [eventId] = await eventIds(user.id);
     const jobs = await emailJobs(user.id);
-    expect(jobs).toHaveLength(1);
-    expect(jobs[0]?.data).toEqual({ kind: "password_changed", refId: user.id });
+    expect(jobs.map((j) => j.data)).toEqual([
+      { kind: "password_changed", refId: user.id, eventId },
+    ]);
+  });
+
+  it("TP-0.22: with an email and refId = a session id: payload { kind, refId: session id, eventId } (A-17)", async () => {
+    const user = await userFactory(h);
+    const sessionId = "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a63";
+
+    await withTransaction(deps.database, (tx) =>
+      recordSecurityEvent(deps, tx, {
+        userId: user.id,
+        kind: "refresh_reuse_detected",
+        sessionId,
+        email: "session_reuse_signed_out",
+        refId: sessionId,
+      }),
+    );
+
+    const [eventId] = await eventIds(user.id);
+    expect(eventId).toBeDefined();
+    const jobs = await emailJobs(sessionId);
+    expect(jobs.map((j) => j.data)).toEqual([
+      { kind: "session_reuse_signed_out", refId: sessionId, eventId },
+    ]);
   });
 });
 
@@ -155,26 +184,6 @@ describe("TP-0.22x: recordSecurityEvent details", () => {
       { kind: "sign_in_succeeded", session_id: sessionId, client_kind: "web" },
     ]);
     expect(await emailJobs(user.id)).toEqual([]);
-  });
-
-  it("TP-0.22x: refId, when given, is the job's refId", async () => {
-    const user = await userFactory(h);
-    const sessionId = "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a63";
-
-    await withTransaction(deps.database, (tx) =>
-      recordSecurityEvent(deps, tx, {
-        userId: user.id,
-        kind: "refresh_reuse_detected",
-        sessionId,
-        email: "session_reuse_signed_out",
-        refId: sessionId,
-      }),
-    );
-
-    const jobs = await emailJobs(sessionId);
-    expect(jobs.map((j) => j.data)).toEqual([
-      { kind: "session_reuse_signed_out", refId: sessionId },
-    ]);
   });
 
   it("TP-0.22x: it logs info security_event with userId and reason = kind", async () => {

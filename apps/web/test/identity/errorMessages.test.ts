@@ -62,6 +62,42 @@ describe("TP-0.38: identityErrorMessage", () => {
       "error.generic.read",
     );
   });
+
+  // A-16: the caller supplies the email; a message missing its value falls back to P-F-203.
+  it.each([
+    ["ALREADY_A_USER", "error.alreadyAUser"],
+    ["INVITATION_PENDING", "error.invitationPending"],
+  ])("TP-0.38 (A-16): %s on a create with context { email } → %s with { email }", (key, id) => {
+    const m = identityErrorMessage(defined(key, 409), "create", { email: "a@x.test" });
+
+    expect(m.descriptor.id).toBe(id);
+    expect(m.values).toEqual({ email: "a@x.test" });
+  });
+
+  it.each(["ALREADY_A_USER", "INVITATION_PENDING"])(
+    "TP-0.38 (A-16): %s on a create without context → P-F-203's create message",
+    (key) => {
+      const e = defined(key, 409);
+
+      expect(identityErrorMessage(e, "create")).toEqual(messageForError(e, "create"));
+    },
+  );
+
+  it("TP-0.38 (A-16): GOOGLE_ACCOUNT_MISMATCH with data.email → error.googleAccountMismatch with { email }", () => {
+    const m = identityErrorMessage(
+      defined("GOOGLE_ACCOUNT_MISMATCH", 400, { email: "a@b.co" }),
+      "mutation",
+    );
+
+    expect(m.descriptor.id).toBe("error.googleAccountMismatch");
+    expect(m.values).toEqual({ email: "a@b.co" });
+  });
+
+  it("TP-0.38 (A-16): GOOGLE_ACCOUNT_MISMATCH without data.email → P-F-203's mutation message", () => {
+    const e = defined("GOOGLE_ACCOUNT_MISMATCH", 400);
+
+    expect(identityErrorMessage(e, "mutation")).toEqual(messageForError(e, "mutation"));
+  });
 });
 
 /** §8.1's identity error IDs and their English text. */
@@ -137,8 +173,10 @@ const IDENTITY_ERROR_TEXT: [string, string, string][] = [
 ];
 
 describe("TP-0.38x: identity keys and the platform fallback", () => {
-  it.each(IDENTITY_ERROR_TEXT)("TP-0.38x: defined %s → %s", (key, id) => {
-    expect(identityErrorMessage(defined(key, 409), "mutation").descriptor.id).toBe(id);
+  // The email-showing keys get their value from data or context, so each resolves to its own ID.
+  it.each(IDENTITY_ERROR_TEXT)("TP-0.38x: defined %s (its email supplied) → %s", (key, id) => {
+    const e = defined(key, 409, { email: "a@x.test" });
+    expect(identityErrorMessage(e, "mutation", { email: "a@x.test" }).descriptor.id).toBe(id);
   });
 
   it.each(IDENTITY_ERROR_TEXT)(
@@ -157,14 +195,18 @@ describe("TP-0.38x: identity keys and the platform fallback", () => {
     for (const [, id, text] of IDENTITY_ERROR_TEXT) expect(byId.get(id)?.defaultMessage).toBe(text);
   });
 
-  it("TP-0.38x: GOOGLE_ACCOUNT_MISMATCH with data.email gives { email }", () => {
-    const m = identityErrorMessage(
-      defined("GOOGLE_ACCOUNT_MISMATCH", 400, { email: "a@b.co" }),
-      "mutation",
-    );
+  it("TP-0.38x (A-16): GOOGLE_ACCOUNT_UNKNOWN without data.email → P-F-203's mutation message", () => {
+    const e = defined("GOOGLE_ACCOUNT_UNKNOWN", 404);
+    expect(identityErrorMessage(e, "mutation")).toEqual(messageForError(e, "mutation"));
+  });
 
-    expect(m.descriptor.id).toBe("error.googleAccountMismatch");
-    expect(m.values).toEqual({ email: "a@b.co" });
+  it("TP-0.38x (A-16): the server's data.email isn't used for ALREADY_A_USER; the context is", () => {
+    const e = defined("ALREADY_A_USER", 409, { email: "server@x.test" });
+
+    expect(identityErrorMessage(e, "create")).toEqual(messageForError(e, "create"));
+    expect(identityErrorMessage(e, "create", { email: "a@x.test" }).values).toEqual({
+      email: "a@x.test",
+    });
   });
 
   it.each<[string, AppError, "read" | "create" | "mutation"]>([
