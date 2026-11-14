@@ -187,16 +187,31 @@ describe("TP-0.16x: §7.2's server catalog", () => {
     expect(catalog[`email.${kind}.button`]).toBeUndefined();
   });
 
-  it.each(SECURITY_KINDS)(
-    "TP-0.16x: %s has its event message and the shared outro text",
-    (kind) => {
-      expect(catalog[`email.${kind}.event`]).toBeTypeOf("string");
-      expect(english(`email.${kind}.outro`)).toBe(
-        "If this wasn't you, change your password and review your security settings.",
-      );
-      expect(english(`email.${kind}.button`)).toBe("Review your security settings");
-    },
-  );
+  it.each(SECURITY_KINDS)("TP-0.16x: %s has the shared outro and button text", (kind) => {
+    expect(english(`email.${kind}.outro`)).toBe(
+      "If this wasn't you, change your password and review your security settings.",
+    );
+    expect(english(`email.${kind}.button`)).toBe("Review your security settings");
+  });
+
+  // A-11: the event sentence of each "{event} on {date}." kind; two_step_failed has none.
+  it.each([
+    ["password_changed", "Your password was changed"],
+    ["password_added", "A password was added to your account"],
+    ["two_step_enabled", "Two-step verification was turned on"],
+    ["two_step_disabled", "Two-step verification was turned off"],
+    ["authenticator_replaced", "Your two-step verification app was changed"],
+    ["recovery_codes_regenerated", "New recovery codes were created"],
+    ["recovery_code_used", "A recovery code was used to sign in"],
+    ["google_linked", "Google sign-in was connected to your account"],
+    ["google_unlinked", "Google sign-in was disconnected from your account"],
+  ])("TP-0.16x (A-11): email.%s.event is %j", (kind, text) => {
+    expect(english(`email.${kind}.event`)).toBe(text);
+  });
+
+  it("TP-0.16x (A-11): two_step_failed has no event message", () => {
+    expect(catalog["email.two_step_failed.event"]).toBeUndefined();
+  });
 
   it.each(SECURITY_KINDS.filter((k) => k !== "two_step_failed"))(
     'TP-0.16x: %s intro is "{event} on {date}."',
@@ -217,6 +232,7 @@ describe("TP-0.16x: §7.2's server catalog", () => {
     ["email.invitation.outro", { date: "D" }, "This invitation expires on D."],
     ["email.invitation.button", {}, "Accept invitation"],
     ["email.invitation.subjectNoInviter", {}, "Your Budmon invitation"],
+    ["email.invitation.introNoInviter", { email: "E" }, "You've been invited to Budmon as E."],
     ["email.password_reset.subject", {}, "Reset your Budmon password"],
     ["email.password_reset.intro", { email: "E" }, "Someone asked to reset the password for E."],
     [

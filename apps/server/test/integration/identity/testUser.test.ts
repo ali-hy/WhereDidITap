@@ -1,6 +1,8 @@
 // createTestUser with identity's FK (P-A-234, identity LLD §10.1). TP-0.34's database half; its
-// other half is the platform suites themselves (`pnpm test`, `pnpm test:int`), whose A-511 cases
-// (TP-2.29 (g), TP-2.49x, TP-4.22 (a), TP-6.12) take their S-0 expectations in this slice.
+// other half is the platform suites themselves (`pnpm test`, `pnpm test:int`), whose changed cases
+// take their S-0 expectations in this slice:
+// - A-511: TP-2.29 (g), TP-2.49x, TP-4.22 (a), TP-6.12;
+// - A-512: TP-2.12, TP-2.14, TP-2.16 (b), TP-2.53x, TP-2.55x.
 import { createTestUser } from "@budmon/test-support";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDatabase, type TestDatabase } from "../../support/testDatabase.js";

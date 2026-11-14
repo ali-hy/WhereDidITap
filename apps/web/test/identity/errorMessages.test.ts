@@ -163,10 +163,8 @@ describe("TP-0.38x: identity keys and the platform fallback", () => {
       "mutation",
     );
 
-    expect(m).toEqual({
-      descriptor: expect.objectContaining({ id: "error.googleAccountMismatch" }),
-      values: { email: "a@b.co" },
-    });
+    expect(m.descriptor.id).toBe("error.googleAccountMismatch");
+    expect(m.values).toEqual({ email: "a@b.co" });
   });
 
   it.each<[string, AppError, "read" | "create" | "mutation"]>([

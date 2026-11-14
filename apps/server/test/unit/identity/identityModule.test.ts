@@ -6,7 +6,6 @@ import { describe, expect, it, vi } from "vitest";
 import { createSealedColumnRegistry } from "../../../src/platform/crypto/sealedColumns.js";
 import type { Database } from "../../../src/platform/db/types.js";
 import { buildJobRegistry } from "../../../src/platform/queue/appRegistry.js";
-import type { JobQueue } from "../../../src/platform/queue/jobQueue.js";
 import {
   defaultPorts,
   type ErasureParticipant,
@@ -31,7 +30,7 @@ function base(): IdentityBase {
     metrics: obs.metrics,
     reporter: obs.reporter,
     registry: buildJobRegistry(),
-    queue: { enqueue: vi.fn() } as unknown as JobQueue,
+    queue: { enqueue: vi.fn() },
     sealedColumns: createSealedColumnRegistry(),
   };
 }

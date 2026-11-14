@@ -8,10 +8,12 @@ import { PushTargetNotEmptyError } from "../../../src/platform/db/schemaPush.js"
 import { runSchemaStep } from "../../../src/platform/db/schemaStep.js";
 import type { Database } from "../../../src/platform/db/types.js";
 import {
+  PLATFORM_TABLES,
   SERVER_DIR,
   connectDatabase,
   recordingLogger,
   schemaStepInput,
+  schemaTableNames,
   type LoggedLine,
 } from "../../support/platform.js";
 import {
@@ -125,6 +127,11 @@ describe("TP-2.55x: the rest of F-19", () => {
       url,
       "SELECT count(*)::int AS n FROM pg_tables WHERE schemaname = 'public'",
     );
+    const [platformTables] = await query(
+      url,
+      "SELECT count(*)::int AS n FROM pg_tables WHERE schemaname = 'public' AND tablename = ANY($1)",
+      [[...PLATFORM_TABLES]],
+    );
     const [grant] = await query(
       url,
       "SELECT has_table_privilege('budmon_app', 'public.currencies', 'SELECT') AS can",
@@ -132,7 +139,8 @@ describe("TP-2.55x: the rest of F-19", () => {
     const [egp] = await query(url, "SELECT minor_units FROM currencies WHERE code = 'EGP'");
 
     expect(roles).toEqual({ n: 4 });
-    expect(tables).toEqual({ n: 4 });
+    expect(tables).toEqual({ n: schemaTableNames().length });
+    expect(platformTables).toEqual({ n: 4 });
     expect(grant).toEqual({ can: true });
     expect(egp).toEqual({ minor_units: 2 });
   });

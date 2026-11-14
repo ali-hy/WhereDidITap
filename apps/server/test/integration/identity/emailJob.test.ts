@@ -5,7 +5,6 @@ import { Temporal } from "@budmon/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DbHandle } from "../../../src/platform/db/types.js";
 import { EmailSendError } from "../../../src/identity/emailSender.js";
-import type { IdentityMetrics } from "../../../src/identity/identityMetrics.js";
 import { hashToken } from "../../../src/identity/tokens.js";
 import {
   invitationFactory,
@@ -34,7 +33,7 @@ let h: DbHandle;
 
 beforeAll(async () => {
   w = await buildIdentityWorker({
-    identityOverrides: { metrics: metrics as unknown as IdentityMetrics },
+    identityOverrides: { metrics },
   });
   h = w.testDb.database.handle;
 });

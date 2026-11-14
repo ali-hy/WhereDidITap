@@ -28,7 +28,7 @@ async function currency(code: string): Promise<Record<string, unknown> | undefin
 
 describe("TP-2.14 (I): loadReferenceData", () => {
   it("TP-2.14: on an empty currencies table, every entry is upserted", async () => {
-    await migrator.handle.executeSql("TRUNCATE exchange_rates, currencies");
+    await migrator.handle.executeSql("TRUNCATE exchange_rates, currencies CASCADE");
     const data = referenceData();
 
     const result = await loadReferenceData(migrator.handle, data);
