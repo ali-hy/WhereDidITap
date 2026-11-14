@@ -56,7 +56,7 @@ function formatDate(at: Date, locale: string, timeZone: string, withTime: boolea
   try {
     return new Intl.DateTimeFormat(tag, options).format(at);
   } catch {
-    return new Intl.DateTimeFormat("en", options).format(at);
+    return new Intl.DateTimeFormat("en", { ...options, timeZone: "UTC" }).format(at);
   }
 }
 

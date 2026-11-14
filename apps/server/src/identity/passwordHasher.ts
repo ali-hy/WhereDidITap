@@ -48,7 +48,13 @@ export function createPasswordHasher(
   const limit = createSemaphore(deps.maxConcurrency ?? ARGON2_MAX_CONCURRENCY);
   let dummy: Promise<string> | null = null;
   const dummyHash = (): Promise<string> => {
-    dummy ??= hashSecret(`dummy-${randomBytes(16).toString("hex")}`);
+    // A rejected hash is dropped so the next call retries.
+    dummy ??= limit(() => hashSecret(`dummy-${randomBytes(16).toString("hex")}`)).catch(
+      (err: unknown) => {
+        dummy = null;
+        throw err;
+      },
+    );
     return dummy;
   };
   // Computed at start-up, so the first unknown-user sign-in doesn't pay for it.
