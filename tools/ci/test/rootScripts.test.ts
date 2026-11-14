@@ -47,6 +47,9 @@ const ROWS: Readonly<Record<string, string>> = {
     "bash infra/local/test/setup-bats.sh && .tools/bats/bats-core/bin/bats infra/local/test",
   // A-391: the infra-int job's integration tests.
   "test:infra": "bash infra/local/test/run-integration.sh",
+  // Identity S-0b (P-A-513 (1), P-A-514): the token generator, run without --root.
+  "tokens:generate": "tsx tools/tokens/generate.ts",
+  "tokens:check": "tsx tools/tokens/generate.ts --check",
   // S-13 (A-14): check:all also runs Android's checks.
   "check:all": "pnpm check && pnpm test:e2e && cd apps/android && ./gradlew check",
 };

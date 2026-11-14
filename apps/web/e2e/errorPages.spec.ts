@@ -65,6 +65,8 @@ test("TP-0b.7: the error page's Try again is the primary button with the refresh
 
   await retry.click();
   await expect(main.getByRole("status")).toHaveText(catalogText("Still not working."));
+  // Off the button, so guide §7.3's hover colour doesn't stand in for the resting one.
+  await page.mouse.move(0, 0);
 
   await expectPrimary(page, retry);
   await expect(retry.locator(`svg path[d="${REFRESH_PATH}"]`)).toHaveCount(1);
