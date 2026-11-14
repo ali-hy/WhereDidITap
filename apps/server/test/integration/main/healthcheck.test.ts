@@ -2,7 +2,7 @@
 //
 // It runs `src/main/healthcheck.ts` through tsx (the bundle is built once, by apiBundle.test.ts;
 // a second build in parallel would race). `--heartbeat` reads HEARTBEAT_FILE (an absolute path,
-// else /tmp/heartbeat, or %TEMP%\heartbeat on Windows, A-226, A-515) and judges its content
+// else /tmp/heartbeat, or %TEMP%\heartbeat on Windows, A-226, A-518) and judges its content
 // (F-79's epoch seconds, A-208); `--ready` requests `http://127.0.0.1:${PORT}/health/ready`, so
 // the stub API listens on a free port.
 import { spawn } from "node:child_process";

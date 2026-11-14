@@ -1,4 +1,4 @@
-// F-22b resolveNodeBin and NodeBinMissingError (A-514), with F-26's failure line. TP-2.71.
+// F-22b resolveNodeBin and NodeBinMissingError (A-517), with F-26's failure line. TP-2.71.
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
