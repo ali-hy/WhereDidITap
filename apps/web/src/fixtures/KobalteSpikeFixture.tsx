@@ -19,8 +19,8 @@ export function KobalteSpikeFixture(): JSX.Element {
       <Dialog>
         <Dialog.Trigger class="focus-visible:outline">Open dialog</Dialog.Trigger>
         <Dialog.Portal>
-          <Dialog.Overlay class="fixed inset-0 bg-black/30" />
-          <Dialog.Content class="fixed inset-x-4 top-16 rounded bg-white p-4">
+          <Dialog.Overlay class="fixed inset-0 bg-fg/30" />
+          <Dialog.Content class="fixed inset-x-4 top-16 rounded-card bg-surface-raised p-4">
             <Dialog.Title>Spike dialog</Dialog.Title>
             <Dialog.CloseButton class="focus-visible:outline" aria-label="Close">
               Close
@@ -58,7 +58,7 @@ export function KobalteSpikeFixture(): JSX.Element {
       <DropdownMenu>
         <DropdownMenu.Trigger class="focus-visible:outline">Actions</DropdownMenu.Trigger>
         <DropdownMenu.Portal>
-          <DropdownMenu.Content class="rounded bg-white p-1 shadow">
+          <DropdownMenu.Content class="rounded-card bg-surface-raised p-1 shadow-overlay">
             <DropdownMenu.Item class="focus-visible:outline" onSelect={() => setPicked("Rename")}>
               Rename
             </DropdownMenu.Item>

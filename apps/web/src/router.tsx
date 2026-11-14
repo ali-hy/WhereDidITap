@@ -13,13 +13,18 @@ import { HomePlaceholder } from "./pages/HomePlaceholder.js";
 import { NotFound } from "./pages/NotFound.js";
 import { announce } from "./ui/a11y.js";
 import { ErrorFallback } from "./ui/ErrorFallback.js";
+import { Wordmark } from "./ui/Wordmark.js";
 
 /** The layout's frame; the error fallback renders inside it too (§4.18, Q-D2). */
 function Shell(props: { children: JSX.Element }): JSX.Element {
   return (
     <>
-      <header />
-      <main id="main" class="mx-auto max-w-[40rem] p-4">
+      <header class="border-b border-line bg-surface">
+        <div class="mx-auto flex min-h-14 max-w-[40rem] items-center px-4 min-[600px]:px-6">
+          <Wordmark />
+        </div>
+      </header>
+      <main id="main" class="mx-auto max-w-[40rem] px-4 pt-8 pb-8 min-[600px]:px-6">
         {props.children}
       </main>
     </>

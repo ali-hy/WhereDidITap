@@ -10,7 +10,10 @@ export type IconName =
   | "chevron-start"
   | "chevron-end"
   | "arrow-back"
-  | "check";
+  | "check"
+  | "eye"
+  | "eye-off"
+  | "chevron-down";
 
 type SvgComponent = Component<JSX.SvgSVGAttributes<SVGSVGElement>>;
 
@@ -34,6 +37,17 @@ const PATHS: Readonly<Record<IconName, readonly string[]>> = {
   "chevron-end": ["M9 18l6-6-6-6"],
   "arrow-back": ["M19 12H5", "M12 19l-7-7 7-7"],
   check: ["M20 6 9 17l-5-5"],
+  eye: [
+    "M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0",
+    "M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
+  ],
+  "eye-off": [
+    "M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49",
+    "M14.084 14.158a3 3 0 0 1-4.242-4.242",
+    "M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143",
+    "m2 2 20 20",
+  ],
+  "chevron-down": ["m6 9 6 6 6-6"],
 };
 
 const MIRROR_IN_RTL: ReadonlySet<IconName> = new Set([

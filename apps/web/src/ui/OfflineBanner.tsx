@@ -41,9 +41,9 @@ export function OfflineBanner(): JSX.Element {
   return (
     <div role="status" aria-live="polite">
       <Show when={state() !== "hidden"}>
-        {/* A-462: full width, light text on dark, the icon before the text. */}
-        <p class="flex w-full items-center gap-2 bg-gray-900 p-2 text-white">
-          <Icon name={state() === "offline" ? "offline" : "check"} class="shrink-0" />
+        {/* A-462: full width, inverse colours, the icon before the text. */}
+        <p class="flex w-full items-center gap-2 bg-inverse px-4 py-2 text-on-inverse">
+          <Icon name={state() === "offline" ? "offline" : "check"} class="size-5 shrink-0" />
           {state() === "offline" ? t(messages.offlineBannerWeb) : t(messages.offlineBack)}
         </p>
       </Show>

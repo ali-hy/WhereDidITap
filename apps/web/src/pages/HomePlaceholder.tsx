@@ -12,10 +12,10 @@ export function HomePlaceholder(): JSX.Element {
   });
   return (
     <>
-      <h1 tabindex="-1" class="text-xl font-semibold">
+      <h1 tabindex="-1" class="text-2xl font-semibold text-fg">
         {APP_NAME}
       </h1>
-      <p>{t(messages.homePlaceholder)}</p>
+      <p class="mt-3 text-fg">{t(messages.homePlaceholder)}</p>
     </>
   );
 }

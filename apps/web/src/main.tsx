@@ -7,11 +7,12 @@ import { markClientUpdateRequired } from "./api/clientUpdate.js";
 import { createApiClient } from "./api/client.js";
 import { createQueryClient } from "./api/queryClient.js";
 import { I18nProvider, supportedLocales } from "./i18n/I18nProvider.js";
-import "./index.css";
+import "./styles/app.css";
 import { initWebSentry } from "./observability/sentry.js";
 import { createAppRouter } from "./router.js";
 import { AppBanners } from "./ui/AppBanners.js";
 import { Toaster } from "./ui/Toaster.js";
+import { initTheme } from "./ui/theme.js";
 
 const buildNumber = Number.parseInt(import.meta.env.VITE_BUILD_NUMBER, 10) || 0;
 
@@ -23,6 +24,9 @@ initWebSentry({
   release: `web@${String(buildNumber)}`,
   environment: import.meta.env.MODE,
 });
+
+// 1b. The mode was set before first paint; this follows the system while the setting is system.
+initTheme();
 
 // 2.
 const queryClient = createQueryClient();
