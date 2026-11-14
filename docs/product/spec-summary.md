@@ -1,7 +1,7 @@
 ---
 doc: spec-summary
-version: 0.10
-updated: 2026-10-05
+version: 0.11
+updated: 2026-11-14
 ---
 
 # Budmon: Spec Summary
@@ -31,6 +31,7 @@ Based on the [project brief](./project-brief.md), the user's [initial descriptio
 | 0.8     | 2026-10-05 | Round 7 answers folded in. Auto-confirmation on by default (R7-Q1: REV-US-8). Split totals across accounts, same currency only (R7-Q2: TXN-US-3, TXN-BR-9). Captures for frozen accounts are processed on unfreeze (R7-Q3: ACC-BR-9, CAP-BR-7). Fast review as a core principle (R7-Q5: XC-23). Budget period kinds, 80%/100% alerts, counting by entry author, shared budgets later (R7-Q7: BUD-US-6, 8, 10, BUD-BR-11). Section 9 rewritten as a numbered list of proposals for the remaining gaps. |
 | 0.9     | 2026-10-05 | New cross-cutting `platform` module (section 4.14, prefix `PLT`), first in the build order. It records the user's technology decisions ([platform decisions](./notes/2026-10-05-platform-decisions.md)) and the clean-up of the current repo. Section 7 now links to the [codebase review](./codebase-review.md) and records the user's acceptance of its recommendations. Section 6 gains the platform's external services. Round 8 items untouched. |
 | 0.10    | 2026-10-05 | Migrations refined ([platform feedback](./notes/2026-10-05-platform-feedback.md)): staging and production schemas change only through committed, reviewed migrations; during development the schema may be synced directly from the code (PLT-US-7, PLT-BR-5). |
+| 0.11    | 2026-11-14 | Owner decision on session lifetime: no absolute lifetime; a session lasts as long as the device is used at least once every 30 days, after which the user signs in again. Replaces the "about a month" wording and the earlier recommended 90-day absolute cap (IDN-US-2, XC-18; rationale in [identity HLD](../design/identity/hld.md) D-2). |
 
 ## 1. Users and roles
 
@@ -103,7 +104,7 @@ Sharing is **per account** (decided, R2-Q4). A "household" is simply a group of 
 - **XC-15** A user only sees another user's data through an account role or an accepted loan.
 - **XC-16** (Decided, R4-Q3) Deleting a Budmon account starts a 7-day grace period during which the user can undo it. After that, all their data is erased. Before deletion, shared accounts where they're the only admin must be handed to someone else. Entries they made on shared accounts stay, attributed to "deleted user".
 - **XC-17** (Decided, R4-Q3) A user can export all their data as CSV and JSON at any time. This is in the MVP.
-- **XC-18** (Decided, R4-Q1) Two-step verification is optional, using an authenticator app. Sessions are long-lived: the refresh token stays valid for about a month.
+- **XC-18** (Decided, R4-Q1) Two-step verification is optional, using an authenticator app. (Decided, owner, 2026-11-14) Sessions have no absolute lifetime: a user stays signed in on a device for as long as they use it at least once every 30 days. After 30 days without use, they sign in again.
 
 ### 3.4 Platforms, UX principles and accessibility
 
@@ -149,7 +150,7 @@ Fourteen modules:
 | ID | As a… | I want… | So that… | Acceptance criteria | MVP? |
 | -- | ----- | ------- | -------- | ------------------- | ---- |
 | IDN-US-1 | invited person | to create a Budmon user from my invitation | I can start | Sign-up works only with a valid, unused, unexpired invitation (decided, R2-Q1); without one, the sign-up page explains that Budmon is invite-only. Sign-up with email + password or with Google (decided, R4-Q1); choose base currency and time zone; land on an empty state that tells me to add my first account. | MVP |
-| IDN-US-2 | user | to stay signed in on web and Android | I don't log in every time | Sessions persist; a session stays valid for about a month without signing in again (decided, R4-Q1); I can see and sign out my active sessions. | MVP |
+| IDN-US-2 | user | to stay signed in on web and Android | I don't log in every time | Sessions persist with no absolute lifetime: I stay signed in on a device as long as I use it at least once every 30 days, and after 30 days without use I sign in again (decided, R4-Q1; owner, 2026-11-14); I can see and sign out my active sessions. | MVP |
 | IDN-US-3 | user | to edit my profile and preferences | totals and dates make sense to me | Name, base currency, time zone and language; changing the time zone doesn't move existing transactions in time. | MVP |
 | IDN-US-4 | user with a password | to reset a forgotten password | I can get back in | Reset link by email; expires; other sessions are signed out. | MVP |
 | IDN-US-5 | user | to find another Budmon user | I can share an account or lend to them | Exact email or invite link only; no directory browsing. | MVP |
