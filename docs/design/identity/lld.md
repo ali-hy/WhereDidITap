@@ -2,16 +2,16 @@
 module: identity
 doc: lld
 status: in-review # draft | in-review | approved
-version: 0.10
-hld_version: 0.8
+version: 0.11
+hld_version: 0.9
 author: planner
-approved_by: (v0.6) main conversation on the owner's behalf (delegation 2026-10-07, "auto approve the hlds as well just keep going"); v0.9 awaits re-review and approval
+approved_by: (v0.6) main conversation on the owner's behalf (delegation 2026-10-07, "auto approve the hlds as well just keep going"); v0.11 awaits approval
 approved_on: 2026-10-07 (v0.6)
 ---
 
 # Identity: Low-Level Design
 
-Implements [HLD](./hld.md) v0.8 (in review; v0.6 is the delegated D-3 amendment for DV-9, v0.7 the re-baseline of its platform citations and D-24's boot marker, v0.8 that re-baseline's plan-review revision). Decisions are cited as **D-n**, journeys as **J-n**, screens as **S-n** (HLD screens) from the HLD.
+Implements [HLD](./hld.md) v0.9 (in review; v0.6 is the delegated D-3 amendment for DV-9, v0.7 the re-baseline of its platform citations and D-24's boot marker, v0.8 that re-baseline's plan-review revision, v0.9 the owner's answers of 2026-11-14: D-2 without an absolute session lifetime, everything else confirmed). Decisions are cited as **D-n**, journeys as **J-n**, screens as **S-n** (HLD screens) from the HLD.
 
 **Platform baseline (v0.7, revised in v0.8):** the platform LLD **v1.29 as built** (`docs/design/platform/lld.md`, built on `feat/platform`, merged into this branch at `a39c05a`, PR #1) **plus the docs-only v1.30 and v1.31** (A-509 to A-511, which identity's slices build), and the platform HLD v1.3. Every name, path and helper below was checked against the code under `apps/`, `packages/`, `infra/` and `tools/`. Citations:
 - **P-F-n** is a platform LLD function; **P-§n** a platform LLD section; **P-HLD §n** and **P-D-n** a platform HLD section and decision; **P-TP-n** a platform test case; **P-A-n** a platform amendment.
@@ -33,6 +33,7 @@ This document doesn't restate the HLD's rationale.
 | 0.8     | 2026-11-03 | Plan review of the v0.7 re-baseline (REVISE, 8 blocking findings, 19 suggestions). Status back to `in-review`; v0.6's approval is recorded as v0.6's only (P-6). **P-1:** new request PA-16 → platform **A-511** (platform LLD v1.31, docs only): the expectations of P-TP-2.13 (A-150 half), P-TP-2.29 (g), P-TP-4.22 (a), P-TP-6.12, P-TP-6.14, P-TP-8.16, P-TP-10.8 and the extras TP-2.49x and TP-4.32x once identity is wired, each applied in the identity slice that changes it (§1.1; the slices' "Platform cases" lines); TP-0.34 and S-0's acceptance 1 expect every platform case to pass as A-511 states it. **P-2:** the wiring grows slice by slice (§1.1's by-slice column; F-33's registration table; F-34's sealed columns S-4, `google` and F-88's route S-6, `erasureHandler` and the start hook S-11, the eager password-list load and PA-14's Dockerfile copy S-1). S-0 has no procedures (`identityRouter = {}`, `API_MINOR` unchanged) and no screen or graph change. F-152's store, F-153, F-154, the S-1 sign-in page shell and Android F-207 (with F-208's screen shell) move to S-1; F-150, F-151 and Android F-203 to S-3; F-204 grows by slice. TP-0.21 and TP-0.32 are extended by later slices, with S-0's exact expectations; TP-0.26 and TP-0.28 move to S-1, TP-0.27 to S-3; TP-0.29 keeps F-200 to F-202 and its refresh rows become **TP-3.55**; TP-0.39's preview becomes **TP-1.39**; TP-M.5 moves to S-8, TP-M.6 to S-3; TP-3.54's language switch moves into TP-7.30; the rehearsal cases TP-1.36, TP-2.7 and TP-6.13 move to the new **checkpoint R-1** after S-8 (§9, §10.1), and no rehearsal runs with identity before it. **P-3:** the fake Google token route is registered in an encapsulated Fastify plugin with its own form-urlencoded parser (§10.1); new **TP-6.34**. **P-4:** §10.1's mechanism table: `POST /api/v1/__test/sessions/unconfirm` for step-up; `page.route` for deletion blockers, Budmon full and `this_computer_only`; how e2e two-step users get their secret and which TOTP step to use; TP-4.31, TP-4.33, TP-5.11, TP-6.32, TP-8.30, TP-10.30 and TP-11.31 name theirs. **P-5:** F-152 is a store created in `main.tsx`, passed to `createAppRouter({ session })` (router context) and to `SessionProvider`, with `ready()`, an `unavailable` status for a failed boot probe (network, timeout, 5xx), `retry()`, and defined `signOut()` (a failed sign-out request keeps the user signed in, because the cookies are `HttpOnly`) and `sessionEnded()`; F-153's guard signatures and `safeNext`; §8.1's frame (one `Shell`, pathless route groups, the `<main>` width rule); TP-0.28 rewritten. **P-6:** front matter, the brief and the README index say `in-review`. **P-7:** F-207 defines the 401 path; TP-3.49 covers the offline start, the retry once back online, a timeout, an expired stored session and both 401 outcomes. **P-8:** F-15 `setUserCap` is an upsert; new **TP-0.40**. **Suggestions taken:** S-1 (a user per test; the seeded users signed in once per worker), S-2 (the `testRoutes` callback keeps the e2e files out of the production bundle; they're the software-engineer's), S-3's wording (platform A-509: the hook runs in F-222's step 1), S-4 (platform A-510's TP-11.15 and TP-11.16 details), S-5 (TP-0.33's contingency pre-written in §1.1), S-6, S-7, S-8 (`NonNullable<Config["api"]>["googleSignIn"]`), S-9 (the invitation-locale rule cites HLD assumption A-4), S-10 (F-201's DataStore isn't a Hilt binding), S-11 (the offline banner above both graphs), S-12, S-13, S-14 (an Android CI item in every slice with an Android part), S-16 (brief), S-17 (TP-1.38, TP-3.41), S-18 (the list is memoised per path), S-19 ("v1.29 as built plus the docs-only v1.30 and v1.31"). **Declined:** S-3's optional removal of A-509's `workerEnv` (kept: it costs nothing and a later module's worker may need a setting); S-15 in part (the App Links deferral is tracked in identity's HLD §12 and the brief, not added to the platform HLD's D-29 checklist, which the stage-1 design writes). |
 | 0.9     | 2026-11-03 | Plan re-review of v0.8 (REVISE: P-1, P-3, P-4, P-6, P-8 resolved; TP-10.8's replay, decision 16b and both declines accepted; four new blocking items). Status `draft` until a re-review passes (README: `in-review` means "passed plan review"). **N-1:** `SessionProvider` (inside `I18nProvider`) owns the language switch with a `createEffect` on `store.me()?.locale` calling `useI18n().setLocale`; the store no longer calls `setLocale`; TP-0.28 (a) drops the spy and new rows (l) and (m) test the provider in a fake i18n context. **N-2:** members whose code belongs to later slices are absent until those slices add them: `IdentityDeps.google` and the Google overrides (S-6), `IdentityModule.invitations` (S-8), `usersReader` and `directory` (S-9), identity's export participant in `defaultPorts()` (S-10), `owner` (S-12) (F-34's slice list, the type blocks, F-22, §1.1, and the S-8, S-9, S-10 and S-12 function lines). **N-3:** F-207 retries while `SignedIn(null)`: when connectivity returns, on app foreground (`LifecycleEventEffect(ON_START)`), on **Try again**, and on a backoff timer while online and in the foreground (15 s doubling to a 5-minute cap); `SignedIn` carries `lastError`; screens that read `me` show `offline_nothing_loaded` only when offline, otherwise the platform's message for the error with **Try again** (`SessionNotLoaded`, §8.2); TP-3.49 rewritten (rows a to l). **N-4:** during the boot probe `sessionEnded` doesn't navigate; it sets `endedDuringBoot`, and F-153's redirect adds `reason=ended`, so a stale marker lands on `/sign-in?reason=ended&next=…` with one navigation; TP-3.40 split into the no-marker and stale-marker paths; §8.1's Boot and Session-ended rows. **Optional items taken:** O-1 (the store's `navigate(href)`, `router.navigate({ href })`); O-2 (the TP-0.33 contingency replaces the header in `onSend`); O-3 (TOTP rule cited to F-60/F-62; at most three steps per window, the e2e helper waits for the next step); O-4 (`requireSignedOut`'s unreachable `/invite` exception and TP-0.28's row dropped); O-5 (`main.tsx`'s late binding, with a code sketch); O-6 (S-1 acceptance 4: QA checks the asset inside the built image); O-7 (the `AppModule.kt` file-plan row split S-0/S-3). |
 | 0.10    | 2026-11-03 | Plan re-review of v0.9: **APPROVE** (N-1 to N-4 resolved, nothing blocking). Status `in-review` (passed plan review; approval pending, plan review Q-1 is with the owner). The reviewer's optional items, all taken: **O-8:** every web session probe (`boot()`, `retry()`, `markSignedIn()`) is one `fetchQuery` with `retry: false`, overriding the query client's default retries, so HLD S-1's "≤ 1 request + 1 refresh" holds and **Try again** is the retry; TP-0.28 (d) asserts exactly one request per probe. **O-9:** `SessionNotLoaded` maps `Network`, `Timeout` and `Unavailable` to `error_unavailable` (the platform maps a timed-out read to `error_generic_read`; here a timeout means the laptop can't be reached), other errors through P-F-253; F-207 names F-204's wrapper `getMe()`; TP-3.49 (j) covers the timeout and `INTERNAL` texts. **O-10:** TP-3.49 rows (d) to (h) (every row where the backoff timer runs) use a MockK `AuthRepository` with scripted delays on virtual time instead of MockWebServer; (h)'s first retry is held in flight for 5 s. **O-11:** TP-3.40 (b) notes that the marker check relies on the client-side redirect (`addInitScript` runs again on every document load). **O-12:** §10.1 cites `verifyTotp`'s callers as F-62 and F-64 (enable). |
+| 0.11    | 2026-11-14 | **The owner's answers** (2026-11-14) to every item flagged "needs user confirmation"; follows HLD v0.9. **One change, HLD D-2: no absolute session lifetime.** Sessions end only after `REFRESH_IDLE_TTL` (30 days) without a refresh; access tokens stay at 15 minutes. The absolute limit is removed, not made optional: `sessions.absolute_expires_at` and `SESSION_ABSOLUTE_TTL` are dropped (§3.1, F-1); `sessions_purge_idx` is on `(revoked_at, idle_expires_at)` (§3.1 index table); F-11's `SessionRow`, `listLive` and `purgeEnded` drop the absolute expiry; F-23 sets `idleExpiresAt = now + REFRESH_IDLE_TTL`; F-24 step 4 and F-25 steps 3 and 5 drop the absolute checks and cap. Tests: TP-0.11 asserts no absolute expiry; TP-3.8 is now "a session created 100 days ago and still in use refreshes to `now + 30 d`" (replacing the cap case); TP-3.9 drops "absolute passed" and makes the idle variant the inclusive boundary (`idleExpiresAt = now` refused, `now + 1 ms` refreshes); S-3's acceptance criterion 2 updated. **Confirmed as recommended** (flags removed): LD-9 (reset links open in the phone's browser), DV-9 (two tabs renewing at once stay signed in), LD-11 / F-219 (App Links deferred to the stage-1 gate), F-207 (Android stays signed in when it starts offline, with the unavailable message and retries as designed), the boot marker (HLD D-24, F-152), PA-4 (platform A-4, with the owner's guidance on single-use tokens in URLs) and PA-2 (platform A-2). Plan review Q-1 is answered: the owner reviewed the brief's items 8b, 11 and 12 directly and accepted them (§11). Platform LLD v1.32 records the A-2/A-4 confirmations and FU-1's deferral, docs only; nothing identity uses changes, so the baseline stays v1.29 as built plus v1.30 and v1.31. Status `in-review`; the plan reviewer checks the D-2 change next. |
 
 ## Amendments
 
@@ -54,7 +55,7 @@ This document doesn't restate the HLD's rationale.
 | DV-7 | §7.5 / A-10: the spike checks Chrome, Edge and Firefox. | TP-0.30 runs on Playwright **Chromium** (the `chromium` project, every PR) and **Firefox** (the `firefox` project, which P-§10.1 runs on release candidates only; indicative in the build environment). **Edge** itself is confirmed by the owner (TP-M.6). | The build environment can't run Edge. Chromium covers Edge's cookie engine; the manual case removes the residual doubt. |
 | DV-8 | Platform HLD layout `src/<module>/<module>Router.ts`, `<module>Service.ts`, `<module>Repo.ts` (one each). | Identity has several of each, all flat in `src/identity/` and named `*Router.ts`, `*Service.ts`, `*Repo.ts`, so P-F-1's and A-11's globs (`apps/server/src/*/*Router.ts`, `apps/server/src/*/*Service.ts`) cover every one. Errors and jobs are `identityErrors.ts` and `identityJobs.ts`. | The module is too large for one file of each kind, and staying flat keeps the layering lint effective without a platform amendment. |
 
-| DV-9 | D-3 (v0.5): a discarded token within both 60-second windows "is answered with `REFRESH_INVALID` without revoking". | F-25 R3 **re-issues** in that case when the current token is still the discarded token's unused sibling, so a concurrent-refresh race never signs the user out. `REFRESH_INVALID` without revoking remains for the rare case where the current token has already been used (R3b). | The reviewer's option (a), taken under the owner's delegation (round-1 Q-2). Two tabs whose responses arrive in the wrong order would otherwise end the session. Detection of theft is unchanged, because the R3 windows require the discard to happen within 60 s of the token's issue. HLD D-3 was amended to match as HLD v0.6 (delegated, needs user confirmation). |
+| DV-9 | D-3 (v0.5): a discarded token within both 60-second windows "is answered with `REFRESH_INVALID` without revoking". | F-25 R3 **re-issues** in that case when the current token is still the discarded token's unused sibling, so a concurrent-refresh race never signs the user out. `REFRESH_INVALID` without revoking remains for the rare case where the current token has already been used (R3b). | The reviewer's option (a), taken under the owner's delegation (round-1 Q-2). Two tabs whose responses arrive in the wrong order would otherwise end the session. Detection of theft is unchanged, because the R3 windows require the discard to happen within 60 s of the token's issue. HLD D-3 was amended to match as HLD v0.6 (delegated; confirmed by the owner, 2026-11-14). |
 
 **Decisions the HLD left to the LLD** (planner decisions):
 
@@ -90,9 +91,9 @@ This document doesn't restate the HLD's rationale.
   | `bmd` | known device |
 
   Stored as `SHA-256(token string)`. Google nonces are bare base64url (Google echoes them unchanged); their SHA-256 is stored.
-- **LD-9: reset links open in the browser for the MVP** (owner decision Q-1 (a), recommended default, **needs user confirmation**). Reset links open the web app in the phone's browser. From stage 1, Android App Links handle `/invite` only (D-23). Resetting a password is a web flow, after which the Android app signs in normally.
+- **LD-9: reset links open in the browser for the MVP** (owner decision Q-1 (a), confirmed by the owner, 2026-11-14). Reset links open the web app in the phone's browser. From stage 1, Android App Links handle `/invite` only (D-23). Resetting a password is a web flow, after which the Android app signs in normally.
 - **LD-10: locales.** The server accepts a `locale` only from `SUPPORTED_LOCALES` (`["en"]`). It also accepts `en-XA` and `ar-XB` when `APP_ENV` is `development` or `test`, so pseudo-locale testing works end to end. Direction comes from P-F-312 `directionOf`; the web formats pseudo-locales' dates and numbers as `en` (P-A-315).
-- **LD-11: App Links are the stage-1 gate's** (D-23 says "from stage 1"). The platform's Android build has only the `debug` and `release` build types, with no stage flavour (P-F-264), and stage 0 has no domain to verify. So this LLD builds no intent filter: F-219 is specified for the stage-1 LLD, and the MVP opens invitations through S-17's paste screen and the phone's browser.
+- **LD-11: App Links are the stage-1 gate's** (D-23 says "from stage 1"; confirmed by the owner, 2026-11-14). The platform's Android build has only the `debug` and `release` build types, with no stage flavour (P-F-264), and stage 0 has no domain to verify. So this LLD builds no intent filter: F-219 is specified for the stage-1 LLD, and the MVP opens invitations through S-17's paste screen and the phone's browser.
 - **LD-12: web wording rules** (the platform's lint and catalog rules, P-F-3b, P-A-401, P-A-464):
   - message IDs match `^[a-z][A-Za-z0-9_]*(\.[a-z][A-Za-z0-9_]*)+$`, so an error key becomes `error.<key in lower camel case>` (`INVALID_CREDENTIALS` → `error.invalidCredentials`, `ALREADY_A_USER` → `error.alreadyAUser`);
   - the product name is the ICU argument `{appName}`, which P-F-206's `t` adds to every call (Android strings and server emails keep "Budmon" literally);
@@ -131,7 +132,7 @@ appEnv: "development" | "test" | "rehearsal" | "production";
 | PA-1 | **A-1** | `Principal { userId; isOwner; sessionId }` (`platform/http/context.ts`); test fixtures build principals with `testPrincipal(overrides?)` (`apps/server/test/support/api.ts`, fixed UUIDv7s `TEST_USER_ID`, `TEST_SESSION_ID`). | F-24, every service. |
 | PA-2 | **A-2** (+ A-57, A-82, A-99, A-487) | Mailpit in `budmon-main` (`--quiet`, logging driver `none`, inbox `127.0.0.1:8025`); worker-general's `SMTP_URL`, `SMTP_PASSWORD_FILE`, `EMAIL_FROM`, `PUBLIC_ORIGIN`, parsed into `Config["email"]` with `smtpTransport` (A-57). The laptop's password file is written empty for Mailpit and changed with `budmon-local secret set main/worker-general/SMTP_PASSWORD` (back to empty with `--empty`, A-487). The rehearsal checks Mailpit is quiet (step 8b). | F-30, F-32, §7.2. |
 | PA-3 | **A-3** (+ A-430, A-508) | API `GOOGLE_SIGNIN_CLIENT_ID` (required in prod), `GOOGLE_SIGNIN_CLIENT_SECRET_FILE`, `GOOGLE_SIGNIN_ANDROID_CLIENT_IDS`, `GOOGLE_SIGNIN_CALLBACK_ORIGIN`, `GOOGLE_SIGNIN_APP_ORIGINS` → `config.api.googleSignIn`; `RECOVERY_CODE_HMAC_KEYS_FILE` → `config.api.recoveryCodeKeys`. P-F-191 generates `main/api/RECOVERY_CODE_HMAC_KEYS` and a `GOOGLE_SIGNIN_CLIENT_SECRET` placeholder; `install` prompts for the non-secret values (app origins default to `<PUBLIC_ORIGIN>,http://localhost:8080`, A-430). Android: `BuildConfig.GOOGLE_SERVER_CLIENT_ID` (P-F-265) from `budmon.googleServerClientId`, which stage-0 builds read from `%UserProfile%\.budmon\android.properties` (A-508); empty → Google hidden. | F-58, F-61, F-80, F-206. |
-| PA-4 | **A-4** | `GET /api/v1/auth/google/callback?code&state` is the one stated exception to D-24 rule 4 (P-§5.3); F-37/F-38 and Caddy's log filter keep the bare path (P-TP-15.13). **Needs user confirmation** (platform's item). | F-88. |
+| PA-4 | **A-4** | `GET /api/v1/auth/google/callback?code&state` is the one stated exception to D-24 rule 4 (P-§5.3); F-37/F-38 and Caddy's log filter keep the bare path (P-TP-15.13). Confirmed by the owner, 2026-11-14 (platform LLD v1.32, with the owner's guidance on single-use tokens in URLs). | F-88. |
 | PA-5 | **A-5** | Egress recorded for stage 1 (P-§7.8); in stage 0 `api` joins `egress` to reach Google. | §7.1. |
 | PA-6 | **A-6** | F-93 lists `identity:bootstrap-owner --email <address> [--replace]` (kind `api`, stdout only, exits 0/1/64) as a row *outside* its machine-read table; identity's build adds the dispatch to `runCli` (F-46). `budmon-local bootstrap-owner` (P-F-178) runs it with `docker compose exec -T api node dist/main/cli.js …` and passes stdout, stderr and the exit code through; exit 25 when `api` isn't running (P-TP-15.29). | F-46, F-47. |
 | PA-7 | **A-22** | `presignGet(bucket, key, ttlSeconds?, opts?: PresignGetOptions)`, `interface PresignGetOptions { downloadName?: string }`; the name must match `^[A-Za-z0-9._-]{1,100}$` (else `RangeError`, before any I/O). S3 sets `attachment; filename="<name>"`; the fs store's token carries `n`; the memory store's URL is `memory://<bucket>/<key>?exp=<epoch seconds>&n=<name>`. Only the API presigns (A-303). | F-110; TP-10.5 reads `n`. |
@@ -378,8 +379,7 @@ export const sessionsTable = pgTable("sessions", {
   accessTokenHash: bytea().notNull(),
   accessExpiresAt: tstz().notNull(),
   currentRefreshId: uuid().notNull(),                    // session_refresh_tokens.id; no FK (circular), checked by F-11
-  idleExpiresAt: tstz().notNull(),
-  absoluteExpiresAt: tstz().notNull(),
+  idleExpiresAt: tstz().notNull(),                       // no absolute expiry (HLD D-2)
   confirmedAt: tstz(),
   lastUsedAt: tstz().notNull(),
   revokedAt: tstz(),
@@ -388,7 +388,7 @@ export const sessionsTable = pgTable("sessions", {
 }, (t) => [
   uniqueIndex("sessions_access_hash_key").on(t.accessTokenHash),
   index("sessions_user_live_idx").on(t.userId, t.lastUsedAt).where(sql`${t.revokedAt} IS NULL`),
-  index("sessions_purge_idx").on(t.revokedAt, t.idleExpiresAt, t.absoluteExpiresAt),
+  index("sessions_purge_idx").on(t.revokedAt, t.idleExpiresAt),
   check("sessions_delivery", sql`${t.delivery} IN ('cookie', 'bearer')`),
   check("sessions_client_kind", sql`${t.clientKind} IN ('web', 'android', 'other')`),
   check("sessions_auth_method", sql`${t.authMethod} IN ('password', 'google', 'reset', 'sign_up')`),
@@ -584,7 +584,7 @@ export type ChallengeData =
 | Owner's invitation list, user list | `invitations_created_idx`, `users_created_id_idx` |
 | Cap count (pending, unexpired) | `invitations_pending_expiry_idx` |
 | Due deletions (sweep) | `users_deletion_due_idx` |
-| Purge scans | `auth_challenges_expires_idx`, `sessions_purge_idx` (revoked, idle and absolute expiry), `known_devices_expires_idx`, `invitations_ended_idx`, `security_events_created_idx` |
+| Purge scans | `auth_challenges_expires_idx`, `sessions_purge_idx` (revoked, idle expiry), `known_devices_expires_idx`, `invitations_ended_idx`, `security_events_created_idx` |
 | Recovery-code check | `recovery_codes_lookup_key` |
 | Exports of a user; one active export | `data_exports_user_idx`, `data_exports_one_active_key` |
 | Known device by hash; per user | `known_devices_hash_key`, `known_devices_user_idx` |
@@ -661,7 +661,6 @@ export type ChallengeData =
   | ---- | ----- |
   | `ACCESS_TTL` | 15 min |
   | `REFRESH_IDLE_TTL` | 30 days |
-  | `SESSION_ABSOLUTE_TTL` | 90 days |
   | `REFRESH_RACE_WINDOW` | 60 s |
   | `MAX_LIVE_SESSIONS` | 20 |
   | `TWO_STEP_CHALLENGE_TTL` | 5 min |
@@ -849,7 +848,7 @@ export type ChallengeData =
   ```ts
   export interface SessionRow { id: string; userId: string; delivery: "cookie" | "bearer"; clientKind: ClientKind; deviceLabel: string;
     authMethod: "password" | "google" | "reset" | "sign_up"; accessExpiresAt: Date; currentRefreshId: string; idleExpiresAt: Date;
-    absoluteExpiresAt: Date; confirmedAt: Date | null; lastUsedAt: Date; revokedAt: Date | null; revokeReason: string | null; createdAt: Date }
+    confirmedAt: Date | null; lastUsedAt: Date; revokedAt: Date | null; revokeReason: string | null; createdAt: Date }
   export interface RefreshRow { id: string; sessionId: string; parentId: string | null; generation: number; issuedAt: Date;
     firstPresentedAt: Date | null; supersededAt: Date | null; supersededReason: "rotated" | "discarded" | null }
   insertSession(h, s: Omit<SessionRow, "revokedAt" | "revokeReason" | "createdAt" | "confirmedAt"> & { accessTokenHash: Buffer; confirmedAt: Date }): Promise<void>;
@@ -860,11 +859,11 @@ export type ChallengeData =
   markRefresh(h, id, patch: { firstPresentedAt?: Date; supersededAt?: Date; supersededReason?: "rotated" | "discarded" }): Promise<void>;
   rotate(h, sessionId, s: { accessTokenHash: Buffer; accessExpiresAt: Date; currentRefreshId: string; idleExpiresAt: Date; lastUsedAt: Date }): Promise<void>;
   findById(h, id: string, opts?: { lock?: boolean }): Promise<SessionRow | null>;
-  listLive(h, userId: string, now: Date): Promise<SessionRow[]>;   // not revoked, idle and absolute not passed; last_used_at desc
+  listLive(h, userId: string, now: Date): Promise<SessionRow[]>;   // not revoked, idle expiry not passed; last_used_at desc
   revoke(h, sessionId: string, reason: string, at: Date): Promise<boolean>;                      // only if not yet revoked
   revokeAllForUser(h, userId: string, reason: string, at: Date, exceptSessionId?: string): Promise<number>;
   setConfirmed(h, sessionId: string, at: Date): Promise<void>;
-  purgeEnded(h, before: Date, limit: number): Promise<number>;      // revoked_at < before, or idle/absolute expiry < before
+  purgeEnded(h, before: Date, limit: number): Promise<number>;      // revoked_at < before, or idle_expires_at < before
   ```
 
 #### F-12: `challengesRepo`
@@ -980,8 +979,7 @@ export type ChallengeData =
 - **Behaviour** (inside the caller's transaction):
   1. Generates the access and refresh tokens and a new session ID and refresh ID.
      - `accessExpiresAt = now + ACCESS_TTL`
-     - `absoluteExpiresAt = now + SESSION_ABSOLUTE_TTL`
-     - `idleExpiresAt = min(now + REFRESH_IDLE_TTL, absoluteExpiresAt)`
+     - `idleExpiresAt = now + REFRESH_IDLE_TTL` (there's no absolute expiry, HLD D-2)
   2. Inserts the session (`confirmedAt = now`, `lastUsedAt = now`) and the refresh row (`generation 1`, `parentId null`).
   3. Live sessions above `MAX_LIVE_SESSIONS` for the user: revokes the least recently used ones with reason `limit` until 20 remain, including the new one.
   4. Known device: if `presentedDeviceToken` is valid (F-57 `checkKnownDevice`) for this user, touches it and returns `deviceToken: null`; otherwise issues a new one (F-57) and returns it.
@@ -1000,7 +998,7 @@ export type ChallengeData =
      - the row exists;
      - `delivery === requiredDelivery`;
      - `revokedAt` is null;
-     - `accessExpiresAt > now`, `idleExpiresAt > now` and `absoluteExpiresAt > now`;
+     - `accessExpiresAt > now` and `idleExpiresAt > now`;
      - the user's status is `active`, or `pending_deletion` with `deletionRequestedBy = "self"`.
   5. No writes.
 - **Calls:** F-2, F-4, F-11, P-F-56.
@@ -1014,7 +1012,7 @@ export type ChallengeData =
   3. F-11 `findRefreshByHashForUpdate`. Throws `REFRESH_INVALID` without other effects when:
      - nothing is found;
      - the session is revoked;
-     - `idleExpiresAt ≤ now` or `absoluteExpiresAt ≤ now`;
+     - `idleExpiresAt ≤ now`;
      - `session.delivery !== channel`.
 
      Then hit `refresh.session` (subject: the session ID; F-29).
@@ -1032,7 +1030,7 @@ export type ChallengeData =
      - `generation` is `parent.generation + 1`.
      - **R3 can't take over a branch that moved on:** it only replaces C while C is T's unused sibling, which R3b enforces.
      - **Why R3 can't be abused:** a thief who redeems the predecessor `P` while the device holds an unused `C` takes R2, which discards `C`. When the device presents `C`, `C` was discarded long after its issue, unless the theft happened within 60 s of the legitimate rotation. So R3 doesn't apply, R4 revokes, and the user is emailed. The one undetected case is a redemption within 60 s of the legitimate rotation (HLD §9, accepted).
-  5. Issuing `N` (R1, R2, R3): new access token; F-11 `insertRefresh` and `rotate` with `idleExpiresAt = min(now + REFRESH_IDLE_TTL, absoluteExpiresAt)`, `accessExpiresAt = now + ACCESS_TTL`, `lastUsedAt = now`. The previous access token hash is replaced, so the old access token stops working immediately (D-3).
+  5. Issuing `N` (R1, R2, R3): new access token; F-11 `insertRefresh` and `rotate` with `idleExpiresAt = now + REFRESH_IDLE_TTL` (never capped by the session's age), `accessExpiresAt = now + ACCESS_TTL`, `lastUsedAt = now`. The previous access token hash is replaced, so the old access token stops working immediately (D-3).
   6. F-8 `touchLastActive`.
   7. Returns `IssuedSession` with `deviceToken: null` and `delivery = session.delivery`.
   - Metric `auth_refresh_total{error_key}` (`none` for R1, R2 and R3, `REFRESH_INVALID` otherwise); `auth_refresh_reuse_total` for R4.
@@ -2916,7 +2914,7 @@ Status for all: not started. The build goes on `feat/identity`, branched from th
 - **Tests by part:** server TP-3.1 to TP-3.22, TP-3.24 to TP-3.31, TP-3.27 (privacy); web TP-0.27, TP-0.28's S-3 rows (`web-unit`), TP-1.31, TP-3.40 to TP-3.47, TP-3.50, TP-3.51, TP-3.53, TP-3.54 (Playwright; TP-3.44 to TP-3.46, TP-3.53 and TP-3.54 are extended by later slices); Android TP-3.48, TP-3.49 (its S-3 rows), TP-3.55; manual TP-M.1, TP-M.6. TP-3.52 is withdrawn (TP-3.13 covers the boundary).
 - **Acceptance criteria:**
   1. Signing in on web and Android keeps the user signed in across restarts.
-  2. A session expires after 30 days idle and 90 days absolute (shown with a fixed clock).
+  2. A session expires after 30 days without a refresh and has no absolute lifetime: one still in use after 100 days keeps refreshing (shown with a fixed clock).
   3. Every refresh-rule test passes.
   4. CI's `android` job is green on the slice's head (review S-14).
 
@@ -3186,7 +3184,7 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-0.8 | S-0 | I | grants | roles from the schema step | As `budmon_capture`: `SELECT` on `users`; on each ★ table and `email_bans`, `identity_settings`, `security_events`, `data_exports` | Allowed; `42501` for each |
 | TP-0.9 | S-0 | U | F-7 + P-F-16 | copy of `identityGrants` with `sessions.capture = ["SELECT"]` | `applyTableGrants` | `SchemaStepError("credential_table_granted_to_capture", "sessions")` |
 | TP-0.10 | S-0 | I | §3.2 | user + idempotency record | Delete the user | Record gone |
-| TP-0.11 | S-0 | I | F-23 | fixed clock; user with 20 live sessions | `createSession` with no device token; then with the returned device token | 21st created, LRU revoked `limit`; expiries exact (`absolute = now + 90 d`, `idle = now + 30 d`); `deviceToken` non-null then null |
+| TP-0.11 | S-0 | I | F-23 | fixed clock; user with 20 live sessions | `createSession` with no device token; then with the returned device token | 21st created, LRU revoked `limit`; expiries exact (`idle = now + 30 d`, `access = now + 15 min`; the row has no absolute expiry); `deviceToken` non-null then null |
 | TP-0.12 | S-0 | I | F-24 | sessions: bearer, cookie; users active, self-pending, owner-pending | Each row of F-24 step 4; bearer + cookie together; `Bearer garbage`; cookie with `X-Budmon-Client: android/5`; an unprefixed access cookie with `Host: x.ts.net`; a prefixed one with `Host: localhost:8080` | Principal only for the valid cases (incl. self-pending), with `sessionId`; bearer chosen over cookie; `null` for the rest (including both host mismatches) |
 | TP-0.13 | S-0 | I | F-26 | 3 sessions | `revokeAllSessionsTx(except one)`; revoke an already revoked one | 2; `false` |
 | TP-0.14 | S-0 | U | F-27 | fake ctx with `host: x.ts.net` and a fresh `resHeaders`; then `host: localhost:8080` | `deliverSession` cookie with a device token; bearer; `clearSessionCookies` | 4 `set-cookie` values appended to `ctx.resHeaders` (`__Secure-budmon_at`, `__Secure-budmon_rt`, `__Secure-budmon_dv` with `Path=/api/v1`, and `__Secure-budmon_2fa` cleared with `Max-Age=0`) with exact attributes, returns `null`; unprefixed names for the localhost host; the token object with instants as `YYYY-MM-DDTHH:MM:SS.sssZ`; 3 clearing cookies, none for `device` |
@@ -3253,8 +3251,8 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-3.5 | S-3 | I | F-50 | stored hash with `m=4096` | Sign in | Stored hash now has `m=19456,t=2,p=1` |
 | TP-3.6 | S-3 | I | F-51 | user with two-step | Sign in (cookie; body) | `two_step_required`; challenge row (expires +5 min); `budmon_2fa` cookie vs `challengeToken` |
 | TP-3.7 | S-3 | I | F-23 via F-50 | 20 live sessions | Sign in | Least recently used revoked (`limit`) |
-| TP-3.8 | S-3 | I | F-25 R1 | session with T1; absolute in 10 days | Refresh with T1 | New tokens; the old access token → hook `null`; T1 `rotated`; `idleExpiresAt = absoluteExpiresAt` |
-| TP-3.9 | S-3 | I | F-25 | variants | Malformed; unknown; revoked session; idle passed; absolute passed; a cookie session's token sent as `body` | `REFRESH_INVALID` each; the session's current token still refreshes where the session is live |
+| TP-3.8 | S-3 | I | F-25 R1 (no absolute lifetime) | fixed clock; session created 100 days ago and refreshed since, current token T1, `idleExpiresAt = now + 1 d` | Refresh with T1 | New tokens; the old access token → hook `null`; T1 `rotated`; `idleExpiresAt = now + 30 d` (not capped by the session's age) |
+| TP-3.9 | S-3 | I | F-25 | variants | Malformed; unknown; revoked session; idle expiry reached (`idleExpiresAt = now`); a cookie session's token sent as `body` | `REFRESH_INVALID` each; the session's current token still refreshes where the session is live, including with `idleExpiresAt = now + 1 ms` |
 | TP-3.10 | S-3 | I | F-25 R2 | T1 → T2 (T2 unpresented) | Refresh with T1 | 200; T2 `discarded`; T3 `parentId = T1` |
 | TP-3.11 | S-3 | I | F-25 R4 | T1 → T2 → T3 (T2 presented) | Refresh with T1 | 401; session revoked `reuse_detected`; event; `session_reuse_signed_out` email job |
 | TP-3.12 | S-3 | I | F-25 R3 (inside both windows, current unpresented) | T1 → R1 issues T2 at t; a concurrent R2 with T1 at t + 1 s issues T3 and discards T2 | Present T2 at t + 1 s + 60 s exactly | 200, new token T4 (parent T2); T3 discarded; session live; no event, no email |
@@ -3411,4 +3409,4 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 
 ## 11. Open questions
 
-None. Items flagged for the owner's confirmation are listed in the [LLD brief](./lld-brief.md) §2; none blocks the build. Whether the standing delegation (2026-10-07) covers approving v0.8 is a process question for the owner (plan review Q-1), not a design question. Two early technical checks in S-0 have a stated fallback rather than an open question: browsers keeping `Secure` cookies on `http://localhost` (TP-0.30) and oRPC keeping several `Set-Cookie` headers apart (TP-0.33); either failure is decided as an amendment before S-1.
+None. The owner answered every item flagged for confirmation on 2026-11-14 ([LLD brief](./lld-brief.md) §2): HLD D-2 changed (no absolute session lifetime), everything else was confirmed. Plan review Q-1 is answered too: the owner reviewed the brief's items 8b, 11 and 12 directly and accepted them. Two early technical checks in S-0 have a stated fallback rather than an open question: browsers keeping `Secure` cookies on `http://localhost` (TP-0.30) and oRPC keeping several `Set-Cookie` headers apart (TP-0.33); either failure is decided as an amendment before S-1.
