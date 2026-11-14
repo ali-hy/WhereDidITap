@@ -9,7 +9,43 @@
 // Root scripts (§2.2.2): `pnpm test` = `vitest run --project=!server-int`;
 // `pnpm test:int` = `vitest run --project=server-int`;
 // `pnpm test:coverage` = `vitest run --project=shared --coverage` (A-35).
-import { defineConfig } from "vitest/config";
+import { createRequire } from "node:module";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { defineConfig, type Plugin } from "vitest/config";
+
+const ROOT = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * web-unit on Windows only (a deliberate platform switch in test config):
+ * - vite-plugin-solid's refresh transform is on under Vitest (`serve`), and its components import
+ *   `solid-refresh`, which the plugin aliases to the virtual id `/@solid-refresh`;
+ * - Vitest's runner turns that id into `file:///@solid-refresh` on Windows and can't load it;
+ * - this rewrites the import to the runtime file the plugin itself serves, so the same code loads
+ *   from a real path. Linux (CI) keeps the plugin's own id.
+ */
+function solidRefreshRealPathOnWindows(): Plugin[] {
+  if (process.platform !== "win32") return [];
+  const fromWeb = createRequire(path.join(ROOT, "apps/web/package.json"));
+  const fromPlugin = createRequire(fromWeb.resolve("vite-plugin-solid"));
+  const runtime = fromPlugin
+    .resolve("solid-refresh/dist/solid-refresh.mjs")
+    .replaceAll(path.sep, "/");
+  return [
+    {
+      name: "test-solid-refresh-real-path",
+      enforce: "post",
+      // The specifier is swapped in place, so null keeps the earlier source maps (Rollup).
+      transform(code: string) {
+        if (!code.includes('from "solid-refresh"')) return null;
+        return {
+          code: code.replaceAll('from "solid-refresh"', `from ${JSON.stringify(runtime)}`),
+          map: null,
+        };
+      },
+    },
+  ];
+}
 
 export default defineConfig({
   test: {
@@ -69,6 +105,7 @@ export default defineConfig({
         // A-310: pseudo-locale catalogs are generated before the run, and pseudo-locales are on.
         extends: "./apps/web/vite.config.ts",
         root: "apps/web",
+        plugins: solidRefreshRealPathOnWindows(),
         test: {
           name: "web-unit",
           environment: "jsdom",
