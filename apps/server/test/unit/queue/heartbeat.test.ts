@@ -1,5 +1,5 @@
 // F-79 startHeartbeat. TP-6.10's unit part (the healthcheck entry is in
-// test/integration/main/healthcheck.test.ts), and TP-6.18 (A-514).
+// test/integration/main/healthcheck.test.ts), and TP-6.18 (A-515).
 import { fixedClock } from "@budmon/shared";
 import {
   AggregationTemporality,
@@ -70,7 +70,7 @@ function harness() {
 }
 
 describe("TP-6.10: startHeartbeat (F-79)", () => {
-  it("TP-6.10: writes the epoch seconds immediately and on each tick, every 15 s by default, to defaultHeartbeatFile() (A-514)", () => {
+  it("TP-6.10: writes the epoch seconds immediately and on each tick, every 15 s by default, to defaultHeartbeatFile() (A-515)", () => {
     const h = harness();
 
     const heartbeat = startHeartbeat({
@@ -169,7 +169,7 @@ describe("TP-6.10: heartbeatFile (A-226)", () => {
   });
 });
 
-describe("TP-6.18: the heartbeat path on every platform (A-514)", () => {
+describe("TP-6.18: the heartbeat path on every platform (A-515)", () => {
   const TEMP = "C:\\Users\\u\\AppData\\Local\\Temp";
   const WINDOWS_DEFAULT = "C:\\Users\\u\\AppData\\Local\\Temp\\heartbeat";
   const fakeTmpdir = () => vi.fn(() => TEMP);
