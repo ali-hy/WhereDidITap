@@ -1,5 +1,5 @@
 // F-79 startHeartbeat. TP-6.10's unit part (the healthcheck entry is in
-// test/integration/main/healthcheck.test.ts).
+// test/integration/main/healthcheck.test.ts), and TP-6.18 (A-514).
 import { fixedClock } from "@budmon/shared";
 import {
   AggregationTemporality,
@@ -14,7 +14,11 @@ import {
   registerPlatformMetrics,
 } from "../../../src/platform/observability/metrics.js";
 import { logCapture } from "../../support/telemetry.js";
-import { heartbeatFile, startHeartbeat } from "../../../src/platform/queue/heartbeat.js";
+import {
+  defaultHeartbeatFile,
+  heartbeatFile,
+  startHeartbeat,
+} from "../../../src/platform/queue/heartbeat.js";
 
 function harness() {
   const exporter = new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE);
@@ -161,5 +165,67 @@ describe("TP-6.10: heartbeatFile (A-226)", () => {
     ["no HEARTBEAT_FILE", {}, "/tmp/heartbeat"],
   ])("TP-6.10: %s gives %s", (_label, env: Record<string, string>, expected) => {
     expect(heartbeatFile(env)).toBe(expected);
+  });
+});
+
+describe("TP-6.18: the heartbeat path on every platform (A-514)", () => {
+  const TEMP = "C:\\Users\\u\\AppData\\Local\\Temp";
+  const WINDOWS_DEFAULT = "C:\\Users\\u\\AppData\\Local\\Temp\\heartbeat";
+  const fakeTmpdir = () => vi.fn(() => TEMP);
+
+  it.each(["linux", "darwin"] as const)(
+    "TP-6.18 (a): defaultHeartbeatFile on %s is /tmp/heartbeat without calling tmpdir",
+    (platform) => {
+      const tmpdir = fakeTmpdir();
+
+      expect(defaultHeartbeatFile({ platform, tmpdir })).toBe("/tmp/heartbeat");
+      expect(tmpdir).not.toHaveBeenCalled();
+    },
+  );
+
+  it("TP-6.18 (b): defaultHeartbeatFile on win32 is <tmpdir>\\heartbeat", () => {
+    const tmpdir = fakeTmpdir();
+
+    expect(defaultHeartbeatFile({ platform: "win32", tmpdir })).toBe(WINDOWS_DEFAULT);
+  });
+
+  // Rows: [label, expected, env].
+  it.each([
+    ["/x/hb", "/x/hb", { HEARTBEAT_FILE: "/x/hb" }],
+    ["rel/hb", "/tmp/heartbeat", { HEARTBEAT_FILE: "rel/hb" }],
+    ["an empty value", "/tmp/heartbeat", { HEARTBEAT_FILE: "" }],
+    ["no HEARTBEAT_FILE", "/tmp/heartbeat", {}],
+    ["C:\\x\\hb", "/tmp/heartbeat", { HEARTBEAT_FILE: "C:\\x\\hb" }],
+  ])("TP-6.18 (c): heartbeatFile on linux with %s gives %s", (_label, expected, env) => {
+    expect(heartbeatFile(env, { platform: "linux", tmpdir: fakeTmpdir() })).toBe(expected);
+  });
+
+  it.each([
+    ["C:\\x\\hb", "C:\\x\\hb", { HEARTBEAT_FILE: "C:\\x\\hb" }],
+    ["D:/x/hb", "D:/x/hb", { HEARTBEAT_FILE: "D:/x/hb" }],
+    ["\\\\srv\\share\\hb", "\\\\srv\\share\\hb", { HEARTBEAT_FILE: "\\\\srv\\share\\hb" }],
+    ["/x/hb", "/x/hb", { HEARTBEAT_FILE: "/x/hb" }],
+    ["rel\\hb", WINDOWS_DEFAULT, { HEARTBEAT_FILE: "rel\\hb" }],
+    ["C:rel", WINDOWS_DEFAULT, { HEARTBEAT_FILE: "C:rel" }],
+    ["an empty value", WINDOWS_DEFAULT, { HEARTBEAT_FILE: "" }],
+    ["no HEARTBEAT_FILE", WINDOWS_DEFAULT, {}],
+  ])("TP-6.18 (d): heartbeatFile on win32 with %s gives %s", (_label, expected, env) => {
+    expect(heartbeatFile(env, { platform: "win32", tmpdir: fakeTmpdir() })).toBe(expected);
+  });
+
+  it("TP-6.18 (e): startHeartbeat without path writes to defaultHeartbeatFile()", () => {
+    const h = harness();
+
+    const heartbeat = startHeartbeat({
+      metrics: h.metrics,
+      logger: h.logger,
+      clock: h.clock,
+      service: "worker-general",
+      setInterval: h.setIntervalFake,
+      writeFile: h.writeFile,
+    });
+
+    expect(h.writeFile.mock.calls[0]?.[0]).toBe(defaultHeartbeatFile());
+    heartbeat.stop();
   });
 });
