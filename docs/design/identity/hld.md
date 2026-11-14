@@ -2,7 +2,7 @@
 module: identity
 doc: hld
 status: approved # draft | in-review | approved
-version: 0.10
+version: 0.11
 author: planner
 approved_by: main conversation on the owner's behalf (delegation 2026-10-07, "auto approve the hlds as well just keep going"); the owner reviewed and confirmed every flagged decision on 2026-11-14; plan re-review passed 2026-11-14
 approved_on: 2026-11-14
@@ -29,6 +29,7 @@ Sources: [spec summary](../../product/spec-summary.md) v0.11 (`fc5081b`) §4.1 (
 | 0.8     | 2026-11-03 | Plan review of the v0.7 re-baseline (REVISE). **P-6:** status `in-review`; v0.6's approval no longer covers the document, and v0.8 awaits approval (the owner's, or the main conversation's under the 2026-10-07 delegation; Q-1 is with the owner). **S-15:** §12 records the App Links deferral as a stage-1 gate item. **S-19:** the platform baseline reads "v1.29 as built plus the docs-only v1.30 and v1.31". No decision changed in v0.8. (The status went back to `draft` while LLD v0.8 and v0.9 were revised, and is `in-review` again since the LLD v0.9 re-review passed on 2026-11-03; the LLD fixes in v0.9 and v0.10 need no HLD change, so the HLD stays at v0.8. Approval is pending.) |
 | 0.9     | 2026-11-14 | **The owner's answers** (2026-11-14) to every item flagged "needs user confirmation". **One change, D-2: no absolute session lifetime.** The owner chose "never asked to sign in again while the device is used at least monthly" over the recommended 90-day absolute limit. Access tokens stay at 15 minutes and the refresh idle timeout at 30 days, extended by every refresh; the absolute limit is removed entirely (not kept as optional configuration). Updated with it: D-2's title, decision and rationale (the accepted cost, and the refresh family growing for the session's life); D-3's rationale (family size); J-6; §1.2's goal; §3.1's `sessions` columns and §3.2's ER diagram (`absolute_expires_at` dropped); S-10's state note (its 20-session cap is §3.3's, not D-2's); §4.6's "open the app" row; the F-2 refresh diagram; §7.4's expiry list; D-9's rationale wording; the §9 risks (a stolen refresh token that keeps being refreshed is bounded by reuse detection, the session list and sign-out, not by a cap); §11; §12 (an absolute limit as future work). **Confirmed as recommended** (flags removed, marked "confirmed by the owner, 2026-11-14"): D-10 (sharing invitations count against the allowance), D-25 (the owner can turn off a user's two-step verification), D-20 (exact email only in the MVP), D-19 (security notices are always emailed), D-3's v0.6 amendment (two tabs renewing at once stay signed in), D-24's v0.7 clause (the boot marker), the App Links deferral (D-23, §12), and the platform items behind PA-2 and PA-4 (§5.6; platform LLD v1.32, which records them and changes nothing identity uses). The LLD's own items (LD-9 reset links in the browser, F-207 Android offline start) are confirmed in identity LLD v0.11, and the plan review's Q-1 is answered: the owner reviewed the LLD brief's items 8b, 11 and 12 directly and accepted them. Passed plan review 2026-11-14. |
 | 0.10    | 2026-11-14 | Plan review of v0.9 (D-2 passed; suggestions applied with the LLD's v0.12). **S-1, refresh pruning:** the purge job deletes superseded refresh tokens issued more than 90 days ago, never a session's current token or its parent. No legitimate client presents a token issued more than 30 days ago (the idle timeout), so the only loss is the reuse alert for a replayed token older than 90 days, which v0.8's 90-day absolute limit didn't give either; such a token is refused without revocation. D-3's first and "any other superseded token" bullets, D-3's rationale, D-2's storage point (corrected estimate: at most one refresh per 15 minutes of active use, so heavy web use is about 1,000 rows a month, and pruning keeps at most about 90 days' worth), §3.1's `session_refresh_tokens` row, §3.3 and §5.5's purge row updated. **S-5:** §9's "legitimate client never refreshes again" row no longer lists reuse detection, which can't fire under that row's premise. **S-6:** D-2 says the values are fixed defaults (constants, identity LLD DV-1) with no absolute limit in code or configuration. **S-8:** D-2 names the guideline it deviates from (OWASP ASVS v4.0.3 requirement 3.3.2). Status `draft` until the plan reviewer re-checks the D-3 change (pruning narrows what D-3 recognises). **Re-review of v0.10 (REVISE), fixed in place:** D-3's rationale states why no legitimate client presents a token older than 30 days (clients expire it themselves: the web cookie's Max-Age, LLD F-27; Android's stored expiry, LLD F-207); pruning applies whether or not the session has ended (§3.3, D-3); D-2's storage figures are estimates (about one row per 15 minutes of use, races add a few; about 3,000 rows for heavy web use, up to about 8,600 for a device used around the clock); D-2 adds ASVS 4.0.3 3.3.2's level-2 limit (12 hours, or 30 minutes of inactivity), which the 30-day idle timeout exceeds; Sources cite spec summary v0.11 (`fc5081b`), and §1.1's IDN-US-2 row matches it. |
+| 0.11    | 2026-11-15 | Amended during implementation of identity: LLD A-23 and A-24, from the owner's UX guide (`docs/design/ux-guidelines.md` v0.1, decisions UX-D1 to UX-D14 of 2026-11-15). Approval stands. **Product name (A-23; UX-D10, UX-D11, UX-D13):** the product is "Where did I tap?". Screens don't name it; emails and the browser tab title do. §4.9 is rewritten and gains a name rule; where a journey, screen table or wireframe written before v0.11 shows "Budmon" as on-screen text, §4.9 and LLD §8.1 win. Prose that calls the product Budmon stays until the separate rename pass (guide §17). **Theme setting (A-24; UX-D4, UX-D5):** D-17 gains `theme` (System, Light, Dark; default System), stored on `users` and cached on each device; §3.1, J-9, S-9, §4.5 and §4.9 updated. **A-9** now points at the guide for the visual style. |
 
 ## 1. Context and requirements
 
@@ -98,7 +99,7 @@ All tables follow the platform conventions (P-§3.1): snake_case, UUIDv7 keys, `
 
 | Table | New / changed | Purpose | Key columns | Relationships |
 | ----- | ------------- | ------- | ----------- | ------------- |
-| `users` | New (replaces the removed `users`) | The Budmon user: profile, preferences, lifecycle, and what `admin` manages. Readable by `budmon_capture` (time zone, locale, status). | `id`; `email` (normalised: trimmed, lower-cased; unique); `email_verified_at`; `display_name`; `locale` (BCP 47, P-D-37); `time_zone` (IANA); `base_currency` (ISO 4217); `status` (`active`, `pending_deletion`); `deletion_requested_at`, `deletion_scheduled_for`, `deletion_requested_by` (`self`, `owner`, `ban`); `is_product_owner` (at most one `true`, partial unique index); `invite_allowance` (integer ≥ 0, `null` = unlimited; default 3, R6-Q5); `invited_by_user_id`; `last_active_at` (hour precision). | `base_currency` → `currencies.code` (`restrict`); `invited_by_user_id` → `users.id` (`set null`). Referenced by every module's user-owned rows. |
+| `users` | New (replaces the removed `users`) | The Budmon user: profile, preferences, lifecycle, and what `admin` manages. Readable by `budmon_capture` (time zone, locale, status). | `id`; `email` (normalised: trimmed, lower-cased; unique); `email_verified_at`; `display_name`; `locale` (BCP 47, P-D-37); `time_zone` (IANA); `base_currency` (ISO 4217); `theme` (`system`, `light`, `dark`; default `system`, D-17); `status` (`active`, `pending_deletion`); `deletion_requested_at`, `deletion_scheduled_for`, `deletion_requested_by` (`self`, `owner`, `ban`); `is_product_owner` (at most one `true`, partial unique index); `invite_allowance` (integer ≥ 0, `null` = unlimited; default 3, R6-Q5); `invited_by_user_id`; `last_active_at` (hour precision). | `base_currency` → `currencies.code` (`restrict`); `invited_by_user_id` → `users.id` (`set null`). Referenced by every module's user-owned rows. |
 | `password_credentials` ★ | New | The password hash, separate from `users` so the capture role never sees it. | `user_id` (PK); `password_hash` (Argon2id PHC string, D-5); `updated_at`. | `user_id` → `users` (`cascade`). |
 | `google_identities` ★ | New | The linked Google account for sign-in (not Gmail capture, R5-Q5). | `id`; `user_id` (unique: one per user); `google_sub` (unique); `email_at_link`; `linked_at`; `last_used_at`. | `user_id` → `users` (`cascade`). |
 | `two_step_credentials` ★ | New | TOTP enrolment (D-8). | `user_id` (PK); `secret_envelope` (`bytea`, sealed with the `api-secrets` key, P-F-114, AAD = table + user + purpose); `pending_secret_envelope` (a new secret during setup or authenticator replacement, J-21); `state` (`pending`, `enabled`); `pending_expires_at`; `last_used_step` (replay guard); `enabled_at`. | `user_id` → `users` (`cascade`). |
@@ -275,7 +276,7 @@ erDiagram
 5. Success: signed in on this device, toast "Password changed. You've been signed out everywhere else.", email "Your Budmon password was changed". Any other reset links still outstanding stop working (D-13).
 - *Goes wrong:* expired or used link: "This link has expired. Request a new one." with **Request new link**; wrong second factor: J-5's messages, and after 5 wrong codes the link stops working ("Too many wrong codes. Request a new link."); closed account: the email is never sent (the page still says "If … has an account"); rate limit: the platform's J-3.
 
-**J-9 Editing profile and preferences (US-6).** Settings → **Profile & preferences**: Name, Email (read-only, with "Contact the administrator to change your email." A-1), Base currency, Time zone, Language. Each change is saved with **Save changes** (one form); toast "Saved." Changing the base currency asks first: "Change base currency to {code}? Totals and budgets will be shown in {code}. Your accounts keep their own currencies." Changing the time zone shows inline, before saving: "Dates of existing transactions won't change. 'Today' will follow {zone}." Changing the language updates the interface immediately after saving, without a reload.
+**J-9 Editing profile and preferences (US-6).** Settings → **Profile & preferences**: Name, Email (read-only, with "Contact the administrator to change your email." A-1), Base currency, Time zone, Language, Appearance (System, Light, Dark; D-17). Each change is saved with **Save changes** (one form); toast "Saved." Changing the base currency asks first: "Change base currency to {code}? Totals and budgets will be shown in {code}. Your accounts keep their own currencies." Changing the time zone shows inline, before saving: "Dates of existing transactions won't change. 'Today' will follow {zone}." Changing the language or the appearance updates the interface immediately after saving, without a reload.
 - *Goes wrong:* validation (empty name, unknown zone) inline; server error: platform J-1.
 
 **J-10 Sessions (US-2).** Settings → **Sign-in & security** → **Where you're signed in**: a list, this device first, each row with device label ("Chrome on Windows", "Android · Pixel 8"), "Signed in {date}", "Last active {relative time}", and **Sign out** (not on this device's row). **Sign out of all other devices** at the bottom (no confirmation; toast "Signed out of {n} other devices."). The account menu has **Sign out** for this device.
@@ -334,7 +335,7 @@ erDiagram
 | S-6 Set up your account | Collect what a new user needs. | Email (read-only) → name → password (if chosen) → base currency → time zone → language → privacy notice link | **Create account** | Back |
 | S-7 Invitation problem | Explain why an invitation can't be used. | Reason → what to do | **Sign in** | (none) |
 | S-8 Settings home | Entry to identity's settings (and other modules'). | Profile summary (name, email) → sections: Profile & preferences, Sign-in & security, Invite people, Your data → (other modules' sections) | (navigation) | Sign out |
-| S-9 Profile & preferences | Edit profile and preferences. | Name → email (read-only) → base currency → time zone → language | **Save changes** | (none) |
+| S-9 Profile & preferences | Edit profile and preferences. | Name → email (read-only) → base currency → time zone → language → appearance | **Save changes** | (none) |
 | S-10 Sign-in & security | Methods, two-step, sessions. | Password (change / add) → Google (connected as … / connect / disconnect) → two-step (on/off, recovery codes left, unsaved-codes banner) → where you're signed in (list) | Per section: **Change password** / **Add a password** (J-17, J-18), **Connect Google** / **Disconnect** (J-19, J-20), **Turn on** / **Turn off**, **Create new codes**, **Replace authenticator app** (J-7, J-21) | Sign out (per session); Sign out of all other devices |
 | S-11 Two-step setup | Enrol TOTP. | Step indicator → QR + key → code → recovery codes | **Verify and turn on**, then **Done** | Copy key; Open in authenticator app (Android); Copy all; Download |
 | S-12 Invite people | Send and manage invitations. | Allowance → email field → invitation list | **Send invitation** | Resend; Cancel invitation |
@@ -571,7 +572,7 @@ Web routes (decided here, detailed in the LLD): `/sign-in`, `/sign-in/two-step`,
 - **Validation:** email format and password length are checked as the user leaves the field; "common password" and all server rules on submit; errors inline under the field (P-J-2). The password field never clears itself on error; the code fields clear and refocus after a wrong code.
 - **Session expiry** is handled silently: on `UNAUTHENTICATED`, the client refreshes once (single-flight per browser through the Web Locks API, per app through a mutex on Android) and retries; only when refresh fails does the sign-in screen appear, keeping unsaved form input on web where the route allows it.
 - **Emails as feedback:** security-relevant changes always produce an email (D-19), so a user learns about changes they didn't make.
-- **What updates when:** profile changes update the app shell (name, language) after the server confirms; a language change re-renders without reload (P-D-37); base currency and time zone changes invalidate cached queries of other modules (TanStack Query invalidation / Android repository refresh).
+- **What updates when:** profile changes update the app shell (name, language) after the server confirms; a language or appearance change re-renders without reload (P-D-37, D-17); base currency and time zone changes invalidate cached queries of other modules (TanStack Query invalidation / Android repository refresh).
 
 ### 4.6 Effort on frequent tasks
 
@@ -606,19 +607,22 @@ Remembered choices: last signed-in email per device; the last used sign-in metho
 
 | Where | Text |
 | ----- | ---- |
-| Sign-in title / button | "Sign in to Budmon" / "Sign in" |
+| **Product name** (A-23; UX-D10, UX-D11, UX-D13) | The product is "Where did I tap?". The header wordmark shows it (guide §2.1), so **screens don't name it**. Emails and the browser tab title ("{page} – Where did I tap?") do. When the name must appear in a sentence, it opens or ends the sentence (its "?" then ends that sentence); it never sits mid-sentence, where the "?" would read as a question. Rows below and LLD §8.1 / §7.2 give the exact texts; any older journey, screen or wireframe text that shows "Budmon" on screen follows them. |
+| Sign-in title / button | "Sign in" / "Sign in" |
 | Google button | "Continue with Google" |
-| Invite-only note | "Budmon is invite-only. Got an invitation? Open the link in the email." |
+| Invite-only note | "You need an invitation to join. Got one? Open the link in the email." |
+| Invitation landing (S-5) title / line | "You've been invited" / "{Inviter} invited {email} to join." |
+| First-run home | "Welcome, {name}." / "Add your first account to start." |
 | Wrong credentials (`INVALID_CREDENTIALS`) | "Email or password is incorrect." |
-| Closed account (`ACCOUNT_CLOSED`) | "This Budmon account has been closed." |
-| Google verified email, no match (`GOOGLE_ACCOUNT_UNKNOWN`) | "There's no Budmon account for {email}. Budmon is invite-only: ask someone who uses Budmon to invite you." |
+| Closed account (`ACCOUNT_CLOSED`) | "This account has been closed." |
+| Google verified email, no match (`GOOGLE_ACCOUNT_UNKNOWN`) | "There's no account for {email}. You need an invitation: ask someone who already has an account to invite you." |
 | Google email unverified, matching or not (`GOOGLE_EMAIL_UNVERIFIED`) | "Google hasn't confirmed this email address. Sign in with your password, or use your invitation." |
 | Google flow failed (`GOOGLE_SIGNIN_FAILED`: state, nonce, hand-off or token invalid or expired) | "Google sign-in didn't complete. Try again." |
-| Google address banned (`GOOGLE_ACCOUNT_NOT_ALLOWED`) | "This Google account can't be used with Budmon." |
-| Wrong Google account at step-up (`GOOGLE_ACCOUNT_MISMATCH`) | "Choose the Google account connected to Budmon ({email})." |
+| Google address banned (`GOOGLE_ACCOUNT_NOT_ALLOWED`) | "This Google account can't be used here." |
+| Wrong Google account at step-up (`GOOGLE_ACCOUNT_MISMATCH`) | "Choose the Google account you connected ({email})." |
 | Sign-up ticket expired (`SIGNUP_TICKET_INVALID`) | "Your Google sign-in timed out. Continue with Google again." |
-| Google only from the laptop (stage 0) | "Works only in a browser on the computer running Budmon." |
-| Google already used (`GOOGLE_ACCOUNT_IN_USE`) | "This Google account is already used by another Budmon account." |
+| Google only from the laptop (stage 0) | "Works only in a browser on the computer that hosts this app." |
+| Google already used (`GOOGLE_ACCOUNT_IN_USE`) | "This Google account is already used by another account." |
 | Google unreachable (`GOOGLE_UNAVAILABLE`) | "Couldn't reach Google. Try again, or use your password." |
 | Google cancelled | "Google sign-in was cancelled." |
 | Two-step prompt | "Enter the 6-digit code from your authenticator app." |
@@ -628,28 +632,29 @@ Remembered choices: last signed-in email per device; the last used sign-in metho
 | Session ended | "Your session ended. Sign in again." |
 | Reuse detected | "For your security, you've been signed out. Sign in again." |
 | Password rule | "At least 12 characters." / "This password is too common. Try a longer phrase." (`PASSWORD_TOO_WEAK`) |
-| Reset sent | "If {email} has a Budmon account, we've sent a link to reset the password. It expires in 30 minutes." |
+| Reset sent | "If {email} has an account, we've sent a link to reset the password. It expires in 30 minutes." |
 | Reset link bad (`RESET_LINK_INVALID`) / too many codes | "This link has expired. Request a new one." / "Too many wrong codes. Request a new link." |
 | Second-factor limit (`RATE_LIMITED` on the per-user limiter) | Platform J-3 wording. |
 | Unsaved recovery codes banner | "You may not have saved your recovery codes." Button "Create new codes" |
-| Android invitation link | "This isn't a Budmon invitation link. Copy the whole link from the email." / "This link is for a different Budmon server." |
+| Android invitation link | "This isn't an invitation link. Copy the whole link from the email." / "This link is for a different server." |
 | Lookup unavailable | "This person can't be added right now." (`accounts` wording) |
 | Invitation problems (`INVITATION_EXPIRED`, `_REVOKED`, `_USED`, `_INVALID`) | "It expired on {date}." / "It was cancelled." / "It has already been used. If that was you, sign in." / "This link isn't complete. Open it again from the email, or copy the whole link." |
-| Cap reached (`USER_CAP_REACHED`) | Invite: "Budmon is full right now, so no new invitations can be sent." Accept: "Budmon can't take new people right now. {Inviter} and the administrator have been told." |
+| Cap reached (`USER_CAP_REACHED`) | Invite: "There's no room for new people right now, so no new invitations can be sent." Accept: "There's no room for new people right now. {Inviter} and the administrator have been told." |
 | Allowance (`INVITE_ALLOWANCE_EXHAUSTED`) | "You've used all your invitations. The administrator can give you more." |
 | Invitations disabled (`INVITATIONS_DISABLED`) | "Sending invitations isn't available for your account." |
-| Already a user (`ALREADY_A_USER`) / pending (`INVITATION_PENDING`) / banned (`EMAIL_NOT_INVITABLE`) | "{email} already uses Budmon." / "{email} already has a pending invitation." / "This address can't be invited." |
+| Already a user (`ALREADY_A_USER`) / pending (`INVITATION_PENDING`) / banned (`EMAIL_NOT_INVITABLE`) | "{email} already has an account." / "{email} already has a pending invitation." / "This address can't be invited." |
 | Invite empty state | "You haven't invited anyone yet. Invite someone you share money with, like a partner or housemate." |
 | Step-up title | "Confirm it's you" |
 | Step-up needed (`CONFIRMATION_REQUIRED`) | (no text; the client opens S-16) |
 | Base currency confirm | "Change base currency to {code}? Totals and budgets will be shown in {code}. Your accounts keep their own currencies." |
 | Time zone hint | "Dates of existing transactions won't change. 'Today' will follow {zone}." |
-| Export intro | "Get a copy of everything you've put into Budmon: accounts, transactions, budgets and settings, as a ZIP file with CSV and JSON." |
+| Appearance (S-9, D-17) | Label "Appearance"; options "System", "Light", "Dark"; hint "System follows your device's setting." |
+| Export intro | "Get a copy of everything you've added: accounts, transactions, budgets and settings, as a ZIP file with CSV and JSON." |
 | Export busy (`EXPORT_IN_PROGRESS`) / limit (`EXPORT_LIMIT_REACHED`) | "Preparing your export…" / "You can request another export tomorrow." |
 | Delete blockers (`SOLE_ADMIN_HANDOVER_REQUIRED`) | "Before you can delete your account, hand over these shared accounts:" |
 | Delete confirm | Checkbox "I understand my data will be erased after 7 days"; button "Delete my account" |
 | Pending banner | "Your account will be deleted on {date}." Button "Keep my account" |
-| Email subjects | "{Inviter} invited you to Budmon"; "Reset your Budmon password"; "Set a password for Budmon"; "Your Budmon password was changed"; "Two-step verification was turned on" / "…turned off"; "New recovery codes were created"; "A recovery code was used to sign in"; "Someone tried to sign in to Budmon and didn't pass two-step verification"; "Your two-step verification app was changed"; "Two-step verification was turned off by the administrator"; "A password was added to your Budmon account"; "Google sign-in was connected to your Budmon account" / "…disconnected"; "We signed you out of Budmon on {device}"; "Your Budmon export is ready"; "Your Budmon account will be deleted on {date}"; "Your Budmon account won't be deleted"; "Your Budmon account has been deleted"; "Your Budmon account has been closed" (owner deletion or ban); "{Name} couldn't join Budmon" (to inviter, cap) |
+| Email subjects (A-23; **needs the owner's confirmation**) | A subject ends with the name: either the sentence ends with it ("{Inviter} invited you to Where did I tap?", "Your invitation to Where did I tap?", "{email} couldn't join Where did I tap?"), or the name-free sentence is followed by " – Where did I tap?": "Reset your password – …"; "Set a password – …"; "Your password was changed – …"; "Two-step verification was turned on – …" / "…turned off – …"; "New recovery codes were created – …"; "A recovery code was used to sign in – …"; "Someone tried to sign in and didn't pass two-step verification – …"; "Your two-step verification app was changed – …"; "Two-step verification was turned off by the administrator – …"; "A password was added to your account – …"; "Google sign-in was connected to your account – …" / "…disconnected from your account – …"; "We signed you out on {device} – …"; "Your export is ready – …"; "Your account will be deleted on {date} – …"; "Your account won't be deleted – …"; "Your account has been deleted – …"; "Your account has been closed – …" (owner deletion or ban). Bodies are name-free except the invitation's (LLD §7.2) |
 
 All strings live in the client catalogs and, for emails, the server catalog (P-F-160), English first.
 
@@ -1180,6 +1185,7 @@ sequenceDiagram
 ### D-17: Preferences on `users`, set at sign-up with sensible defaults
 - **Options considered:** a separate preferences table; columns on `users`.
 - **Decision:** `locale`, `time_zone`, `base_currency` and `display_name` are columns on `users`, required at sign-up and preselected (locale from the browser/device resolved against supported locales, P-F-312; zone from the device; currency from the locale's region, falling back to USD). Changes emit `identity.preferences-changed`.
+  - **Appearance** (amended for LLD A-24; owner decisions UX-D4, UX-D5, 2026-11-15): `theme` is a column on `users` too, `system`, `light` or `dark`, default `system`. Sign-up doesn't ask; it's changed on S-9. Every device follows the account's value after `me` loads, and caches it, so signed-out screens and the next start use the device's last value; with no cached value the device follows the system. Sign-out keeps the cache. A theme change emits no `identity.preferences-changed` (no other module depends on it). The guide's §3.5 gives the resolution order and the no-flash rule.
 - **Rationale:** they're few, always needed together, and read by workers (including `budmon_capture`) for "today" and formatting; a join would add nothing.
 
 ### D-18: Rate limits and throttling instead of account lockout
@@ -1278,7 +1284,7 @@ sequenceDiagram
 | A-6 | No "remember me" option; every session is long-lived. |
 | A-7 | Android's minimum API 26 is supported by Credential Manager through Google Play services (the invited group uses Play-services phones). |
 | A-8 | A transactional email provider for stage 1 is chosen at the stage-1 gate (candidates: Postmark, Amazon SES, Brevo, Resend), with free or low-cost tiers adequate for dozens of emails a month; terms to be checked then. |
-| A-9 | The UX conventions in §4.0 become `docs/design/ux-guidelines.md` once this HLD is approved. |
+| A-9 | The visual style is `docs/design/ux-guidelines.md` (the owner's decisions UX-D1 to UX-D14, 2026-11-15; its defaults are under the owner's review). §4.0's interaction conventions stay here; the guide references them. |
 | A-10 | The owner uses Chrome, Edge or Firefox on the laptop. They treat `http://localhost` as a secure context; whether they also accept `__Secure-` prefixed cookies there is checked in the LLD's spike, with unprefixed `Secure` cookie names as the `localhost` fallback (§7.5). |
 | A-11 | Security events and the security emails in §4.9 are enough audit for users in the MVP (no in-app activity view). |
 
