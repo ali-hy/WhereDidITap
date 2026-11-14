@@ -1,7 +1,7 @@
 ---
 module: identity
 doc: lld-brief
-summarises: lld.md v0.14
+summarises: lld.md v0.15
 ---
 
 # Identity: LLD brief
@@ -9,6 +9,8 @@ summarises: lld.md v0.14
 A human-readable summary of [the LLD](./lld.md) for review and approval. The LLD is the contract the agents build from; this brief is what the owner reads. If the two ever disagree, the LLD wins and the brief is out of date.
 
 **What's new in v0.7 to v0.12:** the design was written against an early draft of the platform; since then the platform was built, with about 500 fixes and clarifications. v0.7 checked every place identity relies on the platform against the platform as it was actually built, and corrected the names, files and test helpers it uses. The plan reviewer then asked for changes, which v0.8 to v0.10 make: mostly the build order (each slice now adds only what it builds), how the automatic browser tests get the situations they need, a few platform tests that must change once identity is plugged in, and (v0.9) who switches the web app's language after sign-in, what a browser with an outdated "signed in here" marker sees, and how the Android app recovers when the server can't be reached. Most of what identity does for you is unchanged, but four things are small visible changes: items 8b, 11 and 12, and one wording effect in item 7. **v0.11 records your answers of 2026-11-14** to every item that needed your confirmation. One thing changed: sessions have no absolute time limit any more (item 1). Everything else you confirmed as recommended, so items 1, 8b, 9 to 12 and 18 now read as decided. The plan reviewer accepted the session-lifetime change and asked for fixes, which **v0.12** makes: how a renewal locks the database, a sturdier test for long-lived sessions, and an hourly clean-up of old sign-in tokens (item 1). **This version is approved** (2026-11-14), after passing plan re-review. **v0.13** adds six small clarifications from the start of the build (amendments A-1 to A-6). They pin down details the tests needed: how an email-sending error is built, how a cookie's lifetime is rounded, which files hold shared types, how the database helpers are laid out, exactly what the email job logs, and exactly which users the development seed creates. The seed creates two users, an owner and a member invited by the owner, both with the development password and a confirmed email address; it doesn't create invitation records. None of the six changes anything you'd see in the product. **v0.14** adds three more (A-7 to A-9) for the Android app's sign-in storage: how the encryption can be tested without a real phone's secure key store, the exact shape of the stored sign-in data, and when the app attaches your sign-in token to a request. One small safety rule is new: the app sends the token only to the Budmon server it was built for, never to another address. If the stored data can't be decrypted (for example after a phone restore), the app wipes it and asks you to sign in again, as before.
+
+**During the build (v0.13 to v0.15):** small details settled while building S-0, as amendments A-1 to A-14 (planner decisions; none needs your input). The ones worth knowing: platform tests now check the platform's own tables by name instead of assuming they're the only ones (A-10, platform A-512); and security emails say what happened in one sentence each, with the authenticator email worded as in the design ("Your two-step verification app was changed", A-11).
 
 ## 1. What this builds
 
@@ -158,7 +160,7 @@ What the tests cover:
 - **Privacy "canary" tests:** fake emails, passwords and tokens go through every flow, and the logs, traces, error reports and job records must never contain them.
 - **The credential-table rule:** the capture worker's database role is refused on every credential table.
 - **Erasure:** a guard test fails if any future table references users without being erased.
-- **The platform still works:** the platform's whole test suite runs with identity present. About ten platform tests that assumed "no module plugged in" change as platform amendment A-511 states, each in the identity slice that affects it; every other platform test runs unchanged.
+- **The platform still works:** the platform's whole test suite runs with identity present. About fifteen platform tests that assumed "no module plugged in" change as platform amendments A-511 and A-512 state (A-512, from S-0: tests that expected only the platform's four tables now check those by name), each in the identity slice that affects it; every other platform test runs unchanged.
 - **The release rehearsal:** the three identity steps (owner bootstrap, emails, Google) run inside the platform's rehearsal, from checkpoint R-1 (after S-8), because the email step needs invitations (S-8) and resets (S-5), and the Google step runs only after it. Before the first release there are no committed migrations, so QA runs it locally with a throwaway one (the platform's procedure), and the "broken on purpose" rehearsal runs on the pull request exercise it too.
 
 Not covered automatically: real Google, real SMTP, Android on a device, Windows and Edge. These are the manual cases TP-M.1 to TP-M.6.
