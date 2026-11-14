@@ -10,6 +10,7 @@ export * from "./common/create.js";
 export * from "./common/cursor.js";
 export * from "./meta/metaContract.js";
 export * from "./rules/listProcedures.js";
+export * from "./identity/index.js";
 
 export const contract = {
   meta: metaContract,
