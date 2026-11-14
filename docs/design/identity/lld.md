@@ -2856,7 +2856,7 @@ Order and dependencies:
 | S-11 Account deletion | US-10 | S-8, S-10 |
 | S-12 Owner services for `admin` | (US-7, US-10; ADM dependencies) | S-11, S-4 |
 
-Status for all: not started. The build goes on `feat/identity`, branched from this branch once PR #1 is merged (or from `feat/platform` with these docs cherry-picked). One pull request carries the `API_MINOR` bump (§1.1).
+The build goes on `feat/identity` (PR #2). Status: **S-0 QA passed** (2026-11-15; code review approved at `60570ab`); S-1 to S-12 not started. One pull request carries the `API_MINOR` bump (§1.1).
 
 ### S-0: Foundations
 - **Depends on:** the platform as built (above).
