@@ -17,6 +17,7 @@ import type { DbLoginRole } from "../platform/config/schema.js";
 import { runCommand } from "../platform/observability/describeFailure.js";
 import { resetDevelopmentDatabase } from "../platform/db/reset.js";
 import { runSchemaStep } from "../platform/db/schemaStep.js";
+import { resolveNodeBin } from "../platform/tooling/nodeBin.js";
 import { repoRoot, seedAll } from "./dbReset.js";
 
 const ROLES: readonly DbLoginRole[] = [
@@ -177,13 +178,71 @@ async function databaseExists(superuserUrl: string, name: string): Promise<boole
   }
 }
 
-function startProcess(
-  name: string,
-  command: string,
-  args: string[],
-  cwd: string,
-  env: Record<string, string>,
-): ChildProcess {
+export interface DevProcess {
+  name: "api" | "worker" | "web";
+  command: string;
+  args: string[];
+  cwd: string;
+  env: Record<string, string>;
+}
+
+/**
+ * F-22 step 4 (A-513): the processes `pnpm dev` starts, in order api, worker, web.
+ * - Each runs as `deps.execPath` on a package's bin script, never a `.bin` shim or a shell.
+ * - `web` only when `apps/web/package.json` exists; vite is resolved only then.
+ * - `resolveBin` errors propagate.
+ */
+export function devProcesses(
+  root: string,
+  env: Readonly<Record<string, string>>,
+  deps: {
+    execPath: string;
+    resolveBin(fromDir: string, packageName: string): string;
+    exists(path: string): boolean;
+  },
+): DevProcess[] {
+  const tsx = deps.resolveBin(path.join(root, "apps", "server"), "tsx");
+  // The telemetry preload runs first (F-89, A-147).
+  const watch = [
+    tsx,
+    "watch",
+    "--tsconfig",
+    "apps/server/tsconfig.json",
+    "--import",
+    "./apps/server/src/main/instrument.ts",
+  ];
+  // Run from the repository root so the relative paths in .env resolve (A-73).
+  const processes: DevProcess[] = [
+    {
+      name: "api",
+      command: deps.execPath,
+      args: [...watch, "apps/server/src/main/api.ts"],
+      cwd: root,
+      env: { ...env },
+    },
+    {
+      name: "worker",
+      command: deps.execPath,
+      args: [...watch, "apps/server/src/main/worker.ts"],
+      cwd: root,
+      env: { ...env, WORKER_ROLES: "capture,general" },
+    },
+  ];
+  const webDir = path.join(root, "apps", "web");
+  if (deps.exists(path.join(webDir, "package.json"))) {
+    processes.push({
+      name: "web",
+      command: deps.execPath,
+      args: [deps.resolveBin(webDir, "vite")],
+      cwd: webDir,
+      env: { ...env },
+    });
+  }
+  return processes;
+}
+
+function startProcess(proc: DevProcess): ChildProcess {
+  const { name, command, args, cwd, env } = proc;
   const child = spawn(command, args, { cwd, env: { ...process.env, ...env }, stdio: "pipe" });
   const prefix = (stream: NodeJS.ReadableStream, out: NodeJS.WriteStream): void => {
     let pending = "";
@@ -206,6 +265,13 @@ export async function startDev(): Promise<number> {
     copyFile: copyFileSync,
     readFile: (file) => readFileSync(file, "utf8"),
     log,
+  });
+
+  // Resolved before Docker starts, so a missing tool fails early.
+  const processes = devProcesses(root, env, {
+    execPath: process.execPath,
+    resolveBin: (dir, name) => resolveNodeBin(dir, name),
+    exists: existsSync,
   });
 
   if (spawnSync("docker", ["info"], { stdio: "ignore" }).status !== 0) {
@@ -246,27 +312,7 @@ export async function startDev(): Promise<number> {
     );
   }
 
-  // Run from the repository root so the relative paths in .env resolve (A-73).
-  const tsx = path.join(root, "apps", "server", "node_modules", ".bin", "tsx");
-  // The telemetry preload runs first (F-89, A-147).
-  const watch = [
-    "watch",
-    "--tsconfig",
-    "apps/server/tsconfig.json",
-    "--import",
-    "./apps/server/src/main/instrument.ts",
-  ];
-  const children = [
-    startProcess("api", tsx, [...watch, "apps/server/src/main/api.ts"], root, env),
-    startProcess("worker", tsx, [...watch, "apps/server/src/main/worker.ts"], root, {
-      ...env,
-      WORKER_ROLES: "capture,general",
-    }),
-  ];
-  const webDir = path.join(root, "apps", "web");
-  if (existsSync(path.join(webDir, "package.json"))) {
-    children.push(startProcess("web", "pnpm", ["exec", "vite"], webDir, env));
-  }
+  const children = processes.map(startProcess);
   const stop = (): void => {
     for (const child of children) child.kill("SIGTERM");
   };

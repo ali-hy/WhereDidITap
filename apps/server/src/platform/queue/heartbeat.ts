@@ -1,16 +1,39 @@
 // F-79: the worker's heartbeat, read by the healthcheck entry (F-175) and exported as a gauge.
 import { writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { Clock } from "@budmon/shared";
 import type { Logger } from "../observability/logger.js";
 import type { PlatformMetrics } from "../observability/metrics.js";
 
 export const DEFAULT_HEARTBEAT_FILE = "/tmp/heartbeat";
 
-/** A-226: `HEARTBEAT_FILE` when it's an absolute path, else the default. Read directly, not
- * through Config, so the healthcheck needn't load the configuration. */
-export function heartbeatFile(env: Readonly<Record<string, string | undefined>>): string {
+interface HeartbeatPathOptions {
+  platform?: NodeJS.Platform;
+  tmpdir?: () => string;
+}
+
+/** The default path: `/tmp/heartbeat`, or `<tmpdir>heartbeat` on Windows (A-514). */
+export function defaultHeartbeatFile(opts: HeartbeatPathOptions = {}): string {
+  const platform = opts.platform ?? process.platform;
+  return platform === "win32"
+    ? path.win32.join((opts.tmpdir ?? os.tmpdir)(), "heartbeat")
+    : DEFAULT_HEARTBEAT_FILE;
+}
+
+/**
+ * A-226: `HEARTBEAT_FILE` when it's an absolute path on the platform, else the default.
+ * Read directly, not through Config, so the healthcheck needn't load the configuration.
+ */
+export function heartbeatFile(
+  env: Readonly<Record<string, string | undefined>>,
+  opts: HeartbeatPathOptions = {},
+): string {
   const value = env["HEARTBEAT_FILE"];
-  return value !== undefined && value.startsWith("/") ? value : DEFAULT_HEARTBEAT_FILE;
+  const platformPath = (opts.platform ?? process.platform) === "win32" ? path.win32 : path.posix;
+  return value !== undefined && value !== "" && platformPath.isAbsolute(value)
+    ? value
+    : defaultHeartbeatFile(opts);
 }
 
 export function startHeartbeat(deps: {
@@ -23,7 +46,7 @@ export function startHeartbeat(deps: {
   writeFile?: (path: string, data: string) => void;
   path?: string;
 }): { stop(): void; last(): number } {
-  const file = deps.path ?? DEFAULT_HEARTBEAT_FILE;
+  const file = deps.path ?? defaultHeartbeatFile();
   const write =
     deps.writeFile ??
     ((p: string, data: string) => {
