@@ -47,19 +47,55 @@ const EVENT_KINDS: ReadonlySet<EmailKind> = new Set<EmailKind>([
   "google_unlinked",
 ]);
 
-/** Dates in the recipient's locale and zone; pseudo-locales format as English. */
-function formatDate(at: Date, locale: string, timeZone: string, withTime: boolean): string {
-  const tag = PSEUDO_LOCALES.includes(locale) ? "en" : locale;
-  const options: Intl.DateTimeFormatOptions = {
-    dateStyle: "medium",
-    ...(withTime ? { timeStyle: "short" as const } : {}),
-    timeZone,
-  };
+/** Set when a stored zone was rejected, so the job logs once per email. */
+interface ZoneNote {
+  invalidZone: boolean;
+}
+
+const isValidZone = (timeZone: string): boolean => {
   try {
-    return new Intl.DateTimeFormat(tag, options).format(at);
+    new Intl.DateTimeFormat("en", { timeZone });
+    return true;
   } catch {
-    return new Intl.DateTimeFormat("en", { ...options, timeZone: "UTC" }).format(at);
+    return false;
   }
+};
+
+/**
+ * Dates in the recipient's locale and zone; pseudo-locales format as English.
+ * A rejected zone formats in UTC, with the zone name when a time shows.
+ */
+function formatDate(
+  at: Date,
+  locale: string,
+  timeZone: string,
+  withTime: boolean,
+  note: ZoneNote,
+): string {
+  const wanted = PSEUDO_LOCALES.includes(locale) ? "en" : locale;
+  const tag = Intl.DateTimeFormat.supportedLocalesOf(wanted).length > 0 ? wanted : "en";
+  if (isValidZone(timeZone)) {
+    const options: Intl.DateTimeFormatOptions = {
+      dateStyle: "medium",
+      ...(withTime ? { timeStyle: "short" as const } : {}),
+      timeZone,
+    };
+    return new Intl.DateTimeFormat(tag, options).format(at);
+  }
+  note.invalidZone = true;
+  // timeZoneName can't combine with dateStyle/timeStyle.
+  const fallback: Intl.DateTimeFormatOptions = withTime
+    ? {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: "UTC",
+        timeZoneName: "short",
+      }
+    : { dateStyle: "medium", timeZone: "UTC" };
+  return new Intl.DateTimeFormat(tag, fallback).format(at);
 }
 
 const isClosed = (user: UserRow): boolean =>
@@ -75,9 +111,10 @@ function userContent(
   user: UserRow,
   origin: string,
   eventAt: Date,
+  note: ZoneNote,
 ): EmailContent | null {
   const security = `${origin}/settings/security`;
-  const date = formatDate(eventAt, user.locale, user.timeZone, true);
+  const date = formatDate(eventAt, user.locale, user.timeZone, true, note);
   switch (kind) {
     case "password_changed":
     case "password_added":
@@ -113,7 +150,7 @@ function userContent(
       };
     case "deletion_scheduled": {
       const scheduled = user.deletionScheduledFor ?? eventAt;
-      const scheduledDate = formatDate(scheduled, user.locale, user.timeZone, true);
+      const scheduledDate = formatDate(scheduled, user.locale, user.timeZone, true, note);
       return {
         subjectId: "email.deletion_scheduled.subject",
         introId: "email.deletion_scheduled.intro",
@@ -135,8 +172,20 @@ function userContent(
         subjectId: "email.account_closed_owner.subject",
         introId: "email.account_closed_owner.intro",
         values: {
-          now: formatDate(user.deletionRequestedAt ?? eventAt, user.locale, user.timeZone, true),
-          date: formatDate(user.deletionScheduledFor ?? eventAt, user.locale, user.timeZone, true),
+          now: formatDate(
+            user.deletionRequestedAt ?? eventAt,
+            user.locale,
+            user.timeZone,
+            true,
+            note,
+          ),
+          date: formatDate(
+            user.deletionScheduledFor ?? eventAt,
+            user.locale,
+            user.timeZone,
+            true,
+            note,
+          ),
         },
       };
     default:
@@ -163,6 +212,7 @@ export async function handleEmailSend(
   const now = deps.clock.now();
   const nowDate = new Date(now.epochMilliseconds);
   const { kind, refId } = payload;
+  const note: ZoneNote = { invalidZone: false };
   let invitationId = null as string | null;
 
   const message = await (async (): Promise<Message | null> => {
@@ -191,7 +241,7 @@ export async function handleEmailSend(
         const values = {
           email: invitation.email,
           contextLine: line === null ? "" : ` ${line}`,
-          date: formatDate(invitation.expiresAt, locale, zone, false),
+          date: formatDate(invitation.expiresAt, locale, zone, false, note),
           ...(inviter === null ? {} : { inviter: inviter.displayName }),
         };
         return {
@@ -261,7 +311,7 @@ export async function handleEmailSend(
           subjectId: "email.export_ready.subject",
           introId: "email.export_ready.intro",
           values: {
-            date: formatDate(export_.expiresAt ?? nowDate, user.locale, user.timeZone, false),
+            date: formatDate(export_.expiresAt ?? nowDate, user.locale, user.timeZone, false, note),
           },
           link: { url: `${origin}/settings/data`, buttonId: "email.export_ready.button" },
         });
@@ -277,7 +327,7 @@ export async function handleEmailSend(
           outroId: "email.session_reuse_signed_out.outro",
           values: {
             device: session.deviceLabel,
-            date: formatDate(session.revokedAt ?? nowDate, user.locale, user.timeZone, true),
+            date: formatDate(session.revokedAt ?? nowDate, user.locale, user.timeZone, true, note),
           },
           link: {
             url: `${origin}/settings/security`,
@@ -303,12 +353,13 @@ export async function handleEmailSend(
         ) {
           return null;
         }
-        const content = userContent(kind, user, origin, eventAt);
+        const content = userContent(kind, user, origin, eventAt, note);
         return content === null ? null : userMessage(user, content);
       }
     }
   })();
 
+  if (note.invalidZone) ctx.logger.warn("email_time_zone_invalid", { reason: kind });
   if (message === null) {
     ctx.logger.info("email_skipped", { reason: kind });
     return;

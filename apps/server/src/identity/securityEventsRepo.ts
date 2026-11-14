@@ -1,5 +1,6 @@
 // F-16: security events.
 import type { DbHandle } from "../platform/db/types.js";
+import type { SecurityEventKind } from "./constants.js";
 
 export async function insert(
   h: DbHandle,
@@ -20,7 +21,7 @@ export async function insert(
 export async function findById(
   h: DbHandle,
   id: string,
-): Promise<{ id: string; userId: string; kind: string; createdAt: Date } | null> {
+): Promise<{ id: string; userId: string; kind: SecurityEventKind; createdAt: Date } | null> {
   const { rows } = await h.executeSql(
     "SELECT id, user_id, kind, created_at FROM security_events WHERE id = $1",
     [id],
@@ -30,7 +31,7 @@ export async function findById(
   return {
     id: r["id"] as string,
     userId: r["user_id"] as string,
-    kind: r["kind"] as string,
+    kind: r["kind"] as SecurityEventKind,
     createdAt: r["created_at"] as Date,
   };
 }
