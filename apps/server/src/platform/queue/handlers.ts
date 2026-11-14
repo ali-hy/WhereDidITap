@@ -3,6 +3,7 @@
 import type { WorkerContainer } from "../container.js";
 import { captureRewrapJob, runCaptureRewrapJob } from "../crypto/rewrap.js";
 import { fxHandlers } from "../fx/fxJobs.js";
+import { identityHandlers } from "../../identity/identityJobs.js";
 import { maintenanceHandlers } from "../maintenance/maintenanceJobs.js";
 import type { JobHandler } from "./workers.js";
 
@@ -10,6 +11,7 @@ export function buildHandlerMap(c: WorkerContainer): ReadonlyMap<string, JobHand
   return new Map<string, JobHandler>([
     ...maintenanceHandlers(c),
     ...fxHandlers(c),
+    ...identityHandlers(c),
     [
       captureRewrapJob.name,
       async (_payload, ctx) => {

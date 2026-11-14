@@ -21,6 +21,7 @@ import { failureLine } from "../src/platform/observability/describeFailure.js";
 import { buildHandlerMap } from "../src/platform/queue/handlers.js";
 import { runGeneralStartHooks, startWorkers } from "../src/platform/queue/workers.js";
 import { POSTGRES_IMAGE } from "../test/setup/postgresImage.js";
+import { e2eModules, type E2eModuleSetup } from "./e2eModules.js";
 import { POSTGRES_COMMAND } from "../test/support/postgres.js";
 
 const API_HOST = "127.0.0.1";
@@ -36,6 +37,35 @@ function portFrom(name: string, fallback: number): number {
 }
 
 const DATABASE = "budmon";
+
+/** A-509: a module's variables over F-222's own; a key F-222 sets itself or two modules set is an error. */
+function mergeEnv(
+  own: Readonly<Record<string, string>>,
+  modules: readonly (Readonly<Record<string, string>> | undefined)[],
+): Record<string, string> {
+  const merged: Record<string, string> = { ...own };
+  const added = new Set<string>();
+  for (const env of modules) {
+    for (const [key, value] of Object.entries(env ?? {})) {
+      if (Object.hasOwn(own, key) || added.has(key)) throw new Error(`e2e module overrides ${key}`);
+      added.add(key);
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
+/** A-509: container overrides merged key by key; a key two modules set is an error. */
+function mergeOverrides<T extends object>(list: readonly (T | undefined)[]): T {
+  const merged: Record<string, unknown> = {};
+  for (const overrides of list) {
+    for (const [key, value] of Object.entries(overrides ?? {})) {
+      if (Object.hasOwn(merged, key)) throw new Error(`e2e module overrides ${key}`);
+      merged[key] = value;
+    }
+  }
+  return merged as T;
+}
 
 const secret = (bytes: number) => randomBytes(bytes).toString("base64");
 const keyRing = () => JSON.stringify({ current: "k1", keys: { k1: secret(32) } });
@@ -165,7 +195,21 @@ async function main(): Promise<void> {
         publicKey.export({ type: "spki", format: "pem" }).toString(),
       ),
     };
-    const apiEnv = {
+    // A-509: the modules run once the temp directory and `file` exist, before configuration is read.
+    const setups: E2eModuleSetup[] = [];
+    for (const module of e2eModules) {
+      setups.push(
+        await module({
+          dir,
+          file,
+          webOrigin: new URL(`http://localhost:${String(PREVIEW_PORT)}`),
+          apiOrigin: new URL(`http://${API_HOST}:${String(API_PORT)}`),
+        }),
+      );
+    }
+    const apiOverrides = mergeOverrides(setups.map((m) => m.apiOverrides));
+    const workerOverrides = mergeOverrides(setups.map((m) => m.workerOverrides));
+    const ownApiEnv = {
       ...common,
       DB_USER: "budmon_app",
       DB_PASSWORD_FILE: file("api-db", passwords.budmon_app),
@@ -177,7 +221,11 @@ async function main(): Promise<void> {
       RECOVERY_CODE_HMAC_KEYS_FILE: file("recovery", keyRing()),
       DEV_OBJECTS_SIGNING_KEY_FILE: file("dev-objects", secret(32)),
     };
-    const workerEnv = {
+    const apiEnv = mergeEnv(
+      ownApiEnv,
+      setups.map((m) => m.apiEnv),
+    );
+    const ownWorkerEnv = {
       ...common,
       WORKER_ROLES: "general",
       DB_USER: "budmon_app",
@@ -189,6 +237,10 @@ async function main(): Promise<void> {
       SMTP_URL: "smtp://127.0.0.1:1025",
       EMAIL_FROM: "Budmon <no-reply@budmon.local>",
     };
+    const workerEnv = mergeEnv(
+      ownWorkerEnv,
+      setups.map((m) => m.workerEnv),
+    );
     const workerConfig = config("worker", workerEnv);
     await resetDevelopmentDatabase(
       {
@@ -205,9 +257,10 @@ async function main(): Promise<void> {
       {
         runSchemaStep,
         seed: async () => {
-          const seeding = createWorkerContainer(workerConfig);
+          const seeding = createWorkerContainer(workerConfig, workerOverrides);
           try {
             await runSeeders(seeding);
+            for (const setup of setups) await setup.afterSeed?.(seeding);
           } finally {
             await seeding.close();
           }
@@ -216,14 +269,14 @@ async function main(): Promise<void> {
     );
 
     // 2. The API and a general worker, in-process.
-    const api = createApiContainer(config("api", apiEnv));
+    const api = createApiContainer(config("api", apiEnv), apiOverrides);
     const app = await createApiServer(api);
     await app.listen({ host: API_HOST, port: API_PORT });
     stops.push(async () => {
       await app.close();
       await api.close();
     });
-    const worker = createWorkerContainer(workerConfig);
+    const worker = createWorkerContainer(workerConfig, workerOverrides);
     const workers = await startWorkers(worker, buildHandlerMap(worker), {
       heartbeatPath: path.join(dir, "heartbeat"),
     });

@@ -15,6 +15,12 @@ import {
 } from "./crypto/captureUnsealer.js";
 import { lazyKmsClient } from "./crypto/kmsClient.js";
 import { createSealedColumnRegistry, type SealedColumnRegistry } from "./crypto/sealedColumns.js";
+import {
+  assertIdentitySubscribersRegistered,
+  createIdentityModule,
+  type IdentityModule,
+  type IdentityOverrides,
+} from "../identity/identityModule.js";
 import { createDatabase } from "./db/client.js";
 import type { Database } from "./db/types.js";
 import { createFxService, type FxService } from "./fx/fxService.js";
@@ -24,7 +30,7 @@ import {
   createOpenExchangeRates,
   type FxProviders,
 } from "./fx/providers.js";
-import { noAuthHook, type AuthHook } from "./http/context.js";
+import { type AuthHook } from "./http/context.js";
 import { createErasureLog, type ErasureHandler, type ErasureLog } from "./storage/erasureLog.js";
 import { createFsObjectStore } from "./storage/fsObjectStore.js";
 import type { ObjectStore } from "./storage/objectStore.js";
@@ -76,6 +82,8 @@ export interface WorkerContainer extends BaseContainer {
   /** Capture-only: pg-boss as budmon_capture. */
   captureBoss: PgBoss | null;
   erasureHandler: ErasureHandler | null;
+  /** Identity's module (F-34), built after the platform members. */
+  identity: IdentityModule;
   /** A-26 (F-78b). */
   onGeneralStarted: (() => Promise<void>)[];
   /** F-132 (S-9): every role. */
@@ -89,6 +97,8 @@ export interface WorkerContainer extends BaseContainer {
 }
 
 export interface ApiContainer extends BaseContainer {
+  /** Identity's module (F-34), built after the platform members. */
+  identity: IdentityModule;
   authHook: AuthHook;
   /** F-63 (S-5): shared rate limits; F-55 also registers the coarse per-IP limit with it. */
   rateLimiter: RateLimiter;
@@ -107,6 +117,14 @@ export interface ApiContainer extends BaseContainer {
   /** F-140 (S-10). */
   objectStore: ObjectStore;
 }
+
+/** Container overrides: every member but `identity`, plus identity's own overrides (F-34). */
+export type ApiContainerOverrides = Partial<Omit<ApiContainer, "identity">> & {
+  identityOverrides?: IdentityOverrides;
+};
+export type WorkerContainerOverrides = Partial<Omit<WorkerContainer, "identity">> & {
+  identityOverrides?: IdentityOverrides;
+};
 
 function platformMetrics(): PlatformMetrics {
   // The drop callback counts into the registered metrics, which exist once registration returns.
@@ -235,7 +253,7 @@ function assertFxSubscribersRegistered<C extends { fx: FxService; registry: JobR
 
 export function createApiContainer(
   config: Config,
-  overrides: Partial<ApiContainer> = {},
+  overrides: ApiContainerOverrides = {},
 ): ApiContainer {
   const base = createCore(config, "api", overrides);
   const rateLimitKey = config.api?.rateLimitKey;
@@ -258,28 +276,44 @@ export function createApiContainer(
       signingKey: config.api?.devObjectsKey?.reveal() ?? null,
     });
   if (objectStore === null) throw new Error("object store config required");
-  return assertFxSubscribersRegistered({
+  const sealedColumns = overrides.sealedColumns ?? createSealedColumnRegistry();
+  const rateLimiter =
+    overrides.rateLimiter ??
+    createRateLimiter({
+      db: base.database,
+      // Checked above: present unless rateLimiter was given.
+      key: (rateLimitKey as NonNullable<typeof rateLimitKey>).reveal(),
+      clock: base.clock,
+    });
+  const apiSecrets =
+    overrides.apiSecrets ??
+    createApiSecretsCipher((config.api as NonNullable<Config["api"]>).apiSecretsKeys.reveal());
+  const cursors =
+    overrides.cursors ??
+    createCursorCodec({
+      // Checked above: present unless cursors was given.
+      key: (cursorKey as NonNullable<typeof cursorKey>).reveal(),
+      clock: base.clock,
+    });
+  // A-26 c: identity is built after the platform members it needs.
+  const identity = createIdentityModule(
+    { ...base, registry, queue, sealedColumns, rateLimiter, apiSecrets, cursors, objectStore },
+    overrides.identityOverrides,
+  );
+  const container = assertFxSubscribersRegistered({
     ...base,
     registry,
     boss,
     objectStore,
     queue,
+    identity,
     fx: overrides.fx ?? fxServiceFor(base, queue),
-    sealedColumns: overrides.sealedColumns ?? createSealedColumnRegistry(),
+    sealedColumns,
     close: closer(base.database, [boss]),
-    authHook: overrides.authHook ?? noAuthHook,
-    rateLimiter:
-      overrides.rateLimiter ??
-      createRateLimiter({
-        db: base.database,
-        // Checked above: present unless rateLimiter was given.
-        key: (rateLimitKey as NonNullable<typeof rateLimitKey>).reveal(),
-        clock: base.clock,
-      }),
-    moduleRoutes: overrides.moduleRoutes ?? [],
-    apiSecrets:
-      overrides.apiSecrets ??
-      createApiSecretsCipher((config.api as NonNullable<Config["api"]>).apiSecretsKeys.reveal()),
+    authHook: overrides.authHook ?? identity.authHook,
+    rateLimiter,
+    moduleRoutes: [...(overrides.moduleRoutes ?? []), ...identity.routes],
+    apiSecrets,
     captureSealer:
       overrides.captureSealer !== undefined
         ? overrides.captureSealer
@@ -288,14 +322,10 @@ export function createApiContainer(
           : createCaptureSealer(config.sealing),
     idempotency:
       overrides.idempotency ?? createIdempotency({ clock: base.clock, metrics: base.metrics }),
-    cursors:
-      overrides.cursors ??
-      createCursorCodec({
-        // Checked above: present unless cursors was given.
-        key: (cursorKey as NonNullable<typeof cursorKey>).reveal(),
-        clock: base.clock,
-      }),
+    cursors,
   });
+  assertIdentitySubscribersRegistered(container);
+  return container;
 }
 
 /** The capture role's own key (config.capture), else the sealing key any role may hold. */
@@ -323,7 +353,7 @@ function captureUnsealerFor(config: Config, metrics: PlatformMetrics): CaptureUn
 
 export function createWorkerContainer(
   config: Config,
-  overrides: Partial<WorkerContainer> = {},
+  overrides: WorkerContainerOverrides = {},
 ): WorkerContainer {
   const roles = config.worker?.roles;
   if (roles === undefined || roles.size === 0) throw new Error("worker config required");
@@ -354,19 +384,27 @@ export function createWorkerContainer(
             signingKey: null,
           })
         : null;
-  return assertFxSubscribersRegistered({
+  const erasureLog =
+    overrides.erasureLog !== undefined
+      ? overrides.erasureLog
+      : objectStore === null
+        ? null
+        : createErasureLog(objectStore);
+  const sealedColumns = overrides.sealedColumns ?? createSealedColumnRegistry();
+  // A-26 c: identity is built after the platform members it needs.
+  const identity = createIdentityModule(
+    { ...base, registry, queue, sealedColumns, objectStore, erasureLog },
+    overrides.identityOverrides,
+  );
+  const container = assertFxSubscribersRegistered({
     ...base,
     roles,
     objectStore,
-    erasureLog:
-      overrides.erasureLog !== undefined
-        ? overrides.erasureLog
-        : objectStore === null
-          ? null
-          : createErasureLog(objectStore),
+    erasureLog,
     registry,
     boss,
     queue,
+    identity,
     fx: overrides.fx ?? fxServiceFor(base, queue),
     fxProviders:
       overrides.fxProviders !== undefined
@@ -374,10 +412,11 @@ export function createWorkerContainer(
         : roles.has("general")
           ? fxProvidersFor(config)
           : null,
-    sealedColumns: overrides.sealedColumns ?? createSealedColumnRegistry(),
+    sealedColumns,
     queueBoss,
     captureBoss,
-    erasureHandler: overrides.erasureHandler ?? null,
+    erasureHandler:
+      overrides.erasureHandler !== undefined ? overrides.erasureHandler : identity.erasureHandler,
     captureSealer:
       overrides.captureSealer !== undefined
         ? overrides.captureSealer
@@ -390,7 +429,12 @@ export function createWorkerContainer(
         : roles.has("capture")
           ? captureUnsealerFor(config, base.metrics)
           : null,
-    onGeneralStarted: overrides.onGeneralStarted ?? [],
+    onGeneralStarted: [
+      ...(overrides.onGeneralStarted ?? []),
+      ...(identity.onGeneralWorkerStarted === null ? [] : [identity.onGeneralWorkerStarted]),
+    ],
     close: closer(base.database, [boss, queueBoss, captureBoss]),
   });
+  assertIdentitySubscribersRegistered(container);
+  return container;
 }
