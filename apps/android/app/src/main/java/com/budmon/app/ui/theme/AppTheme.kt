@@ -129,11 +129,11 @@ fun AppTheme(
 ) {
     val dark = isDark(setting)
     val tokens = if (dark) Tokens.Teal.Dark else Tokens.Teal.Light
-    val script = LocalConfiguration.current.locales[0]?.language
+    val language = LocalConfiguration.current.locales[0]?.language
     CompositionLocalProvider(LocalExtraColors provides tokens.extras()) {
         MaterialTheme(
             colorScheme = tokens.toScheme(dark),
-            typography = appTypography(script),
+            typography = appTypography(language),
             shapes = AppShapes,
             content = content,
         )

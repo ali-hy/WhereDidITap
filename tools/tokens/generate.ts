@@ -173,7 +173,9 @@ function renderKotlin(recipes: Recipes): string {
       const palette = buildTheme(recipes, hue);
       const set = (mode: Mode): string =>
         [...palette[mode]]
-          .map(([n, hex]) => `            ${camel(n)} = Color(0xFF${hex.slice(1).toUpperCase()}),`)
+          .map(
+            ([n, hex]) => `                ${camel(n)} = Color(0xFF${hex.slice(1).toUpperCase()}),`,
+          )
           .join("\n");
       return `    object ${pascal(theme)} {
         val Light =

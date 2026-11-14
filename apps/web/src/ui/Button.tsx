@@ -25,10 +25,10 @@ export interface ButtonProps {
 }
 
 const VARIANT: Readonly<Record<ButtonProps["variant"], string>> = {
-  primary: "bg-accent text-on-accent hover:bg-accent-hover",
+  primary: "border border-transparent bg-accent text-on-accent hover:bg-accent-hover",
   secondary: "bg-surface text-fg border border-line-strong hover:bg-surface-sunken",
   tertiary: "text-accent-fg hover:underline",
-  destructive: "bg-danger text-on-danger",
+  destructive: "border border-transparent bg-danger text-on-danger",
 };
 
 /** The same classes for a button and a link. */

@@ -75,7 +75,7 @@ export function ComboboxField(props: ComboboxFieldProps): JSX.Element {
       <Combobox.Control class="relative">
         <Combobox.Input
           id={props.id}
-          class={`${inputClasses(props.error !== undefined)} pe-12`}
+          class={`${inputClasses(props.error !== undefined)} w-full pe-12`}
           aria-describedby={describedBy(props)}
           aria-invalid={props.error === undefined ? undefined : "true"}
         />

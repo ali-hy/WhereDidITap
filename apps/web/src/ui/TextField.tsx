@@ -17,7 +17,7 @@ export function TextField(props: TextFieldProps): JSX.Element {
         id={props.id}
         type={props.type ?? "text"}
         dir={props.type === "email" ? "ltr" : undefined}
-        class={inputClasses(props.error !== undefined)}
+        class={`${inputClasses(props.error !== undefined)} w-full`}
         value={props.value}
         autocomplete={props.autocomplete}
         aria-describedby={describedBy(props)}

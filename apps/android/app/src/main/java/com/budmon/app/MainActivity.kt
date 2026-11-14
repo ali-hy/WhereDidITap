@@ -17,8 +17,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -81,13 +81,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** The canvas as the window background, and system bar icons that suit the mode. */
+    /** The canvas as the window and system bar colour, and bar icons that suit the mode. */
+    @Suppress("DEPRECATION")
     private fun applyWindowMode(setting: ThemeSetting) {
         val systemDark =
             (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         val dark = setting == ThemeSetting.DARK || (setting == ThemeSetting.SYSTEM && systemDark)
         val tokens = if (dark) Tokens.Teal.Dark else Tokens.Teal.Light
-        window.decorView.setBackgroundColor(tokens.canvas.toArgb())
+        val canvas = tokens.canvas.toArgb()
+        window.decorView.setBackgroundColor(canvas)
+        window.statusBarColor = canvas
+        window.navigationBarColor = canvas
         WindowCompat.getInsetsController(window, window.decorView).apply {
             isAppearanceLightStatusBars = !dark
             isAppearanceLightNavigationBars = !dark

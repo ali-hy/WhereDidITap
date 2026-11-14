@@ -66,7 +66,7 @@ export function renderEmail(
   c: EmailContent,
   locale: string,
 ): { subject: string; text: string; html: string } {
-  // appName comes last, so a caller can't override it;
+  // appName comes last, so a caller can't override it.
   const values = { ...c.values, appName: APP_NAME };
   const subject = renderMessage(locale, c.subjectId, values).replace(ISOLATES, "");
   const intro = renderMessage(locale, c.introId, values);

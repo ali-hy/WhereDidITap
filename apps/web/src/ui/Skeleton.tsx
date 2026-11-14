@@ -25,7 +25,7 @@ export function Skeleton(props: SkeletonProps): JSX.Element {
         <For each={rows()}>
           {() => (
             <div
-              class={`animate-pulse rounded-control bg-surface-sunken motion-reduce:animate-none ${
+              class={`animate-pulse [animation-duration:1.5s] rounded-control bg-surface-sunken motion-reduce:animate-none ${
                 props.shape === "row" ? "h-11" : "h-4"
               }`}
             />

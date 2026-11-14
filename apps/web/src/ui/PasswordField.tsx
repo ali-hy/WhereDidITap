@@ -21,7 +21,7 @@ export function PasswordField(props: PasswordFieldProps): JSX.Element {
         <input
           id={props.id}
           type={shown() ? "text" : "password"}
-          class={`${inputClasses(props.error !== undefined)} pe-24`}
+          class={`${inputClasses(props.error !== undefined)} w-full pe-24`}
           value={props.value}
           autocomplete={props.autocomplete}
           aria-describedby={describedBy(props)}

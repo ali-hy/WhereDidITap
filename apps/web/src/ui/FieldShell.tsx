@@ -21,7 +21,7 @@ export function describedBy(p: Pick<FieldProps, "id" | "hint" | "error">): strin
 /** Input classes: a 1 px `line-strong` border, 2 px `danger` with an error. */
 export function inputClasses(hasError: boolean): string {
   return [
-    "block w-full min-h-11 rounded-control bg-surface px-3 text-base text-fg placeholder:text-fg-muted",
+    "block min-h-11 rounded-control bg-surface px-3 text-base text-fg placeholder:text-fg-muted",
     hasError ? "border-2 border-danger" : "border border-line-strong hover:border-fg-muted",
   ].join(" ");
 }
