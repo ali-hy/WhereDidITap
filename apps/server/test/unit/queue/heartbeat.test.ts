@@ -70,7 +70,7 @@ function harness() {
 }
 
 describe("TP-6.10: startHeartbeat (F-79)", () => {
-  it("TP-6.10: writes the epoch seconds immediately and on each tick, every 15 s by default, to /tmp/heartbeat", () => {
+  it("TP-6.10: writes the epoch seconds immediately and on each tick, every 15 s by default, to defaultHeartbeatFile() (A-514)", () => {
     const h = harness();
 
     const heartbeat = startHeartbeat({
@@ -83,12 +83,12 @@ describe("TP-6.10: startHeartbeat (F-79)", () => {
     });
 
     expect(h.writeFile).toHaveBeenCalledTimes(1);
-    expect(h.writeFile).toHaveBeenLastCalledWith("/tmp/heartbeat", "1791547200");
+    expect(h.writeFile).toHaveBeenLastCalledWith(defaultHeartbeatFile(), "1791547200");
     expect(h.setIntervalFake).toHaveBeenCalledWith(expect.any(Function), 15_000);
     h.clock.advance({ seconds: 15 });
     h.tick();
     expect(h.writeFile).toHaveBeenCalledTimes(2);
-    expect(h.writeFile).toHaveBeenLastCalledWith("/tmp/heartbeat", "1791547215");
+    expect(h.writeFile).toHaveBeenLastCalledWith(defaultHeartbeatFile(), "1791547215");
     expect(heartbeat.last()).toBe(1791547215.75);
     heartbeat.stop();
   });
@@ -164,7 +164,8 @@ describe("TP-6.10: heartbeatFile (A-226)", () => {
     ["an empty HEARTBEAT_FILE", { HEARTBEAT_FILE: "" }, "/tmp/heartbeat"],
     ["no HEARTBEAT_FILE", {}, "/tmp/heartbeat"],
   ])("TP-6.10: %s gives %s", (_label, env: Record<string, string>, expected) => {
-    expect(heartbeatFile(env)).toBe(expected);
+    // Linux, where A-226's default is /tmp/heartbeat (TP-6.18 covers win32).
+    expect(heartbeatFile(env, { platform: "linux" })).toBe(expected);
   });
 });
 
