@@ -86,7 +86,7 @@ export async function runWorker(
   ]);
   let workers: { stop(): Promise<void> };
   try {
-    // A-226/A-514: HEARTBEAT_FILE (absolute) or defaultHeartbeatFile().
+    // A-226/A-515: HEARTBEAT_FILE (absolute) or defaultHeartbeatFile().
     workers = await startWorkers(container, handlers, { heartbeatPath: heartbeatFile(env) });
   } catch (error) {
     // A-225: within the budget, then the entry shuts telemetry down and exits 1.
