@@ -15,6 +15,7 @@ import com.budmon.app.core.network.IdempotencyKeyInterceptor
 import com.budmon.app.core.network.TraceparentInterceptor
 import com.budmon.app.core.network.apiRoot
 import com.budmon.app.core.outbox.OutboxDao
+import com.budmon.app.identity.net.AuthInterceptor
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -47,11 +48,15 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun okHttpClient(@Named("versionCode") versionCode: Int): OkHttpClient = OkHttpClient
+    fun okHttpClient(
+        @Named("versionCode") versionCode: Int,
+        authInterceptor: AuthInterceptor,
+    ): OkHttpClient = OkHttpClient
         .Builder()
         .addInterceptor(ClientHeaderInterceptor(versionCode))
         .addInterceptor(TraceparentInterceptor())
         .addInterceptor(IdempotencyKeyInterceptor())
+        .addInterceptor(authInterceptor)
         .build()
 
     @Provides
