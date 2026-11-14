@@ -1,0 +1,379 @@
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  push:
+    # A-408: whichever is the default branch; jobs compare with it where it matters.
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+env:
+  TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX: mirror.gcr.io/
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: check
+    runs-on: ubuntu-latest
+    env:
+      # Check (ii): release candidates build the integration template from migrations.
+      BUDMON_SCHEMA_MODE: ${{ (startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')) && 'migrate' || 'push' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Format, lint, type-check and unit tests
+        run: |
+          pnpm format:check
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+          pnpm test:int
+          pnpm test:coverage
+
+  contract:
+    name: contract
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the base branch's openapi.json, for F-8 and oasdiff
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: openapi.json matches the contract (TP-4.1)
+        run: |
+          pnpm contract:openapi
+          git diff --exit-code
+      - name: Contract rules (F-348)
+        working-directory: packages/contract
+        run: ./node_modules/.bin/tsx scripts/checkRules.ts
+      - name: The base branch's openapi.json
+        id: base
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if git show "origin/${BASE_REF}:packages/contract/openapi.json" > "$RUNNER_TEMP/base-openapi.json" 2>/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: API_MINOR bumped when the contract changed (F-8)
+        if: steps.base.outputs.exists == 'true'
+        working-directory: tools/ci
+        run: ./node_modules/.bin/tsx checkApiMinor.ts "$RUNNER_TEMP/base-openapi.json" "$GITHUB_WORKSPACE/packages/contract/openapi.json"
+      - name: No breaking changes against the base branch (oasdiff)
+        if: steps.base.outputs.exists == 'true'
+        env:
+          OASDIFF_VERSION: 1.33.0
+          OASDIFF_SHA256: 43a4e328e2d13ba1552d760aa68d2485c75c5621f309f6ff64ae895188345247
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/oasdiff.tgz" "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz"
+          echo "${OASDIFF_SHA256}  $RUNNER_TEMP/oasdiff.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/oasdiff.tgz" -C "$RUNNER_TEMP" oasdiff
+          "$RUNNER_TEMP/oasdiff" breaking "$RUNNER_TEMP/base-openapi.json" packages/contract/openapi.json --fail-on ERR --allow-external-refs=false --format githubactions
+
+  e2e:
+    name: e2e
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Playwright's Chromium (A-334)
+        run: pnpm --filter @budmon/web exec playwright install --with-deps chromium
+      - name: End-to-end tests, chromium and pseudo-RTL (A-334)
+        env:
+          CI: "true"
+        run: pnpm test:e2e --project=chromium --project=pseudo-rtl
+      - name: Playwright report (AC-11.2)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 14
+
+  migrations:
+    name: migrations
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the base branch's history, for the three-dot diff
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: List changed files
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: git -c core.quotePath=false diff --no-renames --name-only "origin/${BASE_REF}...HEAD" > "$RUNNER_TEMP/changed-files.txt"
+      - name: Migration files only on release branches (F-6)
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          MERGE_BACK: ${{ contains(github.event.pull_request.labels.*.name, 'hotfix-merge-back') || contains(github.event.pull_request.labels.*.name, 'infra-merge-back') }}
+        working-directory: tools/ci
+        run: |
+          args=(--branch "$HEAD_REF" --changed-files "$RUNNER_TEMP/changed-files.txt")
+          if [ "$MERGE_BACK" = "true" ]; then args+=(--hotfix-merge-back); fi
+          ./node_modules/.bin/tsx checkMigrationFiles.ts "${args[@]}"
+      - name: Pending schema changes (F-181, job summary)
+        if: ${{ !(startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')) }}
+        continue-on-error: true
+        run: |
+          pnpm --silent --filter @budmon/server db:pending-report > "$RUNNER_TEMP/pending.sql"
+          {
+            echo "## Pending schema changes"
+            if [ -s "$RUNNER_TEMP/pending.sql" ]; then
+              echo '```sql'
+              cat "$RUNNER_TEMP/pending.sql"
+              echo '```'
+            else
+              echo "No pending schema changes."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Check (i), migrations reproduce the schema (F-182)
+        if: ${{ startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/') }}
+        run: pnpm db:check-migrations
+      - name: Check (iii), risky statements in added migrations (F-184)
+        if: ${{ startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/') }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          # A failing diff stops the step (bash -e); a process substitution would hide it.
+          list="$(git -c core.quotePath=false diff --no-renames --name-only --diff-filter=A "origin/${BASE_REF}...HEAD" -- 'apps/server/drizzle/*.sql')"
+          added=()
+          if [ -n "$list" ]; then mapfile -t added <<<"$list"; fi
+          if [ "${#added[@]}" -eq 0 ]; then
+            echo "No added migrations."
+          else
+            pnpm db:check-risky "${added[@]}"
+          fi
+      - name: Check (iv), the upgrade harness (F-183)
+        if: ${{ startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/') }}
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        # A-411: the release's own upgrade folder, test/upgrade/<vN>/, from the head branch.
+        run: pnpm --filter @budmon/server test:upgrade --version "${HEAD_REF#*/}"
+      - name: Merge-back check (F-6b)
+        if: ${{ contains(github.event.pull_request.labels.*.name, 'hotfix-merge-back') || contains(github.event.pull_request.labels.*.name, 'infra-merge-back') }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HOTFIX_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'hotfix-merge-back') }}
+          INFRA_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'infra-merge-back') }}
+        working-directory: tools/ci # A-28
+        run: |
+          args=()
+          if [ "$HOTFIX_LABEL" = "true" ]; then args+=(--kind hotfix); fi
+          if [ "$INFRA_LABEL" = "true" ]; then args+=(--kind infra); fi
+          # A failing diff stops the step (bash -e); a process substitution would hide it.
+          list="$(git -C "$GITHUB_WORKSPACE" -c core.quotePath=false diff --no-renames --name-only --diff-filter=A "origin/${BASE_REF}...HEAD" -- 'apps/server/drizzle/*.sql')"
+          added=()
+          if [ -n "$list" ]; then mapfile -t added <<<"$list"; fi
+          ./node_modules/.bin/tsx checkMergeBack.ts "${args[@]}" "${added[@]}"
+
+  changes:
+    name: changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      android: ${{ steps.diff.outputs.android }}
+      infra: ${{ steps.diff.outputs.infra }}
+      infra-lint: ${{ steps.diff.outputs.infra-lint }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the base branch, for the three-dot diff
+      - name: Paths changed by the pull request
+        id: diff
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git -c core.quotePath=false diff --no-renames --name-only "origin/${BASE_REF}...HEAD" > "$RUNNER_TEMP/changed.txt"
+          # The android job (A-351).
+          if grep -qE '^(apps/android/|packages/shared/test-vectors/|packages/contract/openapi\.json|\.github/workflows/ci\.yml)' "$RUNNER_TEMP/changed.txt"; then echo "android=true" >> "$GITHUB_OUTPUT"; else echo "android=false" >> "$GITHUB_OUTPUT"; fi
+          # The infra-int job (A-391).
+          if grep -qE '^(infra/|images/|apps/server/|apps/web/|packages/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.dockerignore|\.github/workflows/ci\.yml)' "$RUNNER_TEMP/changed.txt"; then echo "infra=true" >> "$GITHUB_OUTPUT"; else echo "infra=false" >> "$GITHUB_OUTPUT"; fi
+          # The infra-lint job.
+          if grep -qE '^(infra/|images/|tools/ci/|\.github/)' "$RUNNER_TEMP/changed.txt"; then echo "infra-lint=true" >> "$GITHUB_OUTPUT"; else echo "infra-lint=false" >> "$GITHUB_OUTPUT"; fi
+
+  android:
+    name: android
+    needs: changes
+    if: needs.changes.outputs.android == 'true' || startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - name: Unit tests, lint and ktlint (A-351)
+        working-directory: apps/android
+        run: ./gradlew testDebugUnitTest lint ktlintCheck --continue
+      - name: Room schema artifact (A-486)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: room-schemas
+          path: apps/android/app/schemas/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Room schema matches the committed export (A-486)
+        working-directory: apps/android
+        run: changed="$(git status --porcelain --untracked-files=all -- app/schemas)"; if [ -n "$changed" ]; then echo "::error::Room schema export differs from the committed app/schemas/ (download the room-schemas artifact and commit it)"; echo "$changed"; exit 1; fi
+      - name: Enable KVM for the emulator
+        if: startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Emulator smoke test (TP-13.13, release candidates)
+        if: startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 34
+          arch: x86_64
+          working-directory: apps/android
+          script: ./gradlew connectedDebugAndroidTest
+      - name: Test reports
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-reports
+          path: |
+            apps/android/app/build/reports/
+            apps/android/lint-rules/build/reports/
+          retention-days: 14
+
+  infra-lint:
+    name: infra-lint
+    needs: changes
+    if: needs.changes.outputs.infra-lint == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - name: shellcheck
+        # A-436: every tracked shell script, test scripts included.
+        run: git ls-files -z -- '*.sh' infra/local/budmon-local | xargs -0 shellcheck -x
+      - name: bats (TP-15.20 to TP-15.29)
+        run: pnpm test:bats
+      - name: Compose files resolve (TP-15.16)
+        run: |
+          home="$RUNNER_TEMP/budmon-home"
+          mkdir -p "$home"
+          printf 'PUBLIC_ORIGIN=https://laptop.tailnet.ts.net\n' > "$home/site.env"
+          BUDMON_HOME="$home" BUDMON_TAG=ci docker compose --project-directory infra/local -f infra/local/compose.main.yaml -f infra/local/compose.capture.yaml --env-file infra/local/local.env config --quiet
+      - name: actionlint (A-367)
+        run: |
+          bash tools/ci/setup-actionlint.sh
+          .tools/actionlint/actionlint
+
+  infra-int:
+    name: infra-int
+    needs: changes
+    if: needs.changes.outputs.infra == 'true' || startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: The three images (A-393)
+        run: |
+          docker build -f images/server/Dockerfile -t budmon/server:tp15 .
+          docker build -f images/web/Dockerfile -t budmon/web:tp15 .
+          docker build --build-context sql=apps/server/src/platform/db/sql -t budmon/postgres:tp15 images/postgres
+      - name: The laptop stack's integration tests (A-391)
+        run: pnpm test:infra
+
+  rehearsal:
+    name: rehearsal
+    if: startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')
+    permissions:
+      contents: read
+    uses: ./.github/workflows/rehearsal.yml
+
+  rehearsal-doctored:
+    name: rehearsal-doctored
+    # A-468: on demand, for S-16 acceptance and harness or stack changes.
+    if: contains(github.event.pull_request.labels.*.name, 'rehearsal:doctored')
+    permissions:
+      contents: read
+    uses: ./.github/workflows/rehearsal.yml
+    with:
+      doctored: true
+
+  dev-smoke:
+    name: dev-smoke
+    if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: pnpm dev creates the secrets, starts Postgres and pushes the schema (TP-2.18)
+        run: tools/ci/test/dev-smoke.sh

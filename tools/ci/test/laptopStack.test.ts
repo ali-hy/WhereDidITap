@@ -1,0 +1,1338 @@
+// The laptop stack's static checks (S-15, F-170, F-175): TP-15.30, TP-15.31, TP-15.16's static
+// parts (docker compose config of both laptop files, no published Postgres port, loopback-only
+// Caddy), plus extra cases TP-15.33x for F-175's per-service settings, pg_hba.conf, pg_ident.conf,
+// postgresql.conf, local.env and the Caddyfile. IDs ending in "x" are test-architect additions, not
+// LLD test-plan IDs. `docker compose config` needs only the Docker CLI (no daemon work).
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { parse } from "yaml";
+import { outputAlternatives } from "./support/changesJob.js";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const LOCAL = path.join(ROOT, "infra/local");
+const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
+
+/** A site.env with throwaway values in valid shapes (F-175's table). */
+const SITE_ENV = `PUBLIC_ORIGIN=https://laptop.tailnet.ts.net
+CAPTURE_KEY_VERSION=projects/p/locations/europe-west3/keyRings/budmon/cryptoKeys/capture-credentials/cryptoKeyVersions/1
+GOOGLE_OAUTH_CLIENT_ID=123-oauth.apps.googleusercontent.com
+S3_ENDPOINT=https://s3.eu-central-003.backblazeb2.com
+S3_REGION=eu-central-003
+S3_BUCKET_EXPORTS=budmon-exports
+S3_BUCKET_ERASURE_LOG=budmon-erasure-log
+SENTRY_DSN=https://k@o1.ingest.sentry.io/1
+GOOGLE_SIGNIN_CLIENT_ID=123-signin.apps.googleusercontent.com
+GOOGLE_SIGNIN_ANDROID_CLIENT_IDS=
+GOOGLE_SIGNIN_CALLBACK_ORIGIN=http://localhost:8080
+GOOGLE_SIGNIN_APP_ORIGINS=https://laptop.tailnet.ts.net,http://localhost:8080
+SMTP_URL=smtp://mailpit:1025
+EMAIL_FROM=Budmon <no-reply@budmon.local>
+`;
+
+interface Service {
+  image?: string;
+  user?: string;
+  read_only?: boolean;
+  tmpfs?: unknown;
+  cap_drop?: string[];
+  security_opt?: string[];
+  restart?: string;
+  stop_grace_period?: string;
+  command?: string[] | string;
+  networks?: Record<string, { ipv4_address?: string } | null>;
+  ports?: { host_ip?: string; published?: string | number; target?: number; protocol?: string }[];
+  mem_limit?: string | number;
+  deploy?: { resources?: { limits?: { memory?: string | number } } };
+  environment?: Record<string, string | null>;
+  volumes?: {
+    type?: string;
+    source?: string;
+    target?: string;
+    read_only?: boolean;
+    bind?: { create_host_path?: boolean };
+  }[];
+  profiles?: string[];
+  logging?: { driver?: string; options?: Record<string, unknown> };
+  extra_hosts?: string[] | Record<string, string>;
+  healthcheck?: { test?: string[]; interval?: string; retries?: number };
+}
+interface ComposeConfig {
+  services?: Record<string, Service>;
+  networks?: Record<
+    string,
+    {
+      internal?: boolean;
+      external?: boolean;
+      name?: string;
+      ipam?: { config?: { subnet?: string; ip_range?: string }[] };
+    }
+  >;
+}
+
+let home: string;
+
+function composeConfig(
+  files: readonly string[],
+  env: Record<string, string | undefined> = {},
+  envFile: string = path.join(LOCAL, "local.env"),
+) {
+  const merged: Record<string, string | undefined> = {
+    ...process.env,
+    BUDMON_HOME: home,
+    BUDMON_TAG: "v1.0.0",
+    ...env,
+  };
+  for (const [k, v] of Object.entries(merged))
+    if (v === undefined) Reflect.deleteProperty(merged, k);
+  const args = ["compose", "--project-directory", LOCAL];
+  for (const f of files) args.push("-f", path.join(LOCAL, f));
+  // `migrate` is in profile tools; config omits profile-gated services otherwise.
+  args.push("--env-file", envFile, "--profile", "tools");
+  args.push("config", "--format", "json");
+  const result = spawnSync("docker", args, { encoding: "utf8", env: merged });
+  return {
+    status: result.status,
+    stderr: result.stderr,
+    config: result.status === 0 ? (JSON.parse(result.stdout) as ComposeConfig) : null,
+  };
+}
+
+let main: ComposeConfig;
+let capture: ComposeConfig;
+
+beforeAll(() => {
+  home = mkdtempSync(path.join(tmpdir(), "budmon-home-"));
+  writeFileSync(path.join(home, "site.env"), SITE_ENV, { mode: 0o600 });
+  const m = composeConfig(["compose.main.yaml"]);
+  const c = composeConfig(["compose.capture.yaml"]);
+  main = m.config ?? {};
+  capture = c.config ?? {};
+});
+afterAll(() => {
+  rmSync(home, { recursive: true, force: true });
+});
+
+const svc = (cfg: ComposeConfig, name: string): Service => {
+  const s = cfg.services?.[name];
+  if (s === undefined) throw new Error(`no service ${name}`);
+  return s;
+};
+const memory = (s: Service) => String(s.deploy?.resources?.limits?.memory ?? s.mem_limit ?? "");
+const commandOf = (s: Service) =>
+  Array.isArray(s.command) ? s.command.join(" ") : (s.command ?? "");
+
+describe("TP-15.30: the Postgres image's base equals POSTGRES_IMAGE (A-61)", () => {
+  it("TP-15.30: images/postgres/Dockerfile's first FROM is POSTGRES_IMAGE exactly, digest included", () => {
+    const pinned = /POSTGRES_IMAGE\s*=\s*"([^"]+)"/.exec(
+      read("apps/server/test/setup/postgresImage.ts"),
+    )?.[1];
+    const from = /^FROM\s+(\S+)/m.exec(read("images/postgres/Dockerfile"))?.[1];
+
+    expect(pinned).toMatch(/@sha256:[0-9a-f]{64}$/);
+    expect(from).toBe(pinned);
+  });
+});
+
+describe("TP-15.31: laptop images are digest-pinned; Mailpit matches the development stack (A-70)", () => {
+  it("TP-15.31: every image: in compose.main.yaml and compose.capture.yaml that isn't built locally is pinned by @sha256", () => {
+    for (const file of ["infra/local/compose.main.yaml", "infra/local/compose.capture.yaml"]) {
+      const doc = parse(read(file)) as { services?: Record<string, { image?: string }> };
+      for (const [name, s] of Object.entries(doc.services ?? {})) {
+        const image = s.image ?? "";
+        // F-175: budmon/<image>:<tag> are built locally by F-178 from the release.
+        if (image.startsWith("budmon/")) continue;
+        expect(image, `${file} ${name}`).toMatch(/@sha256:[0-9a-f]{64}$/);
+      }
+    }
+  });
+
+  it("TP-15.31: the mailpit references in infra/compose.yaml and compose.main.yaml are identical", () => {
+    const dev = parse(read("infra/compose.yaml")) as {
+      services?: Record<string, { image?: string }>;
+    };
+    const laptop = parse(read("infra/local/compose.main.yaml")) as {
+      services?: Record<string, { image?: string }>;
+    };
+
+    expect(laptop.services?.["mailpit"]?.image).toBeDefined();
+    expect(laptop.services?.["mailpit"]?.image).toBe(dev.services?.["mailpit"]?.image);
+  });
+});
+
+// A-449 to A-451: one rehearsal overlay per project, each checked with its own project's file.
+describe("TP-16.17: the rehearsal overlays' compose config (A-392, A-449 to A-451)", () => {
+  interface RService {
+    image?: string;
+    command?: string[] | string;
+    environment?: Record<string, string | null>;
+    volumes?: { type?: string; source?: string; target?: string; read_only?: boolean }[];
+    extra_hosts?: string[] | Record<string, string | string[]>;
+    networks?: Record<string, { aliases?: string[] } | null>;
+    logging?: { driver?: string };
+  }
+  const CA = "/w/ca";
+  const rehearsalConfig = (
+    project: "main" | "capture",
+    doctored?: string,
+    // A-492: the release the images are; null leaves the variable unset.
+    release: string | null = "v1.2.0",
+  ) => {
+    const args = [
+      "compose",
+      "--project-directory",
+      LOCAL,
+      "-p",
+      // A-478: the rehearsal's own project names, never the laptop's.
+      `budmon-rehearsal-${project}`,
+      "-f",
+      path.join(LOCAL, `compose.${project}.yaml`),
+      "-f",
+      path.join(LOCAL, `rehearsal/compose.rehearsal.${project}.yaml`),
+      // A-468: composeArgs appends the doctored overlay after the project's rehearsal overlay.
+      ...(doctored === undefined ? [] : ["-f", doctored]),
+      "--env-file",
+      path.join(LOCAL, "local.env"),
+      // migrate is in profile tools.
+      "--profile",
+      "tools",
+      "config",
+      "--format",
+      "json",
+    ];
+    const result = spawnSync("docker", args, {
+      encoding: "utf8",
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter(([k]) => k !== "REHEARSAL_RELEASE"),
+        ),
+        BUDMON_HOME: home,
+        BUDMON_TAG: "rehearsal",
+        REHEARSAL_CA_DIR: CA,
+        ...(release === null ? {} : { REHEARSAL_RELEASE: release }),
+      },
+    });
+    return {
+      status: result.status,
+      stderr: result.stderr,
+      ...(() => {
+        const parsed =
+          result.status === 0
+            ? (JSON.parse(result.stdout) as {
+                services?: Record<string, RService>;
+                networks?: Record<
+                  string,
+                  {
+                    external?: boolean;
+                    name?: string;
+                    ipam?: { config?: { subnet?: string; ip_range?: string }[] };
+                  }
+                >;
+              })
+            : {};
+        return { services: parsed.services ?? {}, networks: parsed.networks ?? {} };
+      })(),
+    };
+  };
+  const mounts = (sv: RService | undefined) =>
+    (sv?.volumes ?? []).map((v) => ({
+      source: path.posix.normalize(v.source ?? ""),
+      target: v.target,
+      readOnly: v.read_only === true,
+    }));
+  const hosts = (sv: RService | undefined): string[] => {
+    const raw = sv?.extra_hosts ?? [];
+    if (Array.isArray(raw)) return raw.map((h) => h.replace("=", ":"));
+    return Object.entries(raw).flatMap(([k, v]) =>
+      (Array.isArray(v) ? v : [v]).map((ip) => `${k}:${ip}`),
+    );
+  };
+  const COMMON = {
+    APP_ENV: "rehearsal",
+    KMS_PROVIDER: "local",
+    SENTRY_DSN: "https://rehearsal@sentry.rehearsal.invalid:8445/1",
+    NODE_EXTRA_CA_CERTS: "/run/rehearsal/ca.crt",
+  };
+  const CA_MOUNT = { source: `${CA}/ca.crt`, target: "/run/rehearsal/ca.crt", readOnly: true };
+
+  let main: ReturnType<typeof rehearsalConfig>;
+  let capture: ReturnType<typeof rehearsalConfig>;
+  beforeAll(() => {
+    main = rehearsalConfig("main");
+    capture = rehearsalConfig("capture");
+  });
+
+  it("TP-16.17 (a), (b): config of each project with its overlay exits 0", () => {
+    expect(main.status, main.stderr).toBe(0);
+    expect(capture.status, capture.stderr).toBe(0);
+  });
+
+  it.each(["api", "worker-general", "migrate"])(
+    "TP-16.17 (a): %s has the rehearsal variables and the read-only CA mount",
+    (name) => {
+      const sv = main.services[name];
+
+      expect(sv?.environment).toMatchObject(COMMON);
+      expect(mounts(sv)).toContainEqual(CA_MOUNT);
+    },
+  );
+
+  it("TP-16.17 (a): worker-general has the three FX URLs of F-195 step 4", () => {
+    expect(main.services["worker-general"]?.environment).toMatchObject({
+      FX_PRIMARY_BASE_URL: "https://fx.rehearsal.invalid:8444/oxr",
+      FX_FALLBACK_BASE_URL: "https://fx.rehearsal.invalid:8444/fawaz/{date}",
+      FX_FALLBACK_MIRROR_URL: "https://fx.rehearsal.invalid:8444/mirror/{date}",
+    });
+  });
+
+  it("TP-16.17 (a): s3 is the pinned S3 test image over TLS on :7070, aliased s3.rehearsal.invalid on egress", () => {
+    const s3 = main.services["s3"];
+    const command = Array.isArray(s3?.command) ? s3.command : [s3?.command ?? ""];
+
+    expect(s3?.image).toBe(
+      "versity/versitygw:v1.8.0@sha256:30292fc2eeacc67a36993b01f7a7a5e3361a19cced0e80c1d71cfa2a4b0a2499",
+    );
+    for (const part of ["--port", ":7070", "--cert", "--key", "posix", "/data"]) {
+      expect(command).toContain(part);
+    }
+    expect(s3?.networks?.["egress"]?.aliases).toContain("s3.rehearsal.invalid");
+  });
+
+  it("TP-16.17 (a): no main service mounts the capture key or sets CAPTURE_PRIVATE_KEY_FILE; no worker-capture", () => {
+    for (const [name, sv] of Object.entries(main.services)) {
+      for (const m of mounts(sv)) expect(m.source, name).not.toMatch(/^\/w\/capture-key(\/|$)/);
+      expect(sv.environment ?? {}, name).not.toHaveProperty("CAPTURE_PRIVATE_KEY_FILE");
+    }
+    expect(main.services).not.toHaveProperty("worker-capture");
+  });
+
+  it("TP-16.17 (b): worker-capture has the variables, the capture key and CA mounts, and the five extra_hosts", () => {
+    const wc = capture.services["worker-capture"];
+
+    expect(wc?.environment).toMatchObject({
+      ...COMMON,
+      CAPTURE_PRIVATE_KEY_FILE: "/run/rehearsal-capture/CAPTURE_PRIVATE_KEY",
+    });
+    expect(mounts(wc)).toContainEqual({
+      source: "/w/capture-key/CAPTURE_PRIVATE_KEY",
+      target: "/run/rehearsal-capture/CAPTURE_PRIVATE_KEY",
+      readOnly: true,
+    });
+    expect(mounts(wc)).toContainEqual(CA_MOUNT);
+    expect(hosts(wc)).toEqual(
+      expect.arrayContaining([
+        "oauth2.googleapis.com:host-gateway",
+        "www.googleapis.com:host-gateway",
+        "gmail.googleapis.com:host-gateway",
+        "pubsub.googleapis.com:host-gateway",
+        "sentry.rehearsal.invalid:host-gateway",
+      ]),
+    );
+  });
+
+  // A-505: the overlay doesn't replace the laptop's networks, so the ranges hold in the rehearsal.
+  it("TP-16.17 (a) (A-505): main's edge and data ipam.config equal TP-15.56 (b)'s", () => {
+    expect(main.networks["edge"]?.ipam?.config).toStrictEqual([
+      { subnet: "172.30.41.0/24", ip_range: "172.30.41.128/25" },
+    ]);
+    expect(main.networks["data"]?.ipam?.config).toStrictEqual([
+      { subnet: "172.30.40.0/24", ip_range: "172.30.40.128/25" },
+    ]);
+  });
+
+  it("TP-16.17 (A-478): in both projects capture-db is external budmon_rehearsal_capture_db, and no network is named budmon_capture_db", () => {
+    for (const c of [main, capture]) {
+      expect(c.networks["capture-db"]).toMatchObject({
+        external: true,
+        name: "budmon_rehearsal_capture_db",
+      });
+      expect(Object.values(c.networks).map((n) => n.name)).not.toContain("budmon_capture_db");
+    }
+  });
+
+  it.each([
+    ["main", "api"],
+    ["main", "worker-general"],
+    ["main", "migrate"],
+    ["capture", "worker-capture"],
+  ] as const)(
+    "TP-16.17 (A-492): %s/%s has BUDMON_RELEASE=v1.2.0 and a budmon/<image>:rehearsal image",
+    (project, name) => {
+      const sv = (project === "main" ? main : capture).services[name];
+
+      expect(sv?.environment?.["BUDMON_RELEASE"]).toBe("v1.2.0");
+      expect(sv?.image).toMatch(/^budmon\/[a-z]+:rehearsal$/);
+    },
+  );
+
+  it("TP-16.17 (d) (A-492): main's config without REHEARSAL_RELEASE fails naming it", () => {
+    const r = rehearsalConfig("main", undefined, null);
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("REHEARSAL_RELEASE is not set");
+  });
+
+  it("TP-16.17 (c): rehearsal/ holds exactly the two overlays", () => {
+    expect(readdirSync(path.join(LOCAL, "rehearsal")).sort()).toEqual([
+      "compose.rehearsal.capture.yaml",
+      "compose.rehearsal.main.yaml",
+    ]);
+  });
+
+  // A-468: the test-architect's doctored overlays merge, and each changes what its step checks.
+  describe("TP-16.17x: the doctored overlays (A-468)", () => {
+    const DOCTORED = path.join(ROOT, "tools/rehearsal/test/doctored");
+    const config = (name: string) => {
+      const file = readdirSync(DOCTORED).find(
+        (f) => f.startsWith(`${name}.`) && f.endsWith(".yaml"),
+      );
+      if (file === undefined) throw new Error(`no doctored overlay ${name}`);
+      const project = file.endsWith(".capture.yaml") ? "capture" : "main";
+      return rehearsalConfig(project, path.join(DOCTORED, file));
+    };
+
+    it("TP-16.17x: expectations.json names exactly the five overlays with A-468's steps, one file each", () => {
+      const expectations = JSON.parse(
+        readFileSync(path.join(DOCTORED, "expectations.json"), "utf8"),
+      ) as Record<string, string>;
+
+      expect(expectations).toEqual({
+        "api-stage-env": "no-stage-setting",
+        "api-capture-secret": "cross-role-secrets",
+        "api-capture-key": "cross-role-secrets",
+        "capture-on-data": "cross-role-secrets",
+        "mailpit-logged": "mailpit-quiet",
+      });
+      expect(
+        readdirSync(DOCTORED)
+          .filter((f) => f.endsWith(".yaml"))
+          .sort(),
+      ).toEqual(
+        [
+          "api-capture-key.main.yaml",
+          "api-capture-secret.main.yaml",
+          "api-stage-env.main.yaml",
+          "capture-on-data.capture.yaml",
+          "mailpit-logged.main.yaml",
+        ].sort(),
+      );
+    });
+
+    it("TP-16.17x: api-stage-env sets INFRA_STAGE=0 on api", () => {
+      const c = config("api-stage-env");
+
+      expect(c.status, c.stderr).toBe(0);
+      expect(c.services["api"]?.environment?.["INFRA_STAGE"]).toBe("0");
+    });
+
+    it("TP-16.17x: api-capture-secret mounts secrets/capture into api", () => {
+      const c = config("api-capture-secret");
+
+      expect(c.status, c.stderr).toBe(0);
+      expect(mounts(c.services["api"]).map((m) => m.source)).toContain(
+        path.posix.join(home, "secrets/capture"),
+      );
+    });
+
+    it("TP-16.17x: api-capture-key mounts the capture private key into api", () => {
+      const c = config("api-capture-key");
+
+      expect(c.status, c.stderr).toBe(0);
+      expect(mounts(c.services["api"]).map((m) => m.source)).toContain(
+        "/w/capture-key/CAPTURE_PRIVATE_KEY",
+      );
+    });
+
+    it("TP-16.17x: capture-on-data attaches worker-capture to data, external budmon-rehearsal-main_data", () => {
+      const c = config("capture-on-data");
+
+      expect(c.status, c.stderr).toBe(0);
+      expect(Object.keys(c.services["worker-capture"]?.networks ?? {})).toContain("data");
+      expect(c.networks["data"]).toMatchObject({
+        external: true,
+        name: "budmon-rehearsal-main_data",
+      });
+    });
+
+    it("TP-16.17x: mailpit-logged leaves mailpit without the none logging driver", () => {
+      const c = config("mailpit-logged");
+
+      expect(c.status, c.stderr).toBe(0);
+      expect(c.services["mailpit"]?.logging?.driver ?? "default").not.toBe("none");
+    });
+  });
+});
+
+describe("TP-15.16: compose config and published ports", () => {
+  it("TP-15.16: docker compose config of both laptop files with local.env succeeds", () => {
+    const both = composeConfig(["compose.main.yaml", "compose.capture.yaml"]);
+
+    expect(both.status, both.stderr).toBe(0);
+  });
+
+  it("TP-15.16: postgres publishes no port", () => {
+    expect(svc(main, "postgres").ports ?? []).toEqual([]);
+  });
+
+  it("TP-15.16: caddy publishes only 127.0.0.1:8080:8080", () => {
+    const ports = (svc(main, "caddy").ports ?? []).map(
+      (p) => `${p.host_ip ?? ""}:${String(p.published)}:${String(p.target)}`,
+    );
+
+    expect(ports).toEqual(["127.0.0.1:8080:8080"]);
+  });
+
+  it("TP-15.33x (A-2): mailpit publishes only 127.0.0.1:8025:8025, and no other service publishes anything", () => {
+    const published = Object.entries({ ...main.services, ...capture.services }).flatMap(
+      ([name, s]) =>
+        (s.ports ?? []).map(
+          (p) => `${name} ${p.host_ip ?? ""}:${String(p.published)}:${String(p.target)}`,
+        ),
+    );
+
+    expect(published.sort()).toEqual(["caddy 127.0.0.1:8080:8080", "mailpit 127.0.0.1:8025:8025"]);
+  });
+
+  it("TP-15.27: an unset BUDMON_TAG makes compose config fail", () => {
+    expect(composeConfig(["compose.main.yaml"], { BUDMON_TAG: undefined }).status).not.toBe(0);
+  });
+});
+
+const APP = {
+  api: {
+    uid: "10001",
+    grace: "15s",
+    mem: 512,
+    cmd: "node --import ./dist/main/instrument.js dist/main/api.js",
+  },
+  "worker-general": {
+    uid: "10002",
+    grace: "45s",
+    mem: 384,
+    cmd: "node --import ./dist/main/instrument.js dist/main/worker.js",
+  },
+  migrate: { uid: "10004", grace: undefined, mem: 256, cmd: "node dist/main/migrate.js" },
+} as const;
+
+/** Compose resolves memory to bytes (or keeps the string); compare in MiB. */
+const mib = (v: string) => {
+  const m = /^(\d+)\s*([kmg]?)b?$/i.exec(v.trim());
+  if (m === null) return Number.NaN;
+  const n = Number(m[1]);
+  const unit = (m[2] ?? "").toLowerCase();
+  return unit === "g" ? n * 1024 : unit === "m" ? n : unit === "k" ? n / 1024 : n / 1048576;
+};
+
+describe("TP-15.33x: F-175 per-service settings (main project)", () => {
+  it.each(Object.entries(APP))(
+    "TP-15.33x: %s is read-only with /tmp tmpfs, no capabilities, no-new-privileges, its own UID, its command and memory",
+    (name, want) => {
+      const s = svc(main, name);
+
+      expect(s.read_only).toBe(true);
+      expect(JSON.stringify(s.tmpfs)).toContain("/tmp");
+      expect(s.cap_drop).toEqual(["ALL"]);
+      expect(s.security_opt).toContain("no-new-privileges:true");
+      expect(String(s.user).split(":")[0]).toBe(want.uid);
+      expect(commandOf(s)).toBe(want.cmd);
+      expect(mib(memory(s))).toBe(want.mem);
+      if (want.grace !== undefined) expect(s.stop_grace_period).toBe(want.grace);
+    },
+  );
+
+  it("TP-15.33x: api and worker-general restart unless-stopped; migrate is in profile tools", () => {
+    expect(svc(main, "api").restart).toBe("unless-stopped");
+    expect(svc(main, "worker-general").restart).toBe("unless-stopped");
+    expect(svc(main, "migrate").profiles).toEqual(["tools"]);
+  });
+
+  it("TP-15.33x: api env: DB_HOST postgres, DB_USER budmon_app, HOST 0.0.0.0, PORT 3000, BUDMON_RELEASE = the tag, TRUSTED_PROXY from local.env", () => {
+    expect(svc(main, "api").environment).toMatchObject({
+      DB_HOST: "postgres",
+      DB_USER: "budmon_app",
+      HOST: "0.0.0.0",
+      PORT: "3000",
+      BUDMON_RELEASE: "v1.0.0",
+      TRUSTED_PROXY: "172.30.41.2",
+    });
+  });
+
+  it("TP-15.33x: worker-general env: DB_USER budmon_app, QUEUE_DB_USER budmon_queue, WORKER_ROLES general; migrate: DB_USER budmon_migrator", () => {
+    expect(svc(main, "worker-general").environment).toMatchObject({
+      DB_HOST: "postgres",
+      DB_USER: "budmon_app",
+      QUEUE_DB_USER: "budmon_queue",
+      WORKER_ROLES: "general",
+    });
+    expect(svc(main, "migrate").environment).toMatchObject({
+      DB_HOST: "postgres",
+      DB_USER: "budmon_migrator",
+    });
+  });
+
+  it("TP-15.33x: each application service's secrets are its own directory, read-only, at /run/secrets", () => {
+    const dirs: Record<string, string> = {
+      api: "secrets/main/api",
+      "worker-general": "secrets/main/worker-general",
+      migrate: "secrets/main/migrate",
+      postgres: "secrets/main/postgres",
+    };
+    for (const [name, dir] of Object.entries(dirs)) {
+      const mount = (svc(main, name).volumes ?? []).find((v) => v.target === "/run/secrets");
+      expect(mount?.source, name).toBe(path.join(home, dir));
+      expect(mount?.read_only, name).toBe(true);
+    }
+  });
+
+  it("TP-15.33x: caddy runs as 10005 on edge at CADDY_EDGE_IP with 128m, mounting maintenance read-only", () => {
+    const c = svc(main, "caddy");
+
+    expect(String(c.user).split(":")[0]).toBe("10005");
+    expect(c.networks?.["edge"]?.ipv4_address).toBe("172.30.41.2");
+    expect(mib(memory(c))).toBe(128);
+    const m = (c.volumes ?? []).find((v) => v.target === "/srv/maintenance");
+    expect(m?.source).toBe(path.join(home, "maintenance"));
+    expect(m?.read_only).toBe(true);
+  });
+
+  it("TP-15.33x: postgres: data and capture-db addresses, 1g, the pg bind mount without host-path creation, BUDMON_LISTEN_ADDRESSES", () => {
+    const p = svc(main, "postgres");
+
+    expect(p.networks?.["data"]?.ipv4_address).toBe("172.30.40.10");
+    expect(p.networks?.["capture-db"]?.ipv4_address).toBe("172.30.42.2");
+    expect(mib(memory(p))).toBe(1024);
+    const data = (p.volumes ?? []).find((v) => v.target === "/var/lib/postgresql/data");
+    expect(data?.source).toBe(path.join(home, "pg"));
+    // Read from the file itself: some Compose versions drop create_host_path from `config`.
+    const raw = parse(read("infra/local/compose.main.yaml")) as {
+      services?: Record<string, { volumes?: Service["volumes"] }>;
+    };
+    const rawData = (raw.services?.["postgres"]?.volumes ?? []).find(
+      (v) => typeof v === "object" && v.target === "/var/lib/postgresql/data",
+    );
+    expect(rawData?.bind?.create_host_path).toBe(false);
+    expect(p.environment?.["BUDMON_LISTEN_ADDRESSES"]).toBe("172.30.40.10,172.30.42.2");
+  });
+
+  it("TP-15.33x (A-2): mailpit: --quiet, logging none, user 10006, data and mail-ui networks, 128m, no secrets", () => {
+    const m = svc(main, "mailpit");
+
+    expect(commandOf(m)).toBe("--quiet");
+    expect(m.logging?.driver).toBe("none");
+    expect(String(m.user).split(":")[0]).toBe("10006");
+    expect(Object.keys(m.networks ?? {}).sort()).toEqual(["data", "mail-ui"]);
+    expect(mib(memory(m))).toBe(128);
+    expect((m.volumes ?? []).filter((v) => v.target === "/run/secrets")).toEqual([]);
+  });
+
+  it("TP-15.33x: networks: edge and egress bridges, data internal, mail-ui, capture-db external budmon_capture_db", () => {
+    const n = main.networks ?? {};
+
+    expect(n["data"]?.internal).toBe(true);
+    expect(n["edge"]?.internal ?? false).toBe(false);
+    expect(n["egress"]?.internal ?? false).toBe(false);
+    expect(n["mail-ui"]).toBeDefined();
+    expect(n["capture-db"]?.external).toBe(true);
+    expect(n["capture-db"]?.name).toBe("budmon_capture_db");
+  });
+
+  it("TP-15.33x: service networks: api edge+data+egress, worker-general data+egress, migrate data", () => {
+    expect(Object.keys(svc(main, "api").networks ?? {}).sort()).toEqual(["data", "edge", "egress"]);
+    expect(Object.keys(svc(main, "worker-general").networks ?? {}).sort()).toEqual([
+      "data",
+      "egress",
+    ]);
+    expect(Object.keys(svc(main, "migrate").networks ?? {}).sort()).toEqual(["data"]);
+  });
+});
+
+// A-502 (5): every container's logs are bounded (json-file, 10 MB x 5); Mailpit logs nothing.
+describe("TP-15.51: Compose logging (A-502 (5))", () => {
+  const BOUNDED = { driver: "json-file", options: { "max-size": "10m", "max-file": "5" } };
+
+  it.each([["caddy"], ["api"], ["worker-general"], ["migrate"], ["postgres"]])(
+    "TP-15.51: main's %s logs through json-file, max-size 10m, max-file 5",
+    (name) => {
+      expect(svc(main, name).logging).toStrictEqual(BOUNDED);
+    },
+  );
+
+  it("TP-15.51: capture's worker-capture logs through json-file, max-size 10m, max-file 5", () => {
+    expect(svc(capture, "worker-capture").logging).toStrictEqual(BOUNDED);
+  });
+
+  it("TP-15.51: mailpit's logging is exactly driver none", () => {
+    expect(svc(main, "mailpit").logging).toStrictEqual({ driver: "none" });
+  });
+});
+
+// ---- TP-15.56 (A-505): every static address lies outside its network's dynamic ip_range ----
+
+/** An IPv4 address as a 32-bit number, or null. */
+function ip4(text: string): number | null {
+  const parts = text.split(".");
+  if (parts.length !== 4 || !parts.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255))
+    return null;
+  return parts.reduce((n, p) => n * 256 + Number(p), 0);
+}
+
+interface Cidr {
+  base: number;
+  prefix: number;
+  /** Zero host bits. */
+  aligned: boolean;
+}
+
+function cidr(text: string | undefined): Cidr | null {
+  const [address, bits] = (text ?? "").split("/");
+  const base = ip4(address ?? "");
+  const prefix = Number(bits);
+  if (base === null || !Number.isInteger(prefix) || prefix < 0 || prefix > 32) return null;
+  const size = 2 ** (32 - prefix);
+  return { base, prefix, aligned: base % size === 0 };
+}
+
+function inside(address: number, net: Cidr): boolean {
+  const size = 2 ** (32 - net.prefix);
+  return address >= net.base - (net.base % size) && address < net.base - (net.base % size) + size;
+}
+
+/**
+ * The TP-15.56 (c) check over resolved Compose configurations: one violation per broken rule, each
+ * naming the service and network, or the network.
+ */
+function addressViolations(configs: readonly ComposeConfig[]): string[] {
+  const violations: string[] = [];
+  for (const config of configs) {
+    for (const [name, network] of Object.entries(config.networks ?? {})) {
+      const members = Object.entries(config.services ?? {}).flatMap(([service, sv]) =>
+        sv.networks !== undefined && name in sv.networks
+          ? [{ service, address: sv.networks[name]?.ipv4_address }]
+          : [],
+      );
+      if (network.external === true) {
+        for (const m of members) {
+          if (m.address === undefined) violations.push(`${m.service} on ${name}: no ipv4_address`);
+        }
+        continue;
+      }
+      const statics = members.filter((m) => m.address !== undefined);
+      if (statics.length === 0) continue;
+      const entries = network.ipam?.config ?? [];
+      const entry = entries[0];
+      if (entries.length !== 1 || entry?.subnet === undefined || entry.ip_range === undefined) {
+        violations.push(`${name}: needs exactly one ipam.config entry with subnet and ip_range`);
+        continue;
+      }
+      const subnet = cidr(entry.subnet);
+      const range = cidr(entry.ip_range);
+      if (subnet === null || !subnet.aligned) {
+        violations.push(`${name}: subnet ${entry.subnet} isn't a CIDR`);
+        continue;
+      }
+      if (
+        range === null ||
+        !range.aligned ||
+        range.prefix < subnet.prefix ||
+        !inside(range.base, subnet)
+      ) {
+        violations.push(`${name}: ip_range ${entry.ip_range} isn't a range inside ${entry.subnet}`);
+        continue;
+      }
+      for (const m of statics) {
+        const address = ip4(m.address ?? "");
+        if (address === null || !inside(address, subnet) || inside(address, range)) {
+          violations.push(
+            `${m.service} on ${name}: ${String(m.address)} isn't in ${entry.subnet} outside ${entry.ip_range}`,
+          );
+        }
+      }
+    }
+  }
+  return violations;
+}
+
+describe("TP-15.56: static addresses lie outside each network's ip_range (A-505)", () => {
+  const CLEAN = {
+    EDGE_IP_RANGE: undefined,
+    DATA_IP_RANGE: undefined,
+    CADDY_EDGE_IP: undefined,
+    PG_DATA_IP: undefined,
+  };
+  const both = (env: Record<string, string | undefined> = {}) => {
+    const m = composeConfig(["compose.main.yaml"], { ...CLEAN, ...env });
+    const c = composeConfig(["compose.capture.yaml"], { ...CLEAN, ...env });
+    expect(m.status, m.stderr).toBe(0);
+    expect(c.status, c.stderr).toBe(0);
+    return [m.config ?? {}, c.config ?? {}];
+  };
+
+  it("TP-15.56 (a): local.env holds EDGE_IP_RANGE and DATA_IP_RANGE", () => {
+    const env = read("infra/local/local.env");
+
+    expect(env).toMatch(/^EDGE_IP_RANGE=172\.30\.41\.128\/25$/m);
+    expect(env).toMatch(/^DATA_IP_RANGE=172\.30\.40\.128\/25$/m);
+  });
+
+  it("TP-15.56 (b): edge's and data's resolved ipam.config are exactly their subnet and ip_range", () => {
+    const [m] = both();
+
+    expect(m?.networks?.["edge"]?.ipam?.config).toStrictEqual([
+      { subnet: "172.30.41.0/24", ip_range: "172.30.41.128/25" },
+    ]);
+    expect(m?.networks?.["data"]?.ipam?.config).toStrictEqual([
+      { subnet: "172.30.40.0/24", ip_range: "172.30.40.128/25" },
+    ]);
+  });
+
+  it("TP-15.56 (c): no violation over both files: ranges inside subnets, static addresses outside ranges, capture-db all static", () => {
+    expect(addressViolations(both())).toEqual([]);
+  });
+
+  it.each([
+    ["CADDY_EDGE_IP=172.30.41.130", { CADDY_EDGE_IP: "172.30.41.130" }, /^caddy on edge:/],
+    ["PG_DATA_IP=172.30.40.200", { PG_DATA_IP: "172.30.40.200" }, /^postgres on data:/],
+    ["EDGE_IP_RANGE=172.30.40.128/25", { EDGE_IP_RANGE: "172.30.40.128/25" }, /^edge: ip_range/],
+  ])("TP-15.56 (d): with %s the check reports exactly one violation", (_label, env, pattern) => {
+    const violations = addressViolations(both(env));
+
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatch(pattern);
+  });
+
+  it.each([["EDGE_IP_RANGE"], ["DATA_IP_RANGE"]])(
+    "TP-15.56 (e): compose config with a local.env lacking %s fails naming it",
+    (key) => {
+      const dir = mkdtempSync(path.join(tmpdir(), "budmon-tp15-56-"));
+      try {
+        const copy = path.join(dir, "local.env");
+        writeFileSync(
+          copy,
+          read("infra/local/local.env")
+            .split("\n")
+            .filter((l) => !l.startsWith(`${key}=`))
+            .join("\n"),
+        );
+        const r = composeConfig(["compose.main.yaml"], CLEAN, copy);
+
+        expect(r.status).not.toBe(0);
+        expect(r.stderr).toContain(`${key} is not set`);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
+describe("TP-15.33x: the capture project (F-175)", () => {
+  it("TP-15.33x: worker-capture: UID 10003, 45s grace, 384m, its command, WORKER_ROLES capture, verify-full to db.budmon.internal", () => {
+    const w = svc(capture, "worker-capture");
+
+    expect(String(w.user).split(":")[0]).toBe("10003");
+    expect(w.stop_grace_period).toBe("45s");
+    expect(mib(memory(w))).toBe(384);
+    expect(commandOf(w)).toBe("node --import ./dist/main/instrument.js dist/main/worker.js");
+    expect(w.read_only).toBe(true);
+    expect(w.cap_drop).toEqual(["ALL"]);
+    expect(w.environment).toMatchObject({
+      DB_HOST: "db.budmon.internal",
+      DB_USER: "budmon_capture",
+      WORKER_ROLES: "capture",
+      DB_SSLMODE: "verify-full",
+      DB_SSL_ROOT_CERT_FILE: "/run/secrets/DB_CA_CERT",
+      BUDMON_RELEASE: "v1.0.0",
+    });
+    expect(JSON.stringify(w.extra_hosts)).toContain("db.budmon.internal");
+    expect(JSON.stringify(w.extra_hosts)).toContain("172.30.42.2");
+    expect(w.networks?.["capture-db"]?.ipv4_address).toBe("172.30.42.4");
+  });
+
+  it("TP-15.33x: worker-capture has no proxy variables and no OTLP endpoint", () => {
+    const keys = Object.keys(svc(capture, "worker-capture").environment ?? {});
+
+    // Egress proxy variables (TRUSTED_PROXY, from local.env, is Fastify's and not one of them).
+    expect(
+      keys.filter((k) => /^(https?_proxy|no_proxy|all_proxy)$|OTEL_EXPORTER_OTLP/i.test(k)),
+    ).toEqual([]);
+  });
+});
+
+describe("TP-15.33x: Postgres configuration files (F-170, F-175)", () => {
+  it("TP-15.33x: pg_hba.conf is exactly F-175's rules", () => {
+    const rules = read("infra/local/postgres/pg_hba.conf")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l !== "" && !l.startsWith("#"))
+      .map((l) => l.split(/\s+/).join(" "));
+
+    expect(rules).toEqual([
+      "local all budmon_admin peer map=local_admin",
+      "local all all reject",
+      "hostssl budmon budmon_capture 172.30.42.4/32 scram-sha-256",
+      "host budmon budmon_app,budmon_queue,budmon_migrator 172.30.40.0/24 scram-sha-256",
+      "host budmon_restore budmon_migrator 172.30.40.0/24 scram-sha-256",
+      "host all all 0.0.0.0/0 reject",
+      "hostssl all all 0.0.0.0/0 reject",
+    ]);
+  });
+
+  it("TP-15.33x: pg_ident.conf maps postgres to budmon_admin", () => {
+    const lines = read("infra/local/postgres/pg_ident.conf")
+      .split("\n")
+      .map((l) => l.trim().split(/\s+/).join(" "))
+      .filter((l) => l !== "" && !l.startsWith("#"));
+
+    expect(lines).toEqual(["local_admin postgres budmon_admin"]);
+  });
+
+  it("TP-15.33x: postgresql.conf has F-170's logging, TLS, WAL and extension settings", () => {
+    const conf = read("infra/local/postgres/postgresql.conf");
+    const settings = Object.fromEntries(
+      conf
+        .split("\n")
+        .map((l) => l.replace(/#.*$/, "").trim())
+        .filter((l) => l.includes("="))
+        .map((l) => {
+          const i = l.indexOf("=");
+          return [
+            l.slice(0, i).trim(),
+            l
+              .slice(i + 1)
+              .trim()
+              .replace(/^'(.*)'$/, "$1"),
+          ];
+        }),
+    );
+
+    expect(settings).toMatchObject({
+      log_error_verbosity: "terse",
+      log_min_error_statement: "panic",
+      log_statement: "none",
+      log_parameter_max_length: "0",
+      log_parameter_max_length_on_error: "0",
+      log_destination: "stderr",
+      password_encryption: "scram-sha-256",
+      ssl: "on",
+      ssl_cert_file: "/run/secrets/TLS_CERT",
+      ssl_key_file: "/run/secrets/TLS_KEY",
+      max_connections: "100",
+      wal_level: "replica",
+      archive_mode: "off",
+      shared_preload_libraries: "pg_stat_statements",
+      "pg_stat_statements.track_utility": "off",
+      shared_buffers: "512MB",
+    });
+  });
+});
+
+describe("TP-15.33x: local.env (F-175)", () => {
+  it("TP-15.33x: local.env holds F-175's non-secret values", () => {
+    const env = Object.fromEntries(
+      read("infra/local/local.env")
+        .split("\n")
+        .filter((l) => /^[A-Z_]+=/.test(l))
+        .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
+    );
+
+    expect(env).toMatchObject({
+      EDGE_SUBNET: "172.30.41.0/24",
+      CADDY_EDGE_IP: "172.30.41.2",
+      TRUSTED_PROXY: "172.30.41.2",
+      DATA_SUBNET: "172.30.40.0/24",
+      PG_DATA_IP: "172.30.40.10",
+      CAPTURE_DB_SUBNET: "172.30.42.0/29",
+      PG_CAPTURE_IP: "172.30.42.2",
+      WORKER_CAPTURE_IP: "172.30.42.4",
+      APP_ENV: "production",
+      KMS_PROVIDER: "gcp",
+      FX_PROVIDER: "live",
+      OBJECT_STORE_KIND: "s3",
+      DB_NAME: "budmon",
+      DB_PORT: "5432",
+      GOOGLE_OAUTH_REDIRECT_ORIGIN: "http://localhost:8080",
+    });
+  });
+
+  it("TP-15.33x: no secret-looking key is committed in local.env", () => {
+    expect(read("infra/local/local.env")).not.toMatch(/PASSWORD|SECRET|_KEY=|TOKEN/);
+  });
+});
+
+describe("TP-15.33x: the Caddyfile (F-175)", () => {
+  it("TP-15.33x: auto_https off, site :8080, the API proxy and the exact CSP", () => {
+    const caddy = read("infra/local/Caddyfile");
+
+    expect(caddy).toMatch(/auto_https\s+off/);
+    expect(caddy).toMatch(/^:8080\s*\{/m);
+    expect(caddy).toMatch(/reverse_proxy\s+api:3000/);
+    expect(caddy).toContain(
+      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://*.ingest.de.sentry.io https://*.ingest.sentry.io; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    );
+    expect(caddy).toContain(
+      '{"defined":true,"code":"SERVICE_UNAVAILABLE","status":503,"message":"Service unavailable","data":{"outcome":"not_applied"}}',
+    );
+    expect(caddy).toMatch(/request>uri\s+regexp\s+"?\\\?\.\*\$"?\s+""/);
+    expect(caddy).toMatch(/request>headers\s+delete/);
+  });
+});
+
+describe("TP-15.16: the files exist", () => {
+  it.each([
+    ["infra/local/budmon-local"],
+    ["infra/local/gcp-bootstrap.sh"],
+    ["infra/local/compose.main.yaml"],
+    ["infra/local/compose.capture.yaml"],
+    ["infra/local/local.env"],
+    ["infra/local/Caddyfile"],
+    ["images/server/Dockerfile"],
+    ["images/web/Dockerfile"],
+    ["images/postgres/Dockerfile"],
+    ["images/postgres/budmon-entrypoint.sh"],
+    ["infra/runbooks/stage0-laptop.md"],
+  ])("TP-15.16: %s exists", (rel) => {
+    expect(existsSync(path.join(ROOT, rel))).toBe(true);
+  });
+});
+
+describe("TP-15.16: shellcheck and the infra-lint job", () => {
+  // A-436: every tracked shell script, as the infra-lint step lists them.
+  it("TP-15.16: shellcheck -x passes on every tracked *.sh and infra/local/budmon-local", () => {
+    const listed = spawnSync("git", ["ls-files", "-z", "--", "*.sh", "infra/local/budmon-local"], {
+      cwd: ROOT,
+      encoding: "utf8",
+    });
+    const files = listed.stdout.split("\0").filter((f) => f !== "");
+    expect(files).toContain("infra/local/budmon-local");
+    expect(files).toContain("infra/local/test/run-integration.sh");
+
+    const result = spawnSync("shellcheck", ["-x", ...files], { cwd: ROOT, encoding: "utf8" });
+
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+  });
+
+  it("TP-15.16: ci.yml's infra-lint job runs shellcheck, pnpm test:bats, compose config and actionlint", () => {
+    const wf = parse(read(".github/workflows/ci.yml")) as {
+      jobs?: Record<string, { steps?: { run?: unknown }[] }>;
+    };
+    const runs = (wf.jobs?.["infra-lint"]?.steps ?? [])
+      .map((s) => (typeof s.run === "string" ? s.run : ""))
+      .join("\n");
+
+    expect(wf.jobs?.["infra-lint"]).toBeDefined();
+    expect(runs).toMatch(/shellcheck/);
+    expect(runs).toMatch(/pnpm test:bats/);
+    expect(runs).toMatch(/docker compose .*compose\.main\.yaml.*compose\.capture\.yaml.*config/);
+    expect(runs).toMatch(/actionlint/);
+  });
+});
+
+/** The text after the Dockerfile's last FROM matching `from`. */
+function lastStage(rel: string, from: RegExp): string {
+  const text = read(rel);
+  const starts = [...text.matchAll(/^FROM .*$/gm)].filter((m) => from.test(m[0]));
+  const last = starts.at(-1);
+  return last === undefined ? "" : text.slice(last.index);
+}
+
+/** The Caddyfile's top-level blocks: the global options block (no address) and site blocks. */
+function caddyBlocks(): { global: string; sites: string[] } {
+  const lines = read("infra/local/Caddyfile").split("\n");
+  let depth = 0;
+  let current: { head: string; body: string[] } | null = null;
+  const blocks: { head: string; body: string[] }[] = [];
+  for (const line of lines) {
+    const code = line.replace(/#.*$/, "");
+    if (depth === 0 && /\{\s*$/.test(code)) {
+      current = { head: code.replace(/\{\s*$/, "").trim(), body: [] };
+      blocks.push(current);
+    } else if (current !== null && depth > 0) {
+      current.body.push(line);
+    }
+    depth += (code.match(/\{/g) ?? []).length - (code.match(/\}/g) ?? []).length;
+  }
+  return {
+    global: blocks
+      .filter((b) => b.head === "")
+      .flatMap((b) => b.body)
+      .join("\n"),
+    sites: blocks.filter((b) => b.head !== "").map((b) => b.head),
+  };
+}
+
+// A-419: the web image and the Caddyfile.
+describe("TP-15.33: the web image and the Caddyfile (A-417, A-419)", () => {
+  it("TP-15.33: the last stage, from a digest-pinned caddy, removes the file capability, works from /, runs as 10005 and exposes 8080", () => {
+    const stage = lastStage("images/web/Dockerfile", /^FROM caddy:[^@\s]+@sha256:[0-9a-f]{64}/);
+
+    expect(stage).not.toBe("");
+    expect(stage).toMatch(/^RUN setcap -r \/usr\/bin\/caddy$/m);
+    expect(stage).toMatch(/^WORKDIR \/$/m);
+    expect(stage).toMatch(/^USER 10005:10005$/m);
+    expect(stage).toMatch(/^EXPOSE 8080$/m);
+  });
+
+  it.each([
+    ["images/web/Dockerfile"],
+    ["images/server/Dockerfile"],
+    ["images/postgres/Dockerfile"],
+  ])("TP-15.33/TP-15.34 (A-417): %s has no # syntax= line", (rel) => {
+    expect(read(rel)).not.toMatch(/^#\s*syntax\s*=/m);
+  });
+
+  it("TP-15.33: the Caddyfile has exactly one site block, :8080, and global auto_https off and admin off", () => {
+    const { global, sites } = caddyBlocks();
+
+    expect(sites).toEqual([":8080"]);
+    expect(global).toMatch(/^\s*auto_https\s+off\s*$/m);
+    expect(global).toMatch(/^\s*admin\s+off\s*$/m);
+  });
+
+  it("TP-15.33 (A-419): @maint file has root / and try_files /srv/maintenance/on, one directive per line", () => {
+    expect(read("infra/local/Caddyfile")).toMatch(
+      /@maint\s+file\s*\{\s*\n\s*root\s+\/\s*\n\s*try_files\s+\/srv\/maintenance\/on\s*\n\s*\}/,
+    );
+  });
+});
+
+// A-417, A-418: the Postgres image.
+describe("TP-15.34: the Postgres image (A-417, A-418)", () => {
+  it("TP-15.34: the Dockerfile copies cluster-bootstrap.sql from the sql context and sets PGDATABASE=postgres", () => {
+    const docker = read("images/postgres/Dockerfile");
+
+    expect(docker).toMatch(
+      /^COPY --from=sql cluster-bootstrap\.sql \/docker-entrypoint-initdb\.d\/10-budmon\.sql\.tpl$/m,
+    );
+    expect(docker).toMatch(/^ENV PGDATABASE=postgres$/m);
+  });
+
+  it("TP-15.34: the entrypoint passes -c listen_addresses=${BUDMON_LISTEN_ADDRESSES:-}", () => {
+    // Quoted or not.
+    expect(read("images/postgres/budmon-entrypoint.sh")).toMatch(
+      /-c\s+"?listen_addresses=\$\{BUDMON_LISTEN_ADDRESSES:-\}"?(\s|$)/,
+    );
+  });
+
+  it("TP-15.34: postgresql.conf has no uncommented listen_addresses line", () => {
+    const lines = read("infra/local/postgres/postgresql.conf")
+      .split("\n")
+      .map((l) => l.trim());
+
+    expect(lines.filter((l) => /^listen_addresses\b/.test(l))).toEqual([]);
+  });
+});
+
+// A-391, A-417, A-424: the changes and infra-int jobs.
+describe("TP-15.35: ci.yml's changes and infra-int jobs", () => {
+  interface Step {
+    run?: unknown;
+  }
+  interface Job {
+    needs?: unknown;
+    if?: unknown;
+    "timeout-minutes"?: unknown;
+    outputs?: Record<string, unknown>;
+    steps?: Step[];
+  }
+  const jobs = () =>
+    (parse(read(".github/workflows/ci.yml")) as { jobs?: Record<string, Job> }).jobs ?? {};
+  const cond = (job: Job | undefined) => (typeof job?.if === "string" ? job.if : "");
+  const runs = (job: Job | undefined) =>
+    (job?.steps ?? []).map((s) => (typeof s.run === "string" ? s.run : "")).join("\n");
+
+  it("TP-15.35: infra-int needs changes; its if reads the infra output or a release/hotfix head branch; timeout 30", () => {
+    const job = jobs()["infra-int"];
+    const text = cond(job);
+
+    expect([job?.needs].flat()).toContain("changes");
+    expect(text).toContain("needs.changes.outputs.infra == 'true'");
+    expect(text).toContain("startsWith(github.head_ref, 'release/')");
+    expect(text).toContain("startsWith(github.head_ref, 'hotfix/')");
+    expect(job?.["timeout-minutes"]).toBe(30);
+  });
+
+  it("TP-15.35 (A-424): changes outputs infra, infra-lint and android", () => {
+    expect(Object.keys(jobs()["changes"]?.outputs ?? {})).toEqual(
+      expect.arrayContaining(["infra", "infra-lint", "android"]),
+    );
+  });
+
+  // A-489: everything the images build from, in this order.
+  it("TP-15.35 (A-489): the infra line lists exactly the image inputs, in order", () => {
+    expect(outputAlternatives(ROOT, "infra")).toEqual([
+      "infra/",
+      "images/",
+      "apps/server/",
+      "apps/web/",
+      "packages/",
+      "package.json",
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml",
+      ".dockerignore",
+      ".github/workflows/ci.yml",
+    ]);
+  });
+
+  it("TP-15.35 (A-424): the infra-lint line lists exactly infra/, images/, tools/ci/, .github/", () => {
+    expect(outputAlternatives(ROOT, "infra-lint")?.sort()).toEqual(
+      ["infra/", "images/", "tools/ci/", ".github/"].sort(),
+    );
+  });
+
+  it("TP-15.35 (A-424): infra-lint's if reads needs.changes.outputs.infra-lint == 'true'", () => {
+    expect(cond(jobs()["infra-lint"])).toContain("needs.changes.outputs.infra-lint == 'true'");
+  });
+
+  it("TP-15.35 (A-393, A-417): infra-int builds server and web from the root, postgres with the sql context, before pnpm test:infra", () => {
+    const text = runs(jobs()["infra-int"]).replace(/\\\n\s*/g, " ");
+    const builds = text.split("\n").filter((l) => /docker build/.test(l));
+    const at = (pattern: RegExp) => {
+      const line = builds.find((l) => pattern.test(l));
+      return line === undefined ? -1 : text.indexOf(line);
+    };
+
+    for (const n of ["server", "web"]) {
+      const line = builds.find((l) => l.includes(`-f images/${n}/Dockerfile`)) ?? "";
+      expect(line.split(/\s+/), n).toContain(".");
+    }
+    const pg = builds.find((l) => /images\/postgres\/?(\s|$)/.test(l)) ?? "";
+    expect(pg).toContain("--build-context sql=apps/server/src/platform/db/sql");
+    expect(pg.trim().split(/\s+/).at(-1)).toMatch(/^images\/postgres\/?$/);
+    const test = text.indexOf("pnpm test:infra");
+    expect(test).toBeGreaterThan(
+      Math.max(at(/images\/server\//), at(/images\/web\//), at(/images\/postgres/)),
+    );
+  });
+
+  it("TP-15.35 (A-393): the root .dockerignore lists the eight entries", () => {
+    const lines = read(".dockerignore")
+      .split("\n")
+      .map((l) => l.trim());
+
+    for (const p of [
+      "**/node_modules",
+      ".git",
+      ".data",
+      ".tools",
+      ".claude",
+      "**/dist",
+      "apps/android",
+      "docs",
+    ]) {
+      expect(lines).toContain(p);
+    }
+  });
+});
+
+// A-436: the infra-lint shellcheck step lists files through git, so none is missed.
+describe("TP-15.45: infra-lint's shellcheck step", () => {
+  it("TP-15.45: git ls-files -z -- '*.sh' infra/local/budmon-local piped to xargs -0 shellcheck -x; no .sh file named", () => {
+    const wf = parse(read(".github/workflows/ci.yml")) as {
+      jobs?: Record<string, { steps?: { run?: unknown }[] }>;
+    };
+    const runs = (wf.jobs?.["infra-lint"]?.steps ?? [])
+      .map((st) => (typeof st.run === "string" ? st.run : ""))
+      .filter((r) => r.includes("shellcheck"));
+
+    expect(runs).toHaveLength(1);
+    const run = runs[0] ?? "";
+    expect(run).toContain("git ls-files -z -- '*.sh'");
+    expect(run).toContain("infra/local/budmon-local");
+    expect(run).toMatch(/\|\s*xargs -0 shellcheck -x/);
+    expect(run.match(/[\w./-]+\.sh\b/g) ?? []).toEqual([]);
+  });
+});
+
+// A-432: Postgres needs no capability.
+describe("TP-15.42: postgres runs with no capabilities (A-432)", () => {
+  it("TP-15.42: compose.main.yaml's postgres has cap_drop [ALL] and no-new-privileges:true", () => {
+    const raw = parse(read("infra/local/compose.main.yaml")) as {
+      services?: Record<string, { cap_drop?: unknown; security_opt?: unknown }>;
+    };
+    const pg = raw.services?.["postgres"];
+
+    expect(pg?.cap_drop).toEqual(["ALL"]);
+    expect(pg?.security_opt).toEqual(expect.arrayContaining(["no-new-privileges:true"]));
+  });
+
+  it("TP-15.42 (A-448): postgres's healthcheck is pg_isready over the socket as budmon_admin", () => {
+    const raw = parse(read("infra/local/compose.main.yaml")) as {
+      services?: Record<string, { healthcheck?: Record<string, unknown> }>;
+    };
+
+    expect(raw.services?.["postgres"]?.healthcheck).toEqual({
+      test: [
+        "CMD",
+        "pg_isready",
+        "-q",
+        "-h",
+        "/var/run/postgresql",
+        "-U",
+        "budmon_admin",
+        "-d",
+        "postgres",
+      ],
+      interval: "5s",
+      timeout: "5s",
+      retries: 12,
+      start_period: "60s",
+    });
+  });
+
+  it.each(["api", "worker-general", "migrate"])(
+    "TP-15.42 (A-448): %s depends on postgres with condition service_healthy",
+    (name) => {
+      const raw = parse(read("infra/local/compose.main.yaml")) as {
+        services?: Record<string, { depends_on?: unknown }>;
+      };
+      const deps = raw.services?.[name]?.depends_on as
+        Record<string, { condition?: unknown }> | undefined;
+
+      expect(deps?.["postgres"]?.condition).toBe("service_healthy");
+    },
+  );
+});
+
+// A-455: the runbook's recovery section, by layout.
+describe('TP-15.46: runbook "A restore didn\'t finish" (A-455)', () => {
+  /** From the heading or bullet naming the section to the next heading or top-level bullet. */
+  const section = (): string => {
+    const lines = read("infra/runbooks/stage0-laptop.md").split("\n");
+    const start = lines.findIndex(
+      (l) => /^(#+ |[-*] )/.test(l) && l.includes("A restore didn't finish"),
+    );
+    if (start < 0) return "";
+    const head = lines[start] ?? "";
+    const level = /^(#+) /.exec(head)?.[1]?.length;
+    const end = lines.findIndex((l, i) => {
+      if (i <= start) return false;
+      if (level !== undefined) {
+        const m = /^(#+) /.exec(l);
+        return m !== null && (m[1]?.length ?? 0) <= level;
+      }
+      return /^(#+ |[-*] )/.test(l);
+    });
+    return lines.slice(start, end < 0 ? undefined : end).join("\n");
+  };
+
+  it("TP-15.46: the section exists", () => {
+    expect(section()).not.toBe("");
+  });
+
+  it.each(["L1", "L2", "L3-done", "L3-undo", "L3-same", "L4", "L5", "none"])(
+    "TP-15.46: it names layout %s",
+    (layout) => {
+      expect(section()).toMatch(new RegExp(`(^|[^\\w-])${layout.replace("-", "\\-")}($|[^\\w-])`));
+    },
+  );
+
+  it("TP-15.46: it contains ln -sfn and pg_terminate_backend, and no DROP DATABASE", () => {
+    const text = section();
+
+    expect(text).toContain("ln -sfn");
+    expect(text).toContain("pg_terminate_backend");
+    expect(text).not.toMatch(/DROP DATABASE/i);
+  });
+});

@@ -1,0 +1,17 @@
+{
+  "name": "@budmon/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@formatjs/icu-messageformat-parser": "3.5.20",
+    "@js-temporal/polyfill": "0.5.1",
+    "uuid": "14.0.2"
+  }
+}

@@ -1,0 +1,5 @@
+# A-468, TP-16.13: Mailpit's logging driver back to the default (the base file sets none); step 8b
+# (mailpit-quiet) must fail.
+services:
+  mailpit:
+    logging: !reset null

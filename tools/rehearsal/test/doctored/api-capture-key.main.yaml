@@ -1,0 +1,9 @@
+# A-468, A-451, TP-16.6: the rehearsal's capture private key mounted into api; step 10
+# (cross-role-secrets) must fail.
+services:
+  api:
+    volumes:
+      - type: bind
+        source: ${REHEARSAL_CA_DIR}/../capture-key/CAPTURE_PRIVATE_KEY
+        target: /run/doctored-capture-key/CAPTURE_PRIVATE_KEY
+        read_only: true

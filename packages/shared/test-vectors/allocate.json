@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "minor": "100",
+      "currency": "EGP",
+      "weights": ["1", "1", "1"],
+      "expected": ["34", "33", "33"]
+    },
+    {
+      "minor": "-100",
+      "currency": "EGP",
+      "weights": ["1", "1", "1"],
+      "expected": ["-34", "-33", "-33"]
+    },
+    {
+      "minor": "0",
+      "currency": "EGP",
+      "weights": ["1", "2"],
+      "expected": ["0", "0"]
+    },
+    {
+      "minor": "1",
+      "currency": "EGP",
+      "weights": ["0", "1"],
+      "expected": ["0", "1"]
+    },
+    {
+      "minor": "5",
+      "currency": "EGP",
+      "weights": ["1", "1"],
+      "expected": ["3", "2"]
+    },
+    {
+      "minor": "-5",
+      "currency": "EGP",
+      "weights": ["1", "1"],
+      "expected": ["-3", "-2"]
+    },
+    {
+      "minor": "1000",
+      "currency": "EGP",
+      "weights": ["1", "2", "3", "4"],
+      "expected": ["100", "200", "300", "400"]
+    },
+    {
+      "minor": "7",
+      "currency": "EGP",
+      "weights": ["1"],
+      "expected": ["7"]
+    },
+    {
+      "minor": "10",
+      "currency": "EGP",
+      "weights": ["3", "3", "4"],
+      "expected": ["3", "3", "4"]
+    },
+    {
+      "minor": "2",
+      "currency": "EGP",
+      "weights": ["1", "1", "1"],
+      "expected": ["1", "1", "0"]
+    },
+    {
+      "minor": "-2",
+      "currency": "EGP",
+      "weights": ["1", "1", "1"],
+      "expected": ["-1", "-1", "0"]
+    },
+    {
+      "minor": "9007199254740993",
+      "currency": "EGP",
+      "weights": ["1", "1"],
+      "expected": ["4503599627370497", "4503599627370496"]
+    }
+  ]
+}
