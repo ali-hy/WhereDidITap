@@ -86,7 +86,7 @@ function validate(raw: unknown): Recipes {
   const r = raw as Partial<Recipes> | null;
   if (r === null || typeof r !== "object") throw new RecipeError("not an object");
   for (const key of ["themes", "statuses", "tokens", "statusTokens", "aliases"] as const) {
-    if (typeof r[key] !== "object" || r[key] === null) throw new RecipeError(`${key} missing`);
+    if (typeof r[key] !== "object") throw new RecipeError(`${key} missing`);
   }
   const recipes = r as Recipes;
   if (Object.keys(recipes.themes).length === 0) throw new RecipeError("no themes");
