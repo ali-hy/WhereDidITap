@@ -13,7 +13,7 @@ interface HeartbeatPathOptions {
   tmpdir?: () => string;
 }
 
-/** The default path: `/tmp/heartbeat`, or `<tmpdir>\heartbeat` on Windows (A-515). */
+/** The default path: `/tmp/heartbeat`, or `<tmpdir>\heartbeat` on Windows (A-518). */
 export function defaultHeartbeatFile(opts: HeartbeatPathOptions = {}): string {
   const platform = opts.platform ?? process.platform;
   return platform === "win32"

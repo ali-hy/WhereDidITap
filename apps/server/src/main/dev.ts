@@ -187,7 +187,7 @@ export interface DevProcess {
 }
 
 /**
- * F-22 step 4 (A-514): the processes `pnpm dev` starts, in order api, worker, web.
+ * F-22 step 4 (A-517): the processes `pnpm dev` starts, in order api, worker, web.
  * - Each runs as `deps.execPath` on a package's bin script, never a `.bin` shim or a shell.
  * - `web` only when `apps/web/package.json` exists; vite is resolved only then.
  * - `resolveBin` errors propagate.
