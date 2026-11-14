@@ -33,15 +33,23 @@ function emailOf(data: unknown): string | undefined {
   return typeof email === "string" ? email : undefined;
 }
 
-export function identityErrorMessage(e: AppError, operation: Operation): ErrorMessage {
+/** Keys whose message shows an email: from the error's data, or from the caller's context. */
+const EMAIL_FROM_DATA = new Set(["GOOGLE_ACCOUNT_UNKNOWN", "GOOGLE_ACCOUNT_MISMATCH"]);
+const EMAIL_FROM_CONTEXT = new Set(["ALREADY_A_USER", "INVITATION_PENDING"]);
+
+/** A message missing a value it needs falls back to the platform's. */
+export function identityErrorMessage(
+  e: AppError,
+  operation: Operation,
+  context?: { email?: string },
+): ErrorMessage {
   if (e.kind === "defined") {
     const descriptor = Object.hasOwn(BY_KEY, e.key) ? BY_KEY[e.key] : undefined;
     if (descriptor !== undefined) {
-      const email =
-        e.key === "GOOGLE_ACCOUNT_UNKNOWN" || e.key === "GOOGLE_ACCOUNT_MISMATCH"
-          ? emailOf(e.data)
-          : undefined;
-      return email === undefined ? { descriptor } : { descriptor, values: { email } };
+      const needsEmail = EMAIL_FROM_DATA.has(e.key) || EMAIL_FROM_CONTEXT.has(e.key);
+      if (!needsEmail) return { descriptor };
+      const email = EMAIL_FROM_DATA.has(e.key) ? emailOf(e.data) : context?.email;
+      if (email !== undefined) return { descriptor, values: { email } };
     }
   }
   return messageForError(e, operation);

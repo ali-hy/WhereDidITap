@@ -17,6 +17,24 @@ export async function insert(
   );
 }
 
+export async function findById(
+  h: DbHandle,
+  id: string,
+): Promise<{ id: string; userId: string; kind: string; createdAt: Date } | null> {
+  const { rows } = await h.executeSql(
+    "SELECT id, user_id, kind, created_at FROM security_events WHERE id = $1",
+    [id],
+  );
+  const r = rows[0];
+  if (r === undefined) return null;
+  return {
+    id: r["id"] as string,
+    userId: r["user_id"] as string,
+    kind: r["kind"] as string,
+    createdAt: r["created_at"] as Date,
+  };
+}
+
 export async function listForUser(
   h: DbHandle,
   userId: string,

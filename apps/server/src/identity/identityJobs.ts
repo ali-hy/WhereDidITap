@@ -16,6 +16,7 @@ export const identityJobs = {
       kind: z.enum(EMAIL_KINDS),
       refId: UuidSchema,
       recipient: z.enum(["inviter", "owner"]).optional(),
+      eventId: UuidSchema.optional(),
     }),
     retryLimit: 5,
     retryDelaySeconds: 60,

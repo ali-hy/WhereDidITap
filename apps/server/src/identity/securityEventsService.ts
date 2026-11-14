@@ -20,8 +20,9 @@ export async function recordSecurityEvent(
     refId?: string;
   },
 ): Promise<void> {
+  const eventId = deps.ids.next();
   await securityEventsRepo.insert(h, {
-    id: deps.ids.next(),
+    id: eventId,
     userId: e.userId,
     kind: e.kind,
     sessionId: e.sessionId ?? null,
@@ -31,6 +32,7 @@ export async function recordSecurityEvent(
     await deps.queue.enqueue(h, identityJobs.emailSend, {
       kind: e.email,
       refId: e.refId ?? e.userId,
+      eventId,
     });
   }
   deps.logger.info("security_event", { userId: e.userId, reason: e.kind });

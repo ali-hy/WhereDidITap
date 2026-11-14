@@ -4,7 +4,7 @@ import { renderMessage } from "../i18n/render.js";
 import { withTransaction } from "../platform/db/transaction.js";
 import type { JobContext } from "../platform/queue/wrapper.js";
 import * as credentialsRepo from "./credentialsRepo.js";
-import { PSEUDO_LOCALES, type SecurityEventKind } from "./constants.js";
+import { PSEUDO_LOCALES } from "./constants.js";
 import { renderEmail, type EmailContent, type EmailKind } from "./emailTemplates.js";
 import { EmailSendError } from "./emailSender.js";
 import * as exportsRepo from "./exportsRepo.js";
@@ -22,6 +22,7 @@ export interface EmailSendPayload {
   kind: EmailKind;
   refId: string;
   recipient?: "inviter" | "owner";
+  eventId?: string;
 }
 
 /** One email to send. */
@@ -31,19 +32,20 @@ interface Message {
   content: EmailContent;
 }
 
-const SECURITY_EVENT_OF: Partial<Record<EmailKind, SecurityEventKind>> = {
-  password_changed: "password_changed",
-  password_added: "password_added",
-  two_step_enabled: "two_step_enabled",
-  two_step_disabled: "two_step_disabled",
-  two_step_reset_by_owner: "two_step_reset_by_owner",
-  authenticator_replaced: "authenticator_replaced",
-  recovery_codes_regenerated: "recovery_codes_regenerated",
-  recovery_code_used: "recovery_code_used",
-  two_step_failed: "two_step_failed_sign_in",
-  google_linked: "google_linked",
-  google_unlinked: "google_unlinked",
-};
+/** Kinds dated by their security event. */
+const EVENT_KINDS: ReadonlySet<EmailKind> = new Set<EmailKind>([
+  "password_changed",
+  "password_added",
+  "two_step_enabled",
+  "two_step_disabled",
+  "two_step_reset_by_owner",
+  "authenticator_replaced",
+  "recovery_codes_regenerated",
+  "recovery_code_used",
+  "two_step_failed",
+  "google_linked",
+  "google_unlinked",
+]);
 
 /** Dates in the recipient's locale and zone; pseudo-locales format as English. */
 function formatDate(at: Date, locale: string, timeZone: string, withTime: boolean): string {
@@ -236,6 +238,7 @@ export async function handleEmailSend(
       case "invitation_cap_failed": {
         const invitation = await invitationsRepo.findById(h, refId);
         if (invitation === null) return null;
+        if (payload.recipient === undefined) return null;
         const recipient =
           payload.recipient === "owner"
             ? await usersRepo.findOwner(h)
@@ -285,11 +288,20 @@ export async function handleEmailSend(
       default: {
         const user = await usersRepo.findById(h, refId);
         if (user === null) return null;
-        const eventKind = SECURITY_EVENT_OF[kind];
         let eventAt = nowDate;
-        if (eventKind !== undefined) {
-          const events = await securityEventsRepo.listForUser(h, user.id, 50);
-          eventAt = events.find((e) => e.kind === eventKind)?.createdAt ?? nowDate;
+        if (EVENT_KINDS.has(kind)) {
+          const event =
+            payload.eventId === undefined
+              ? null
+              : await securityEventsRepo.findById(h, payload.eventId);
+          if (event?.userId !== user.id) return null;
+          eventAt = event.createdAt;
+        }
+        if (
+          (kind === "deletion_scheduled" || kind === "account_closed_owner") &&
+          user.deletionScheduledFor === null
+        ) {
+          return null;
         }
         const content = userContent(kind, user, origin, eventAt);
         return content === null ? null : userMessage(user, content);

@@ -33,18 +33,26 @@ object IdentityErrorMessages {
             "DELETION_IN_PROGRESS" to R.string.error_deletion_in_progress,
         )
 
-    /** Messages that show an email address, which the server sends in `data.email`. */
-    private val withEmail = setOf("GOOGLE_ACCOUNT_UNKNOWN", "GOOGLE_ACCOUNT_MISMATCH")
+    /** Messages that show an email: from `data.email` (Google keys) or from the caller. */
+    private val emailFromData = setOf("GOOGLE_ACCOUNT_UNKNOWN", "GOOGLE_ACCOUNT_MISMATCH")
+    private val emailFromCaller = setOf("ALREADY_A_USER", "INVITATION_PENDING")
 
+    /** A message missing its email falls back to the platform's. */
     fun forError(
         error: ApiError,
         op: Operation,
+        email: String? = null,
     ): UiText {
         if (error is ApiError.Defined) {
             val resId = byKey[error.key]
             if (resId != null) {
-                val email = (error.data?.get("email") as? JsonPrimitive)?.takeIf { it.isString }?.content
-                return if (error.key in withEmail && email != null) UiText(resId, listOf(email)) else UiText(resId)
+                val needed =
+                    when (error.key) {
+                        in emailFromData -> (error.data?.get("email") as? JsonPrimitive)?.takeIf { it.isString }?.content
+                        in emailFromCaller -> email
+                        else -> return UiText(resId)
+                    }
+                if (needed != null) return UiText(resId, listOf(needed))
             }
         }
         return ErrorMessages.forError(error, op)

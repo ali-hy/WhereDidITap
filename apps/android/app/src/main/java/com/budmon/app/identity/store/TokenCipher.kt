@@ -3,8 +3,10 @@ package com.budmon.app.identity.store
 
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import java.io.IOException
 import java.security.GeneralSecurityException
 import java.security.KeyStore
+import java.security.ProviderException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -12,7 +14,7 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** A value couldn't be encrypted or decrypted: a tampered byte, another key, or a key the Keystore lost. */
+/** A value couldn't be encrypted or decrypted: a tampered byte, another key, or a Keystore that failed. */
 class TokenCipherException(cause: Throwable) : Exception(cause)
 
 private const val KEY_ALIAS = "budmon_tokens"
@@ -54,6 +56,10 @@ class TokenCipher internal constructor(
             cipher.iv + cipher.doFinal(plain)
         } catch (e: GeneralSecurityException) {
             throw TokenCipherException(e)
+        } catch (e: IOException) {
+            throw TokenCipherException(e)
+        } catch (e: ProviderException) {
+            throw TokenCipherException(e)
         }
 
     fun decrypt(data: ByteArray): ByteArray {
@@ -63,6 +69,10 @@ class TokenCipher internal constructor(
             cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(TAG_BITS, data, 0, IV_BYTES))
             cipher.doFinal(data, IV_BYTES, data.size - IV_BYTES)
         } catch (e: GeneralSecurityException) {
+            throw TokenCipherException(e)
+        } catch (e: IOException) {
+            throw TokenCipherException(e)
+        } catch (e: ProviderException) {
             throw TokenCipherException(e)
         }
     }
