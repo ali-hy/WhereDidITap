@@ -36,6 +36,11 @@ function badClasses(root: Element): string[] {
 const REFRESH_PATH = "M21 3v5h-5";
 const CHECK_PATH = "M20 6 9 17l-5-5";
 const hasPath = (el: Element, d: string) => el.querySelector(`svg path[d="${d}"]`) !== null;
+/** The svg drawing path `d` inside `el`, or null. */
+const svgWith = (el: Element, d: string) =>
+  el.querySelector(`svg path[d="${d}"]`)?.closest("svg") ?? null;
+/** A-515 (a), A-519: the busy icon spins through `animate-spin`. */
+const spins = (svg: Element | null) => svg?.classList.contains("animate-spin") ?? false;
 
 describe("TP-0b.6x: the class rule itself", () => {
   it("TP-0b.6x: palette and arbitrary colours are caught; tokens and non-colour arbitrary values pass", () => {
@@ -95,11 +100,45 @@ describe("TP-0b.6: Button", () => {
     expect(button.hasAttribute("disabled")).toBe(false);
     expect(onClick).not.toHaveBeenCalled();
     expect(button.textContent).toContain("Try again");
-    expect(hasPath(button, REFRESH_PATH)).toBe(true);
+    expect(button.querySelectorAll("svg")).toHaveLength(1);
+    expect(spins(svgWith(button, REFRESH_PATH))).toBe(true);
     expect(hasPath(button, CHECK_PATH)).toBe(false);
     for (const svg of button.querySelectorAll("svg")) {
       expect(svg.getAttribute("aria-hidden")).toBe("true");
     }
+  });
+
+  it("TP-0b.6x (A-515 (a), A-519): busy without an icon shows the one spinning refresh icon", () => {
+    renderWithI18n(() => (
+      <Button variant="primary" busy>
+        Save
+      </Button>
+    ));
+    const button = screen.getByRole("button", { name: "Save" });
+
+    expect(button.querySelectorAll("svg")).toHaveLength(1);
+    expect(spins(svgWith(button, REFRESH_PATH))).toBe(true);
+  });
+
+  it('TP-0b.6x (A-515 (a), A-519): icon="refresh" shows one still refresh icon, which spins only while busy', () => {
+    const [busy, setBusy] = createSignal(false);
+    renderWithI18n(() => (
+      <Button variant="primary" icon="refresh" busy={busy()}>
+        Try again
+      </Button>
+    ));
+    const button = screen.getByRole("button", { name: "Try again" });
+
+    expect(button.querySelectorAll("svg")).toHaveLength(1);
+    expect(spins(svgWith(button, REFRESH_PATH))).toBe(false);
+
+    setBusy(true);
+    expect(button.querySelectorAll("svg")).toHaveLength(1);
+    expect(spins(svgWith(button, REFRESH_PATH))).toBe(true);
+
+    setBusy(false);
+    expect(button.querySelectorAll("svg")).toHaveLength(1);
+    expect(spins(svgWith(button, REFRESH_PATH))).toBe(false);
   });
 
   it("TP-0b.6: a busy submit button doesn't submit its form", () => {
@@ -156,6 +195,7 @@ describe("TP-0b.6: Button", () => {
     expect(onClick).toHaveBeenCalledTimes(1);
     expect(button.getAttribute("aria-busy")).not.toBe("true");
     expect(hasPath(button, CHECK_PATH)).toBe(true);
+    expect(spins(svgWith(button, CHECK_PATH))).toBe(false);
     expect(hasPath(button, REFRESH_PATH)).toBe(false);
   });
 

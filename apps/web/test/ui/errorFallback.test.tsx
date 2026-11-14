@@ -1,5 +1,5 @@
-// F-209 ErrorFallback (§8.1 S-2). TP-11.7, with B-6 (spinner), A-397 (stillFailing) and A-400 (the
-// status element is always rendered).
+// F-209 ErrorFallback (§8.1 S-2). TP-11.7, with A-519 (the refresh icon spins only while busy; busy
+// isn't disabled), A-397 (stillFailing) and A-400 (the status element is always rendered).
 import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
 import { describe, expect, it } from "vitest";
 import { loadErrorFallback, plain } from "../support/s11b.js";
@@ -8,7 +8,7 @@ import { renderWithI18n } from "../support/render.js";
 const REQUEST_ID = "4bf92f35ab12cd34ef567890abcdef12";
 
 describe("TP-11.7: ErrorFallback (F-209)", () => {
-  it("TP-11.7: title, body and Reference: 4bf92f35 in <bdi dir=ltr>; during the retry the button is aria-busy and disabled; after the retry fails, Still not working. appears", async () => {
+  it("TP-11.7: title, body and Reference: 4bf92f35 in <bdi dir=ltr>; during the retry the button is aria-busy, not disabled, its refresh icon spins and a second click is ignored; after the retry fails, Still not working. appears", async () => {
     const { ErrorFallback } = await loadErrorFallback();
     let reject: (err: Error) => void = () => undefined;
     let retries = 0;
@@ -35,17 +35,23 @@ describe("TP-11.7: ErrorFallback (F-209)", () => {
     expect(plain(container.textContent)).not.toContain("Still not working.");
 
     const button = screen.getByRole("button", { name: /Try again/ });
-    const spinner = () => button.querySelector('[aria-hidden="true"]');
-    expect(spinner()).toBeNull();
+    // A-519: exactly one aria-hidden icon, the refresh icon (F-215 path data); it spins only while busy.
+    const icons = () => [...button.querySelectorAll('[aria-hidden="true"]')];
+    const refresh = () => button.querySelector('svg path[d="M21 3v5h-5"]')?.closest("svg") ?? null;
+    const spinning = () => refresh()?.classList.contains("animate-spin") ?? false;
+    expect(icons()).toHaveLength(1);
+    expect(refresh()).not.toBeNull();
+    expect(icons()[0]).toBe(refresh());
+    expect(spinning()).toBe(false);
     fireEvent.click(button);
 
     await waitFor(() => {
       expect(button.getAttribute("aria-busy")).toBe("true");
     });
-    expect((button as HTMLButtonElement).disabled).toBe(true);
-    // B-6: a decorative (aria-hidden) spinner inside the button while busy.
-    expect(spinner()).not.toBeNull();
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(spinning()).toBe(true);
     expect(plain(button.textContent)).toContain("Try again");
+    fireEvent.click(button);
     expect(retries).toBe(1);
 
     reject(new Error("still down"));
@@ -55,7 +61,8 @@ describe("TP-11.7: ErrorFallback (F-209)", () => {
     });
     expect(button.getAttribute("aria-busy")).not.toBe("true");
     expect((button as HTMLButtonElement).disabled).toBe(false);
-    expect(spinner()).toBeNull();
+    expect(refresh()).not.toBeNull();
+    expect(spinning()).toBe(false);
   });
 
   it("TP-11.7: the Go to home link goes to /", async () => {
