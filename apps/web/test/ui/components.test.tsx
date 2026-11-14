@@ -14,23 +14,9 @@ import { PasswordField } from "../../src/ui/PasswordField.js";
 import { TextField } from "../../src/ui/TextField.js";
 import { Wordmark } from "../../src/ui/Wordmark.js";
 import { renderWithI18n } from "../support/render.js";
+import { badClasses } from "../support/tokenClasses.js";
 
-// --- P-A-515 (e): "token utilities only"
-
-const PALETTE =
-  /^(bg|text|border|outline|ring|fill|stroke|divide|placeholder|decoration|caret|accent)-(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|black|white)(-\d+)?$/;
-const ARBITRARY_COLOUR = /-\[(#|rgb\(|hsl\(|oklch\(|color:)/;
-
-/** Every class token rendered under `root` that breaks P-A-515 (e), variants stripped. */
-function badClasses(root: Element): string[] {
-  const tokens = [root, ...root.querySelectorAll("*")].flatMap((el) =>
-    (el.getAttribute("class") ?? "").split(/\s+/).filter((c) => c !== ""),
-  );
-  return tokens.filter((c) => {
-    const utility = c.split(":").at(-1) ?? c;
-    return PALETTE.test(utility) || ARBITRARY_COLOUR.test(utility);
-  });
-}
+// P-A-515 (e) "token utilities only": badClasses (test/support/tokenClasses.ts).
 
 // F-215 registry path data, to recognise icons.
 const REFRESH_PATH = "M21 3v5h-5";

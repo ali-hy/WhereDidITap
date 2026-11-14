@@ -1,7 +1,47 @@
 // P-A-513 (3) theme-boot.js: <html data-theme data-mode> before first paint, from the device cache
 // or the system (guide §3.5). TP-0b.4, plus extra cases TP-0b.4x. IDs ending in "x" are
 // test-architect additions, not LLD test-plan IDs.
+//
+// vite preview sends no CSP, so every page here is served with the production policy from
+// infra/local/Caddyfile (added to the document response by the test), and the "no CSP violation"
+// checks are real.
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "./fixtures.js";
+
+const CADDYFILE = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../infra/local/Caddyfile",
+);
+
+/** The Caddyfile's Content-Security-Policy value (its first `header … Content-Security-Policy`). */
+function productionCsp(): string {
+  const match = /header\s+\??Content-Security-Policy\s+"([^"]+)"/.exec(
+    readFileSync(CADDYFILE, "utf8"),
+  );
+  if (match?.[1] === undefined) throw new Error("no Content-Security-Policy in the Caddyfile");
+  return match[1];
+}
+
+const servedWithCsp = new WeakSet<Page>();
+
+/** Serves every document of `page` with the production CSP. */
+async function withProductionCsp(page: Page): Promise<void> {
+  const csp = productionCsp();
+  await page.route("**/*", async (route) => {
+    if (route.request().resourceType() !== "document") {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    servedWithCsp.add(page);
+    await route.fulfill({
+      response,
+      headers: { ...response.headers(), "content-security-policy": csp },
+    });
+  });
+}
 
 const KEY = "budmon.theme";
 
@@ -15,6 +55,7 @@ interface Boot {
 
 /** Records the attributes before first paint and any CSP violation; runs before every page script. */
 async function recordBoot(page: Page): Promise<void> {
+  await withProductionCsp(page);
   await page.addInitScript(() => {
     const w = window as unknown as { __boot: Boot };
     w.__boot = { csp: [] };
@@ -50,6 +91,7 @@ async function cache(page: Page, value: string): Promise<void> {
 
 async function boot(page: Page): Promise<Boot> {
   await page.waitForLoadState("load");
+  expect(servedWithCsp.has(page)).toBe(true);
   return page.evaluate(() => (window as unknown as { __boot: Boot }).__boot);
 }
 
@@ -141,4 +183,26 @@ test("TP-0b.4x: index.html loads /theme-boot.js as the first child of <head>, a 
   const script = await request.get("/theme-boot.js");
   expect(script.status()).toBe(200);
   expect(script.headers()["content-type"] ?? "").toMatch(/javascript/);
+});
+
+test("TP-0b.4x: under the production CSP an inline script is reported, so the no-violation checks can fail", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "chromium project only");
+  await recordBoot(page);
+  await page.goto("/");
+  await boot(page);
+
+  await page.evaluate(() => {
+    const s = document.createElement("script");
+    s.textContent = "window.__inlineRan = true;";
+    document.head.append(s);
+  });
+
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __boot: Boot }).__boot.csp.length))
+    .toBeGreaterThan(0);
+  expect(
+    await page.evaluate(() => (window as unknown as { __inlineRan?: boolean }).__inlineRan),
+  ).toBeUndefined();
 });

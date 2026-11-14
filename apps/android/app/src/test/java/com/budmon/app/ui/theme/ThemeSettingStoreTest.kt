@@ -15,17 +15,21 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.File
+import java.io.IOException
 
 @RunWith(RobolectricTestRunner::class)
 class ThemeSettingStoreTest {
@@ -105,5 +109,31 @@ class ThemeSettingStoreTest {
         assertEquals(ThemeSetting.SYSTEM, ThemeSetting.fromWire("DARK"))
         assertEquals(ThemeSetting.SYSTEM, ThemeSetting.fromWire(""))
         assertEquals(ThemeSetting.SYSTEM, ThemeSetting.fromWire(null))
+    }
+
+    /** A DataStore whose reads fail with [failure] (review B-6 (a)). */
+    private class FailingDataStore(
+        private val failure: Throwable,
+    ) : DataStore<Preferences> {
+        override val data: Flow<Preferences> = flow { throw failure }
+
+        override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences = throw failure
+    }
+
+    @Test
+    fun `TP-0b_9x an IOException while reading emits SYSTEM (P-A-516 (b))`() = runTest {
+        val store = ThemeSettingStore(FailingDataStore(IOException("disk unreadable")))
+
+        assertEquals(ThemeSetting.SYSTEM, store.setting.first())
+    }
+
+    @Test
+    fun `TP-0b_9x any other exception while reading propagates`() = runTest {
+        val store = ThemeSettingStore(FailingDataStore(IllegalStateException("not an IO failure")))
+
+        val thrown = runCatching { store.setting.first() }.exceptionOrNull()
+
+        assertTrue("$thrown", thrown is IllegalStateException)
+        assertEquals("not an IO failure", thrown?.message)
     }
 }
