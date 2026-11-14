@@ -16,6 +16,17 @@ Rules that apply to everyone, including the main conversation:
 - Tests belong to the test-architect, and application code to the software-engineer. Neither edits the other's files.
 - Only the user approves design documents and merges PRs.
 
+## Asking the user for a decision
+
+The user doesn't remember earlier decisions or the details behind an ID. Every decision or confirmation you ask for must stand on its own:
+
+- **The problem:** what situation or gap makes a decision necessary, in plain words.
+- **What was decided before:** any earlier decision it builds on or changes, restated, not just its ID.
+- **What's proposed:** what the amendment or default actually does.
+- **The options and their consequences:** what each one means for the user, and which one is recommended and why.
+
+IDs (A-2, D-24, …) can follow as references, never replace the explanation.
+
 ## Project conventions
 
 <!-- To be filled in after the codebase review: stack, folder layout, module layering, naming,
