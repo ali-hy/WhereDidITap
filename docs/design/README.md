@@ -38,4 +38,4 @@ Templates (including `lld-brief.md`) are in [`_templates/`](./_templates) and [`
 | Module | HLD | LLD |
 | ------ | --- | --- |
 | `platform` | [hld.md](./platform/hld.md) (approved, v1.3.1; amended during implementation) | [lld.md](./platform/lld.md) (approved, v1.44 on `feat/identity`; A-509 to A-516 and A-519 to A-530 are docs-only amendments for identity; v1.32 records the owner's confirmation of A-2 and A-4 and defers FU-1); [brief](./platform/lld-brief.md) |
-| `identity` | [hld.md](./identity/hld.md) (approved, v0.12; amended during implementation) | [lld.md](./identity/lld.md) (approved, v0.31; amended during implementation, A-1 to A-51; re-baseline on platform LLD v1.29 as built plus the docs-only v1.30 and v1.31); [brief](./identity/lld-brief.md) |
+| `identity` | [hld.md](./identity/hld.md) (approved, v0.12; amended during implementation) | [lld.md](./identity/lld.md) (approved, v0.32; amended during implementation, A-1 to A-59; re-baseline on platform LLD v1.29 as built plus the docs-only v1.30 and v1.31); [brief](./identity/lld-brief.md) |
