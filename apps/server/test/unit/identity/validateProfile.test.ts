@@ -1,4 +1,4 @@
-// F-90 validateProfile (identity LLD §4.8, §6). TP-1.13, plus extra cases TP-1.13x. The handle
+// F-90 validateProfile (identity LLD §4.8, §6). TP-1.13, TP-1.50 (A-53), plus extra cases TP-1.13x. The handle
 // throws: none of these inputs has a baseCurrency, the only field read from the database.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
@@ -85,5 +85,24 @@ describe("TP-1.13: validateProfile", () => {
         (i) => i.code,
       ),
     ).toEqual(["unsupported_locale"]);
+  });
+});
+
+describe("TP-1.50: validateProfile with the UTC zone (A-53)", () => {
+  it("TP-1.50: timeZone UTC → no issue, the value UTC", async () => {
+    const r = await validateProfile(depsIn("test"), noDatabase, { timeZone: "UTC" });
+
+    expect(r.issues).toEqual([]);
+    expect(r.value.timeZone).toBe("UTC");
+  });
+
+  it("TP-1.50: timeZone Etc/UTC → no issue, the runtime's canonical name", async () => {
+    const canonical = new Intl.DateTimeFormat("en", { timeZone: "Etc/UTC" }).resolvedOptions()
+      .timeZone;
+
+    const r = await validateProfile(depsIn("test"), noDatabase, { timeZone: "Etc/UTC" });
+
+    expect(r.issues).toEqual([]);
+    expect(r.value.timeZone).toBe(canonical);
   });
 });

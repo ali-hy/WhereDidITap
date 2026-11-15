@@ -1,0 +1,188 @@
+// F-159's S-1 QA fixes (identity LLD v0.32, A-52 to A-57): a later link in the same tab, long
+// text at 360 px, focus on a step change, the set-up privacy link in a new tab, a signed-in visitor.
+// TP-1.48, TP-1.51 to TP-1.54.
+import {
+  catalogText,
+  createInvitation,
+  expect,
+  looseText,
+  openInvitation,
+  signUpThroughUi,
+  test,
+  uniqueEmail,
+  type Page,
+} from "../identity.js";
+
+const PREVIEW = "/api/v1/invitations/preview";
+const STORED = "budmon.invite";
+
+/** The number of preview requests from now on. */
+function countPreviews(page: Page): { readonly n: number } {
+  const seen = { n: 0 };
+  page.on("request", (r) => {
+    if (new URL(r.url()).pathname === PREVIEW) seen.n += 1;
+  });
+  return seen;
+}
+
+/** `looseText(text)` without its start anchor: the text at the end of a string. */
+const endsWithLoose = (text: string): RegExp => new RegExp(looseText(text).source.slice(1));
+
+test.describe("TP-1.48: a later link in the same tab (A-52)", () => {
+  test("TP-1.48: /invite (incomplete), then location.hash = #t=<token> → the join screen, one preview, the hash stripped; Back leaves no #t= in the URL", async ({
+    page,
+    request,
+  }) => {
+    const email = uniqueEmail();
+    const { token } = await createInvitation(request, { email });
+    const previews = countPreviews(page);
+    await page.goto("/invite");
+    await expect(page.locator("main h1")).toHaveText(catalogText("This invitation can't be used"));
+
+    await page.evaluate((t) => {
+      location.hash = `#t=${t}`;
+    }, token);
+
+    await expect(page.locator("main h1")).toHaveText(catalogText("You've been invited"));
+    await expect(page.getByText(looseText(`This invitation is for ${email}.`))).toBeVisible();
+    expect(previews.n).toBe(1);
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
+
+    await page.goBack();
+
+    expect(page.url()).not.toContain("#t=");
+    expect(page.url()).not.toContain(token);
+  });
+});
+
+test.describe("TP-1.51: long text at 360 px (A-54)", () => {
+  const EMAIL = `${"a".repeat(88)}@example.test`;
+  const INVITER = "N".repeat(80);
+
+  /** No horizontal page overflow, and the element lies inside the viewport, wrapped in its box. */
+  async function expectWrappedInside(page: Page, text: RegExp): Promise<void> {
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      360,
+    );
+    const line = page.locator("main").getByText(text);
+    await expect(line).toBeVisible();
+    const box = await line.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { left: r.left, right: r.right, scroll: el.scrollWidth, client: el.clientWidth };
+    });
+    expect(box.left).toBeGreaterThanOrEqual(0);
+    expect(box.right).toBeLessThanOrEqual(360);
+    expect(box.scroll).toBeLessThanOrEqual(box.client);
+  }
+
+  test("TP-1.51: a 100-character email and an 80-character inviter name wrap on join and set-up; scrollWidth ≤ 360", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 360, height: 800 });
+    // The preview is answered here, so any well-formed token will do.
+    const token = `bmi_${"L".repeat(43)}`;
+    await page.route(`**${PREVIEW}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          invitationId: "0190a0b0-0000-7000-8000-000000000051",
+          email: EMAIL,
+          inviterName: INVITER,
+          expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
+          origin: "direct",
+        }),
+      }),
+    );
+
+    await page.goto(`/invite#t=${token}`);
+    await expect(page.locator("main h1")).toHaveText(catalogText("You've been invited"));
+
+    await expectWrappedInside(page, looseText(`${INVITER} invited ${EMAIL} to join.`));
+
+    await page.getByRole("button", { name: catalogText("Use a password") }).click();
+    await expect(page.locator("main h1")).toHaveText(catalogText("Set up your account"));
+
+    await expectWrappedInside(page, new RegExp(EMAIL.replaceAll(".", "\\.")));
+  });
+});
+
+test.describe("TP-1.52: focus on a step change (A-55)", () => {
+  test("TP-1.52: on load the join h1 has focus; after Use a password, the h1 'Set up your account' (not BODY)", async ({
+    page,
+    request,
+  }) => {
+    const { token } = await createInvitation(request, { email: uniqueEmail() });
+
+    await openInvitation(page, token);
+
+    const h1 = page.locator("main h1");
+    await expect(h1).toBeFocused();
+
+    await page.getByRole("button", { name: catalogText("Use a password") }).click();
+
+    await expect(h1).toHaveText(catalogText("Set up your account"));
+    await expect(h1).toBeFocused();
+    expect(await page.evaluate(() => document.activeElement?.tagName)).toBe("H1");
+  });
+});
+
+test.describe("TP-1.53: the set-up privacy link opens in a new tab (A-56)", () => {
+  test("TP-1.53: the link's name ends with '(opens in a new tab)'; activating it opens /privacy in a popup; the set-up page keeps the typed name", async ({
+    page,
+    request,
+  }) => {
+    const { token } = await createInvitation(request, { email: uniqueEmail() });
+    await openInvitation(page, token);
+    await page.getByRole("button", { name: catalogText("Use a password") }).click();
+    await expect(page.locator("main h1")).toHaveText(catalogText("Set up your account"));
+    const name = page.getByLabel(catalogText("Your name"));
+    await name.fill("Mona Hassan");
+    const link = page.locator("main").getByRole("link", { name: /privacy notice/ });
+
+    await expect(link).toHaveAccessibleName(endsWithLoose("(opens in a new tab)"));
+    await expect(link).toHaveAttribute("href", "/privacy");
+    await expect(link).toHaveAttribute("target", "_blank");
+    expect(await link.getAttribute("rel")).toContain("noopener");
+
+    const popup = page.waitForEvent("popup");
+    await link.click();
+
+    const notice = await popup;
+    await expect(notice).toHaveURL(/\/privacy$/);
+    await expect(notice.locator("main h1")).toHaveText(catalogText("Privacy notice"));
+    await expect(page).toHaveURL(/\/invite$/);
+    await expect(page.locator("main h1")).toHaveText(catalogText("Set up your account"));
+    await expect(name).toHaveValue("Mona Hassan");
+  });
+});
+
+test.describe("TP-1.54: a signed-in visitor on /invite goes home (A-57)", () => {
+  test("TP-1.54: signed in, /invite#t=<another token> and then /invite land on / with no preview, no #t= in the URL or history, nothing stored", async ({
+    page,
+    request,
+  }) => {
+    const first = await createInvitation(request, { email: uniqueEmail() });
+    await signUpThroughUi(page, first.token, "Signed In");
+    const second = await createInvitation(request, { email: uniqueEmail() });
+    const previews = countPreviews(page);
+
+    await page.goto(`/invite#t=${second.token}`);
+
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.locator("main h1")).toHaveText(looseText("Welcome, Signed In."));
+    expect(page.url()).not.toContain("#t=");
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), STORED)).toBeNull();
+    // The /invite entry was replaced by /, so going back can't reach the token.
+    await page.goBack();
+    expect(page.url()).not.toContain("#t=");
+    expect(page.url()).not.toContain(second.token);
+
+    await page.goto("/invite");
+
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.locator("main h1")).toHaveText(looseText("Welcome, Signed In."));
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), STORED)).toBeNull();
+    expect(previews.n).toBe(0);
+  });
+});

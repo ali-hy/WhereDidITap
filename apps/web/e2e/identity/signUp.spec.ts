@@ -1,5 +1,6 @@
 // S-1 sign-up from an invitation (identity LLD §8.1, §8.3, F-152, F-159, F-170, F-173).
-// TP-1.30, TP-1.32, TP-1.37, TP-1.38, TP-1.39 (LLD v0.27: A-41, A-43), plus extra cases ending in "x".
+// TP-1.30, TP-1.32, TP-1.37, TP-1.38, TP-1.39 (A-41, A-43, A-53, A-56, A-58), plus extra cases ending in "x".
+// TP-1.48 and TP-1.51 to TP-1.54 (A-52 to A-57) are in invitePage.spec.ts.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import {
   accentRgb,
@@ -33,17 +34,30 @@ function record(page: Page) {
 }
 
 test.describe("TP-1.30: sign-up with a password", () => {
-  test("TP-1.30: /invite#t=<token> → Use a password → Create account: the fragment leaves the URL, then / shows 'Welcome, {name}.' with the title 'Welcome, {name}. – wDit'", async ({
+  test("TP-1.30: /invite#t=<token> → Use a password → Create account: the fragment leaves the URL, then / shows 'Welcome, {name}.' with the title 'Welcome, {name}. – wDit'; in chromium (UTC) the zone is preselected 'UTC (GMT)' and sent as UTC (A-53)", async ({
     page,
     request,
-  }) => {
+  }, testInfo) => {
     const { token } = await createInvitation(request, { email: uniqueEmail() });
 
     await openInvitation(page, token);
     expect(new URL(page.url()).hash).toBe("");
     expect(page.url()).not.toContain(token);
 
-    await signUpThroughUi(page, token, "Mona Hassan");
+    await page.getByRole("button", { name: catalogText("Use a password") }).click();
+    await expect(page.locator("main h1")).toHaveText(catalogText("Set up your account"));
+    if (testInfo.project.name === "chromium") {
+      await expect(page.getByRole("combobox", { name: catalogText("Time zone") })).toHaveValue(
+        "UTC (GMT)",
+      );
+    }
+    await page.getByLabel(catalogText("Your name")).fill("Mona Hassan");
+    await page.getByLabel(catalogText("Password")).fill(E2E_PASSWORD);
+    const acceptSent = page.waitForRequest("**/api/v1/invitations/accept");
+    await page.getByRole("button", { name: catalogText("Create account") }).click();
+    const body = (await acceptSent).postDataJSON() as { timeZone?: unknown };
+    if (testInfo.project.name === "chromium") expect(body.timeZone).toBe("UTC");
+    await expect(page).toHaveURL(/\/$/);
 
     await expect(page.locator("main h1")).toHaveText(looseText("Welcome, Mona Hassan."));
     await expect(page.getByText(catalogText("Add your first account to start."))).toBeVisible();
@@ -93,9 +107,12 @@ test.describe("TP-1.30: sign-up with a password", () => {
   });
 });
 
-test.describe("TP-1.32: invitation problems (A-41, A-43)", () => {
+test.describe("TP-1.32: invitation problems (A-41, A-43, A-56, A-58)", () => {
   const INCOMPLETE =
     "This link isn't complete. Open it again from the email, or copy the whole link.";
+  const ASK_DEV_OWNER = "Ask Dev Owner to send a new one.";
+  const ASK_ANYONE = "Ask someone who already has an account to invite you again.";
+  const STORED = "budmon.invite";
 
   /** The problem page: its h1, and exactly one primary Button, **Sign in**, linking to /sign-in. */
   async function expectProblemWithSignIn(page: Page): Promise<void> {
@@ -106,7 +123,12 @@ test.describe("TP-1.32: invitation problems (A-41, A-43)", () => {
     await expect(signIn).toHaveCSS("background-color", await accentRgb(page));
   }
 
-  test("TP-1.32: an expired link: 'It expired on {date}.' with the long date, and Sign in", async ({
+  /** A-56 (b): a problem other than a failed load removes the stored token. */
+  async function expectNothingStored(page: Page): Promise<void> {
+    await expect.poll(() => page.evaluate((k) => sessionStorage.getItem(k), STORED)).toBeNull();
+  }
+
+  test("TP-1.32: an expired link from Dev Owner: 'It expired on {date}.' with the long date, 'Ask Dev Owner to send a new one.', Sign in, nothing stored", async ({
     page,
     request,
   }, testInfo) => {
@@ -133,23 +155,37 @@ test.describe("TP-1.32: invitation problems (A-41, A-43)", () => {
     } else {
       expect(await expired.textContent()).toMatch(/\d/);
     }
+    await expect(page.getByText(looseText(ASK_DEV_OWNER))).toBeVisible();
+    await expectNothingStored(page);
   });
 
-  test("TP-1.32: a revoked link: 'It was cancelled.' and Sign in", async ({ page, request }) => {
-    const { token } = await createInvitation(request, { email: uniqueEmail(), state: "revoked" });
+  test("TP-1.32: a revoked link from Dev Owner: 'It was cancelled.', 'Ask Dev Owner to send a new one.', Sign in, nothing stored", async ({
+    page,
+    request,
+  }) => {
+    const { token } = await createInvitation(request, {
+      email: uniqueEmail(),
+      state: "revoked",
+      inviterEmail: "owner@budmon.local",
+    });
 
     await page.goto(`/invite#t=${token}`);
 
     await expectProblemWithSignIn(page);
     await expect(page.getByText(catalogText("It was cancelled."))).toBeVisible();
+    await expect(page.getByText(looseText(ASK_DEV_OWNER))).toBeVisible();
+    await expectNothingStored(page);
   });
 
-  test("TP-1.32 (A-41): used just before (recent: true): 'Your account is ready. Sign in to continue.' and Sign in", async ({
+  test("TP-1.32 (A-41): used just before (recent: true): 'Your account is ready. Sign in to continue.', no ask line, Sign in, nothing stored", async ({
     page,
     request,
   }) => {
     const email = uniqueEmail();
-    const { token } = await createInvitation(request, { email });
+    const { token } = await createInvitation(request, {
+      email,
+      inviterEmail: "owner@budmon.local",
+    });
     const accepted = await request.post("/api/v1/invitations/accept", {
       headers: { "X-Budmon-Client": "web/1" },
       data: {
@@ -170,13 +206,16 @@ test.describe("TP-1.32: invitation problems (A-41, A-43)", () => {
     await expect(
       page.getByText(catalogText("Your account is ready. Sign in to continue.")),
     ).toBeVisible();
+    await expect(page.getByText(looseText(ASK_DEV_OWNER))).toHaveCount(0);
+    await expect(page.getByText(catalogText(ASK_ANYONE))).toHaveCount(0);
+    await expectNothingStored(page);
   });
 
-  test("TP-1.32 (A-41): used earlier (recent: false): 'It has already been used. If that was you, sign in.' and Sign in", async ({
+  test("TP-1.32 (A-41, A-58): used earlier (recent: false): 'It has already been used. If that was you, sign in.', 'Ask Dev Owner to send a new one.', Sign in, nothing stored", async ({
     page,
-    request,
   }) => {
-    const { token } = await createInvitation(request, { email: uniqueEmail() });
+    // The preview is answered here, so any well-formed token will do.
+    const token = `bmi_${"U".repeat(43)}`;
     await page.route("**/api/v1/invitations/preview", (route) =>
       route.fulfill({
         status: 409,
@@ -186,7 +225,7 @@ test.describe("TP-1.32: invitation problems (A-41, A-43)", () => {
           code: "INVITATION_USED",
           status: 409,
           message: "Invitation already used",
-          data: { recent: false },
+          data: { recent: false, inviterName: "Dev Owner", origin: "direct" },
         }),
       }),
     );
@@ -197,6 +236,8 @@ test.describe("TP-1.32: invitation problems (A-41, A-43)", () => {
     await expect(
       page.getByText(catalogText("It has already been used. If that was you, sign in.")),
     ).toBeVisible();
+    await expect(page.getByText(looseText(ASK_DEV_OWNER))).toBeVisible();
+    await expectNothingStored(page);
   });
 
   for (const [label, path] of [
@@ -256,17 +297,22 @@ test.describe("TP-1.37: the privacy notice", () => {
       .toBe("Privacy notice – wDit");
   });
 
-  test("TP-1.37: the set-up screen's privacy link opens /privacy", async ({ page, request }) => {
+  test("TP-1.37: the set-up screen's privacy link opens /privacy (in a new tab, A-56)", async ({
+    page,
+    request,
+  }) => {
     const { token } = await createInvitation(request, { email: uniqueEmail() });
     await openInvitation(page, token);
     await page.getByRole("button", { name: catalogText("Use a password") }).click();
     await expect(page.locator("main h1")).toHaveText(catalogText("Set up your account"));
 
-    const link = page.getByRole("link", { name: /privacy notice/ });
+    const link = page.locator("main").getByRole("link", { name: /privacy notice/ });
+    const popup = page.waitForEvent("popup");
     await link.click();
 
-    await expect(page).toHaveURL(/\/privacy$/);
-    await expect(page.locator("main h1")).toHaveText(catalogText("Privacy notice"));
+    const notice = await popup;
+    await expect(notice).toHaveURL(/\/privacy$/);
+    await expect(notice.locator("main h1")).toHaveText(catalogText("Privacy notice"));
   });
 });
 

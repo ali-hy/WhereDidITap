@@ -1,5 +1,5 @@
 // F-212 InviteViewModel over F-204 AuthRepository and MockWebServer (identity LLD §4.15, A-37,
-// A-41). TP-1.34's ViewModel rows, plus TP-1.34x.
+// A-41, A-58). TP-1.34's ViewModel rows, TP-1.47's formError, TP-1.55's Android part, plus TP-1.34x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.identity
 
@@ -361,5 +361,39 @@ class InviteViewModelTest {
         other.open(token)
         await("Join after the re-check") { other.state is InviteState.Join }
         assertEquals(3, previews())
+    }
+
+    @Test
+    fun `TP-1_55 a preview answered INVITATION_EXPIRED with inviterName Mona - Problem(Expired(at), inviter = Mona)`() = runTest {
+        answers["/api/v1/invitations/preview"] = {
+            defined(
+                "INVITATION_EXPIRED",
+                410,
+                "Invitation expired",
+                """{"expiredAt":"2026-11-01T10:00:00.000Z","inviterName":"Mona","origin":"direct"}""",
+            )
+        }
+        val vm = viewModel()
+
+        vm.open(token)
+        await("Problem") { vm.state is InviteState.Problem }
+
+        assertEquals(InviteState.Problem(InviteProblem.Expired(Instant.parse("2026-11-01T10:00:00Z")), inviter = "Mona"), vm.state)
+    }
+
+    @Test
+    fun `TP-1_55x an accept answered INVITATION_REVOKED with inviterName Mona - the error's inviter, not the preview's`() = runTest {
+        answers["/api/v1/invitations/accept"] = {
+            defined("INVITATION_REVOKED", 410, "Invitation revoked", """{"inviterName":"Mona","origin":"direct"}""")
+        }
+        val vm = viewModel()
+        toSetUp(vm)
+        vm.name = "Mona Hassan"
+        vm.password = "violet staircase umbrella"
+
+        vm.submit { }
+        await("Problem") { vm.state is InviteState.Problem }
+
+        assertEquals(InviteState.Problem(InviteProblem.Revoked, inviter = "Mona"), vm.state)
     }
 }

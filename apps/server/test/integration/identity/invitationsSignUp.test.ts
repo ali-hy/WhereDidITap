@@ -1,5 +1,5 @@
 // invitations.preview (F-40) and invitations.accept (F-41) through the real HTTP layer (identity
-// LLD §4.2, §5.4, §6). TP-1.1 to TP-1.11, plus extra cases TP-1.xx ending in "x".
+// LLD §4.2, §5.4, §6). TP-1.1 to TP-1.11, TP-1.44, TP-1.55, plus extra cases TP-1.xx ending in "x".
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { Temporal } from "@budmon/shared";
 import { z } from "zod";
@@ -244,7 +244,11 @@ describe("TP-1.4: revoked and used invitations", () => {
     const accepted = await userFactory(h, { email: "accepted-10@example.com" });
     await acceptInvitationRow(h, inv.invitationId, accepted.id, NOW.subtract({ minutes: 10 }));
 
-    expect(errorOf(await preview(inv.token)).data).toEqual({ recent: true });
+    expect(errorOf(await preview(inv.token)).data).toEqual({
+      recent: true,
+      inviterName: null,
+      origin: "direct",
+    });
   });
 });
 
@@ -639,5 +643,101 @@ describe("TP-1.11: token.ip", () => {
     for (let i = 0; i < 31; i += 1) await preview(inv.token, ip);
 
     expect((await preview(inv.token)).status).toBe(200);
+  });
+});
+
+describe("TP-1.55: the invitation errors carry the inviter's name and origin (A-58)", () => {
+  /** An invitation from "Dev Owner", stored in the given state. */
+  async function fromDevOwner(state: "expired" | "revoked" | "accepted") {
+    const owner = await userFactory(h, { displayName: "Dev Owner" });
+    const inv = await invitation({
+      inviterUserId: owner.id,
+      ...(state === "expired" ? { expiresAt: NOW.subtract({ hours: 1 }) } : {}),
+      ...(state === "revoked" ? { revokedAt: NOW.subtract({ minutes: 1 }) } : {}),
+    });
+    if (state === "expired") {
+      await invitationsRepo.expireIfDue(h, inv.invitationId, new Date(NOW.epochMilliseconds));
+    }
+    if (state === "accepted") {
+      const user = await userFactory(h, { email: inv.email });
+      await acceptInvitationRow(h, inv.invitationId, user.id, NOW.subtract({ minutes: 1 }));
+    }
+    return { ...inv, owner };
+  }
+
+  it("TP-1.55: a stored expired invitation → INVITATION_EXPIRED { expiredAt, inviterName: Dev Owner, origin: direct }", async () => {
+    const inv = await fromDevOwner("expired");
+
+    const res = await preview(inv.token);
+
+    expect(res.status).toBe(410);
+    expect(errorOf(res)).toMatchObject({ code: "INVITATION_EXPIRED" });
+    expect(errorOf(res).data).toEqual({
+      expiredAt: wire(NOW.subtract({ hours: 1 })),
+      inviterName: "Dev Owner",
+      origin: "direct",
+    });
+  });
+
+  it("TP-1.55: revoked → INVITATION_REVOKED { inviterName: Dev Owner, origin: direct }", async () => {
+    const inv = await fromDevOwner("revoked");
+
+    const res = await preview(inv.token);
+
+    expect(res.status).toBe(410);
+    expect(errorOf(res)).toMatchObject({ code: "INVITATION_REVOKED" });
+    expect(errorOf(res).data).toEqual({ inviterName: "Dev Owner", origin: "direct" });
+  });
+
+  it("TP-1.55: accepted → INVITATION_USED { recent, inviterName: Dev Owner, origin: direct }", async () => {
+    const inv = await fromDevOwner("accepted");
+
+    const res = await preview(inv.token);
+
+    expect(res.status).toBe(409);
+    expect(errorOf(res)).toMatchObject({ code: "INVITATION_USED" });
+    expect(errorOf(res).data).toEqual({ recent: true, inviterName: "Dev Owner", origin: "direct" });
+  });
+
+  it("TP-1.55: an erased inviter (the user row deleted) → inviterName null", async () => {
+    const inv = await fromDevOwner("revoked");
+    await h.executeSql("DELETE FROM users WHERE id = $1", [inv.owner.id]);
+
+    const res = await preview(inv.token);
+
+    expect(errorOf(res)).toMatchObject({ code: "INVITATION_REVOKED" });
+    expect(errorOf(res).data).toEqual({ inviterName: null, origin: "direct" });
+  });
+
+  it("TP-1.55: a revoked bootstrap invitation → origin bootstrap, inviterName null", async () => {
+    const inv = await invitation({ origin: "bootstrap", revokedAt: NOW.subtract({ minutes: 1 }) });
+
+    const res = await preview(inv.token);
+
+    expect(errorOf(res)).toMatchObject({ code: "INVITATION_REVOKED" });
+    expect(errorOf(res).data).toEqual({ inviterName: null, origin: "bootstrap" });
+  });
+
+  it("TP-1.55x: accept (F-41) adds the same fields: revoked, expired and a second accept", async () => {
+    const revoked = await fromDevOwner("revoked");
+    const expired = await fromDevOwner("expired");
+    const owner = await userFactory(h, { displayName: "Dev Owner" });
+    const pending = await invitation({ inviterUserId: owner.id });
+    expect((await accept({ token: pending.token })).status).toBe(200);
+
+    const r = errorOf(await accept({ token: revoked.token }));
+    const e = errorOf(await accept({ token: expired.token }));
+    const u = errorOf(await accept({ token: pending.token }));
+
+    expect(r).toMatchObject({ code: "INVITATION_REVOKED" });
+    expect(r.data).toEqual({ inviterName: "Dev Owner", origin: "direct" });
+    expect(e).toMatchObject({ code: "INVITATION_EXPIRED" });
+    expect(e.data).toEqual({
+      expiredAt: wire(NOW.subtract({ hours: 1 })),
+      inviterName: "Dev Owner",
+      origin: "direct",
+    });
+    expect(u).toMatchObject({ code: "INVITATION_USED" });
+    expect(u.data).toEqual({ recent: true, inviterName: "Dev Owner", origin: "direct" });
   });
 });

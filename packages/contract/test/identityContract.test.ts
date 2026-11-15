@@ -271,9 +271,19 @@ const CATALOG: [string, number, string, unknown][] = [
   ["GOOGLE_ACCOUNT_MISMATCH", 400, "Wrong Google account", { email: "mona@example.com" }],
   ["SIGNUP_TICKET_INVALID", 400, "Sign-up ticket invalid", undefined],
   ["INVITATION_INVALID", 400, "Invitation invalid", undefined],
-  ["INVITATION_EXPIRED", 410, "Invitation expired", { expiredAt: WIRE }],
-  ["INVITATION_REVOKED", 410, "Invitation revoked", undefined],
-  ["INVITATION_USED", 409, "Invitation already used", { recent: true }],
+  [
+    "INVITATION_EXPIRED",
+    410,
+    "Invitation expired",
+    { expiredAt: WIRE, inviterName: "Dev Owner", origin: "direct" },
+  ],
+  ["INVITATION_REVOKED", 410, "Invitation revoked", { inviterName: null, origin: "direct" }],
+  [
+    "INVITATION_USED",
+    409,
+    "Invitation already used",
+    { recent: true, inviterName: "Dev Owner", origin: "bootstrap" },
+  ],
   ["USER_CAP_REACHED", 409, "User cap reached", undefined],
   ["INVITE_ALLOWANCE_EXHAUSTED", 409, "Invite allowance exhausted", undefined],
   ["INVITATIONS_DISABLED", 403, "Invitations disabled", undefined],
@@ -319,6 +329,27 @@ describe("TP-0.42x: IDENTITY_ERRORS is §6's catalog", () => {
       expect(entry?.data, `${key} declares a data schema`).toBeDefined();
       expect(entry?.data?.safeParse(data).success).toBe(true);
     }
+  });
+
+  it("TP-1.55x: the invitation errors' inviterName and origin (A-58): required on revoked and used, optional on expired", () => {
+    const expired = errors["INVITATION_EXPIRED"]?.data;
+    const revoked = errors["INVITATION_REVOKED"]?.data;
+    const used = errors["INVITATION_USED"]?.data;
+
+    expect(expired?.safeParse({ expiredAt: WIRE }).success).toBe(true);
+    expect(
+      expired?.safeParse({ expiredAt: WIRE, inviterName: null, origin: "account_share" }).success,
+    ).toBe(true);
+    expect(expired?.safeParse({ expiredAt: WIRE, origin: "other" }).success).toBe(false);
+    expect(revoked?.safeParse({ inviterName: "Dev Owner", origin: "bootstrap" }).success).toBe(
+      true,
+    );
+    expect(revoked?.safeParse({ inviterName: "Dev Owner" }).success).toBe(false);
+    expect(revoked?.safeParse({ origin: "direct" }).success).toBe(false);
+    expect(used?.safeParse({ recent: false, inviterName: null, origin: "direct" }).success).toBe(
+      true,
+    );
+    expect(used?.safeParse({ recent: true }).success).toBe(false);
   });
 
   it("TP-0.42x: CONFIRMATION_REQUIRED's factor is two_step, password or google only", () => {
