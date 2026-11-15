@@ -35,8 +35,8 @@ import com.budmon.app.identity.SessionUiState
 import com.budmon.app.identity.SessionViewModel
 import com.budmon.app.identity.SignedOutReason
 import com.budmon.app.identity.ui.HomeFirstRunScreen
-import com.budmon.app.identity.ui.InvitationLinkScreen
-import com.budmon.app.identity.ui.InviteFlowScreen
+import com.budmon.app.identity.ui.InvitationLinkRoute
+import com.budmon.app.identity.ui.InviteFlowRoute
 import com.budmon.app.identity.ui.SessionLoadingScreen
 import com.budmon.app.identity.ui.SessionNotLoaded
 import com.budmon.app.identity.ui.SignInScreen
@@ -169,7 +169,7 @@ class MainActivity : ComponentActivity() {
                 composable(ROUTE_INVITATION_LINK) { entry ->
                     // The invitation state lives in the graph's view model; the token is never a route.
                     val invite: InviteViewModel = hiltViewModel(remember(entry) { nav.getBackStackEntry(ROUTE_SIGNED_OUT) })
-                    InvitationLinkScreen(
+                    InvitationLinkRoute(
                         apiBaseUrl = apiBaseUrl,
                         isOnline = isOnline,
                         onToken = {
@@ -181,11 +181,11 @@ class MainActivity : ComponentActivity() {
                 }
                 composable(ROUTE_INVITE) { entry ->
                     val invite: InviteViewModel = hiltViewModel(remember(entry) { nav.getBackStackEntry(ROUTE_SIGNED_OUT) })
-                    InviteFlowScreen(
+                    InviteFlowRoute(
                         onBack = { nav.popBackStack() },
                         onSignIn = { nav.popBackStack(ROUTE_SIGN_IN, inclusive = false) },
                         onSignedUp = sessionModel::onSignedIn,
-                        onOpenPrivacy = { openPrivacy() },
+                        onPrivacy = { openPrivacy() },
                         viewModel = invite,
                     )
                 }

@@ -2,6 +2,7 @@
 package com.budmon.app.identity.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -57,11 +58,13 @@ import com.budmon.app.core.error.UiText
 import com.budmon.app.core.network.ApiError
 import com.budmon.app.identity.IdentityErrorMessages
 import com.budmon.app.identity.InvitationLinkParser
+import com.budmon.app.identity.InvitationPreview
 import com.budmon.app.identity.InviteProblem
 import com.budmon.app.identity.InviteState
 import com.budmon.app.identity.InviteViewModel
 import com.budmon.app.identity.Me
 import com.budmon.app.identity.ParseResult
+import com.budmon.app.identity.SignUpOptions
 import com.budmon.app.identity.SignedOutReason
 import com.budmon.app.ui.components.AppButton
 import com.budmon.app.ui.components.AppButtonVariant
@@ -91,9 +94,12 @@ private fun Heading(text: String) {
 }
 
 @Composable
-private fun Page(content: @Composable () -> Unit) {
+private fun Page(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 24.dp),
+        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Wordmark()
@@ -119,8 +125,9 @@ fun SignInScreen(
     isOnline: Boolean,
     onHaveLink: () -> Unit,
     onPrivacy: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Page {
+    Page(modifier) {
         Heading(stringResource(R.string.signin_title))
         if (reason == SignedOutReason.Ended) Text(stringResource(R.string.signin_session_ended))
         Text(stringResource(R.string.signin_invite_only), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -130,9 +137,35 @@ fun SignInScreen(
     }
 }
 
-/** Paste (read only on tap) or type the invitation link. */
+/** The invitation link: type or paste it; Continue is enabled when there is text. */
 @Composable
 fun InvitationLinkScreen(
+    text: String,
+    @StringRes error: Int?,
+    onTextChange: (String) -> Unit,
+    onPaste: () -> Unit,
+    onContinue: () -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Page(modifier) {
+        Heading(stringResource(R.string.invite_link_title))
+        Text(stringResource(R.string.invite_link_instruction), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        AppTextField(
+            value = text,
+            onValueChange = onTextChange,
+            label = stringResource(R.string.invite_link_field),
+            error = error?.let { stringResource(it) },
+        )
+        AppButton(stringResource(R.string.invite_link_paste), onPaste, Modifier.fillMaxWidth(), AppButtonVariant.Secondary)
+        AppButton(stringResource(R.string.invite_link_continue), onContinue, Modifier.fillMaxWidth(), enabled = text.isNotBlank())
+        AppButton(stringResource(R.string.invite_link_back), onBack, variant = AppButtonVariant.Tertiary)
+    }
+}
+
+/** Holds the link screen's state; the pasted text can hold the token, so it is never saved. */
+@Composable
+fun InvitationLinkRoute(
     apiBaseUrl: HttpUrl,
     isOnline: Boolean,
     onToken: (String) -> Unit,
@@ -140,116 +173,103 @@ fun InvitationLinkScreen(
 ) {
     BackHandler(onBack = onBack)
     val clipboard = LocalClipboardManager.current
-    // Not saved: the pasted link holds the invitation token.
     var text by remember { mutableStateOf("") }
-    var error by rememberSaveable { mutableStateOf<Int?>(null) }
-    fun open() {
-        error =
-            if (!isOnline) {
-                R.string.invite_link_offline
-            } else {
-                when (val parsed = InvitationLinkParser.parse(text, apiBaseUrl)) {
-                    is ParseResult.Token -> {
-                        onToken(parsed.value)
-                        null
-                    }
+    var error by remember { mutableStateOf<Int?>(null) }
+    InvitationLinkScreen(
+        text = text,
+        error = error,
+        onTextChange = {
+            text = it
+            error = null
+        },
+        onPaste = { clipboard.getText()?.text?.let { text = it } },
+        onContinue = {
+            error =
+                if (!isOnline) {
+                    R.string.invite_link_offline
+                } else {
+                    when (val parsed = InvitationLinkParser.parse(text, apiBaseUrl)) {
+                        is ParseResult.Token -> {
+                            onToken(parsed.value)
+                            null
+                        }
 
-                    ParseResult.OtherServer -> R.string.invite_link_other_server
-                    ParseResult.NotAnInvitation -> R.string.invite_link_not_invitation
+                        ParseResult.OtherServer -> R.string.invite_link_other_server
+                        ParseResult.NotAnInvitation -> R.string.invite_link_not_invitation
+                    }
                 }
-            }
+        },
+        onBack = onBack,
+    )
+}
+
+/** Checking the invitation. */
+@Composable
+fun InviteCheckingScreen(modifier: Modifier = Modifier) {
+    Page(modifier) {
+        Heading(stringResource(R.string.invite_checking))
+        CircularProgressIndicator()
     }
-    Page {
-        Heading(stringResource(R.string.invite_link_title))
-        Text(stringResource(R.string.invite_link_instruction), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        AppTextField(
-            value = text,
-            onValueChange = {
-                text = it
-                error = null
-            },
-            label = stringResource(R.string.invite_link_field),
-            error = error?.let { stringResource(it) },
+}
+
+/** The invitation's preview, with the way into set-up. */
+@Composable
+fun JoinScreen(
+    preview: InvitationPreview,
+    busy: Boolean,
+    onUsePassword: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Page(modifier) {
+        Heading(stringResource(R.string.invite_title))
+        val line =
+            if (preview.origin == "bootstrap") {
+                stringResource(R.string.invite_from_owner, isolated(preview.email))
+            } else if (preview.inviterName.isNullOrBlank()) {
+                stringResource(R.string.invite_for_email, isolated(preview.email))
+            } else {
+                stringResource(R.string.invite_from, isolated(preview.inviterName.trim()), isolated(preview.email))
+            }
+        Text(line)
+        Text(
+            stringResource(R.string.invite_expires, formatDate(preview.expiresAt)),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         AppButton(
-            stringResource(R.string.invite_link_paste),
-            { clipboard.getText()?.text?.let { text = it } },
+            stringResource(R.string.invite_use_password),
+            onUsePassword,
             Modifier.fillMaxWidth(),
             AppButtonVariant.Secondary,
+            busy = busy,
         )
-        AppButton(stringResource(R.string.invite_link_continue), ::open, Modifier.fillMaxWidth(), enabled = text.isNotBlank())
-        AppButton(stringResource(R.string.invite_link_back), onBack, variant = AppButtonVariant.Tertiary)
     }
 }
 
-/** Join (preview) and set-up, for one invitation token. */
+/** What the set-up form shows. */
+data class SetUpFormState(
+    val name: String,
+    val password: String,
+    val currency: String?,
+    val timeZone: String?,
+    val language: String?,
+    @StringRes val nameError: Int?,
+    @StringRes val passwordError: Int?,
+    @StringRes val currencyError: Int?,
+    @StringRes val timeZoneError: Int?,
+    val formError: UiText?,
+    val busy: Boolean,
+)
+
+/** The invitation's problem: its text, and Sign in or Try again. */
 @Composable
-fun InviteFlowScreen(
-    onBack: () -> Unit,
-    onSignIn: () -> Unit,
-    onSignedUp: (Me?) -> Unit,
-    onOpenPrivacy: () -> Unit,
-    viewModel: InviteViewModel,
-) {
-    // Back on set-up returns to join; elsewhere it leaves the screen.
-    BackHandler {
-        if (viewModel.state is InviteState.SetUp) viewModel.backToJoin() else onBack()
-    }
-    // After the process was recreated the token is gone: back to the link screen.
-    LaunchedEffect(Unit) { if (!viewModel.hasToken) onBack() }
-    when (val state = viewModel.state) {
-        InviteState.Checking -> {
-            Page {
-                Heading(stringResource(R.string.invite_checking))
-                CircularProgressIndicator()
-            }
-        }
-
-        is InviteState.Join -> {
-            val p = state.preview
-            Page {
-                Heading(stringResource(R.string.invite_title))
-                val line =
-                    if (p.origin == "bootstrap") {
-                        stringResource(R.string.invite_from_owner, isolated(p.email))
-                    } else if (p.inviterName.isNullOrBlank()) {
-                        stringResource(R.string.invite_for_email, isolated(p.email))
-                    } else {
-                        stringResource(R.string.invite_from, isolated(p.inviterName.trim()), isolated(p.email))
-                    }
-                Text(line)
-                Text(
-                    stringResource(R.string.invite_expires, formatDate(p.expiresAt)),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                AppButton(
-                    stringResource(R.string.invite_use_password),
-                    viewModel::usePassword,
-                    Modifier.fillMaxWidth(),
-                    AppButtonVariant.Secondary,
-                    busy = viewModel.busy,
-                )
-            }
-        }
-
-        is InviteState.SetUp -> {
-            SetUpAccountScreen(state, viewModel, onSignedUp, onOpenPrivacy)
-        }
-
-        is InviteState.Problem -> {
-            ProblemScreen(state, onRetry = viewModel::check, onSignIn = onSignIn)
-        }
-    }
-}
-
-@Composable
-private fun ProblemScreen(
-    state: InviteState.Problem,
+fun InviteProblemScreen(
+    problem: InviteProblem,
+    inviter: String?,
     onRetry: () -> Unit,
     onSignIn: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val problem = state.problem
-    Page {
+    Page(modifier) {
         Heading(stringResource(R.string.invite_problem_title))
         val text =
             when (problem) {
@@ -262,13 +282,13 @@ private fun ProblemScreen(
                 is InviteProblem.Failed -> uiString(IdentityErrorMessages.forError(problem.error, Operation.Read))
             }
         Text(text)
-        val inviter = state.inviter?.trim().orEmpty()
+        val name = inviter?.trim().orEmpty()
         if (problem is InviteProblem.Expired || problem == InviteProblem.Revoked) {
             val ask =
-                if (inviter.isEmpty()) {
+                if (name.isEmpty()) {
                     stringResource(R.string.invite_problem_ask_anyone)
                 } else {
-                    stringResource(R.string.invite_problem_ask_inviter, isolated(inviter))
+                    stringResource(R.string.invite_problem_ask_inviter, isolated(name))
                 }
             Text(ask, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -280,77 +300,138 @@ private fun ProblemScreen(
     }
 }
 
+/** The set-up form (password path). */
 @Composable
-private fun SetUpAccountScreen(
-    state: InviteState.SetUp,
-    vm: InviteViewModel,
-    onSignedUp: (Me?) -> Unit,
-    onOpenPrivacy: () -> Unit,
+fun SetUpAccountScreen(
+    email: String,
+    options: SignUpOptions,
+    form: SetUpFormState,
+    onNameChange: (String) -> Unit,
+    onPasswordChange: (String) -> Unit,
+    onCurrencyChange: (String) -> Unit,
+    onTimeZoneChange: (String) -> Unit,
+    onLanguageChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+    onPrivacy: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val locale = Locale.getDefault()
     val zones = remember { ZoneId.getAvailableZoneIds().sorted() }
-    Page {
+    Page(modifier) {
         Heading(stringResource(R.string.setup_title))
-        Text(isolated(state.preview.email), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        vm.formError?.let { Text(uiString(it), color = MaterialTheme.colorScheme.error) }
+        Text(isolated(email), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        form.formError?.let { Text(uiString(it), color = MaterialTheme.colorScheme.error) }
         AppTextField(
-            value = vm.name,
-            onValueChange = { vm.name = it },
+            value = form.name,
+            onValueChange = onNameChange,
             label = stringResource(R.string.setup_name),
-            error = vm.nameError?.let { stringResource(it) },
+            error = form.nameError?.let { stringResource(it) },
         )
         AppPasswordField(
-            value = vm.password,
-            onValueChange = { vm.password = it },
+            value = form.password,
+            onValueChange = onPasswordChange,
             label = stringResource(R.string.setup_password),
             hint = stringResource(R.string.setup_password_hint),
-            error = vm.passwordError?.let { stringResource(it) },
+            error = form.passwordError?.let { stringResource(it) },
         )
         PickerField(
             label = stringResource(R.string.setup_currency),
             hint = stringResource(R.string.setup_currency_hint),
             options =
-            state.options.currencies.map { code ->
+            options.currencies.map { code ->
                 code to "$code – ${runCatching { java.util.Currency.getInstance(code).getDisplayName(locale) }.getOrDefault(code)}"
             },
-            selected = vm.currency,
-            error = vm.currencyError?.let { stringResource(it) },
-            onSelect = { vm.currency = it },
+            selected = form.currency,
+            error = form.currencyError?.let { stringResource(it) },
+            onSelect = onCurrencyChange,
         )
         PickerField(
             label = stringResource(R.string.setup_time_zone),
             hint = null,
             options = zones.map { it to it },
-            selected = vm.timeZone,
-            error = vm.timeZoneError?.let { stringResource(it) },
-            onSelect = { vm.timeZone = it },
+            selected = form.timeZone,
+            error = form.timeZoneError?.let { stringResource(it) },
+            onSelect = onTimeZoneChange,
         )
         PickerField(
             label = stringResource(R.string.setup_language),
             hint = null,
             options =
-            state.options.locales.map {
+            options.locales.map {
                 it to Locale.forLanguageTag(it).getDisplayName(Locale.forLanguageTag(it))
             },
-            selected = vm.language,
+            selected = form.language,
             error = null,
-            onSelect = { vm.language = it },
+            onSelect = onLanguageChange,
         )
-        // Opens the notice on the server's origin in a Custom Tab.
+        // The notice opens on the server's origin in a Custom Tab.
         val linkStyle = SpanStyle(color = AppColors.extra.accentFg, textDecoration = TextDecoration.Underline)
         val privacy =
             buildAnnotatedString {
-                withLink(LinkAnnotation.Clickable("privacy", TextLinkStyles(linkStyle)) { onOpenPrivacy() }) {
+                withLink(LinkAnnotation.Clickable("privacy", TextLinkStyles(linkStyle)) { onPrivacy() }) {
                     append(stringResource(R.string.setup_privacy))
                 }
             }
         Text(privacy, style = MaterialTheme.typography.bodySmall, modifier = Modifier.heightIn(min = 48.dp))
-        AppButton(
-            stringResource(R.string.setup_submit),
-            { vm.submit(onSignedUp) },
-            Modifier.fillMaxWidth(),
-            busy = vm.busy,
-        )
+        AppButton(stringResource(R.string.setup_submit), onSubmit, Modifier.fillMaxWidth(), busy = form.busy)
+    }
+}
+
+/** Holds the invitation flow: one screen per [InviteState], from the view model. */
+@Composable
+fun InviteFlowRoute(
+    viewModel: InviteViewModel,
+    onBack: () -> Unit,
+    onSignIn: () -> Unit,
+    onSignedUp: (Me?) -> Unit,
+    onPrivacy: () -> Unit,
+) {
+    // Back on set-up returns to join; elsewhere it leaves the screen.
+    BackHandler {
+        if (viewModel.state is InviteState.SetUp) viewModel.backToJoin() else onBack()
+    }
+    // After the process was recreated the token is gone: back to the link screen.
+    LaunchedEffect(Unit) { if (!viewModel.hasToken) onBack() }
+    when (val state = viewModel.state) {
+        InviteState.Checking -> {
+            InviteCheckingScreen()
+        }
+
+        is InviteState.Join -> {
+            JoinScreen(state.preview, viewModel.busy, onUsePassword = viewModel::usePassword)
+        }
+
+        is InviteState.SetUp -> {
+            SetUpAccountScreen(
+                email = state.preview.email,
+                options = state.options,
+                form =
+                SetUpFormState(
+                    name = viewModel.name,
+                    password = viewModel.password,
+                    currency = viewModel.currency,
+                    timeZone = viewModel.timeZone,
+                    language = viewModel.language,
+                    nameError = viewModel.nameError,
+                    passwordError = viewModel.passwordError,
+                    currencyError = viewModel.currencyError,
+                    timeZoneError = viewModel.timeZoneError,
+                    formError = viewModel.formError,
+                    busy = viewModel.busy,
+                ),
+                onNameChange = { viewModel.name = it },
+                onPasswordChange = { viewModel.password = it },
+                onCurrencyChange = { viewModel.currency = it },
+                onTimeZoneChange = { viewModel.timeZone = it },
+                onLanguageChange = { viewModel.language = it },
+                onSubmit = { viewModel.submit(onSignedUp) },
+                onPrivacy = onPrivacy,
+            )
+        }
+
+        is InviteState.Problem -> {
+            InviteProblemScreen(state.problem, state.inviter, onRetry = viewModel::check, onSignIn = onSignIn)
+        }
     }
 }
 
@@ -414,9 +495,12 @@ private fun PickerField(
 
 /** The first-run home: an empty state with the user's name. */
 @Composable
-fun HomeFirstRunScreen(me: Me) {
+fun HomeFirstRunScreen(
+    me: Me,
+    modifier: Modifier = Modifier,
+) {
     Column(
-        Modifier.fillMaxSize().padding(24.dp),
+        modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -446,8 +530,8 @@ fun HomeFirstRunScreen(me: Me) {
 }
 
 @Composable
-fun SessionLoadingScreen() {
-    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+fun SessionLoadingScreen(modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
         Wordmark()
     }
 }
