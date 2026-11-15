@@ -2,7 +2,7 @@
 module: identity
 doc: lld
 status: approved # draft | in-review | approved
-version: 0.29
+version: 0.30
 hld_version: 0.12
 author: planner
 approved_by: main conversation on the owner's behalf (delegation 2026-10-07, "auto approve the hlds as well just keep going"); the owner reviewed and confirmed every flagged decision on 2026-11-14; plan re-review passed 2026-11-14
@@ -52,6 +52,7 @@ This document doesn't restate the HLD's rationale.
 | 0.27    | 2026-11-15 | **Implementation-time amendments A-37 to A-43** (S-1 test-architect and engineer questions; planner decisions; approval stands): Android shapes for F-204, F-207, `SessionNotLoaded`, F-211, F-212 (A-37); direct calls in `AuthRepository` (A-38); `navigation-compose` from S-1 (A-39); F-205 and `kick()` confirmed in S-3, also after an accept (A-40); `recent: true` shows "ready" (A-41); primary counts per S-1 screen (A-42); a malformed invitation fragment is "incomplete" (A-43). Stale text fixed in place: TP-1.30 (the A-23 welcome and the wDit title), TP-1.37 (the intro is the `<h1>`), F-155's slice note. TP-1.32, TP-1.34, TP-1.40, TP-1.41 and TP-3.49 (setup, row j) updated. |
 | 0.28    | 2026-11-15 | **Implementation-time amendment A-44** (S-1; planner decision; approval stands): the first-run home's icon is `wallet`; identity's icon list gets slices; P-TP-11.26's exact list gains it (platform A-529). |
 | 0.29    | 2026-11-15 | **Implementation-time amendments A-45 to A-48** (S-1 code review G-1 to G-3, N-4; approval stands): texts for an invitation with no inviter (A-45; wording confirmed by the owner, 2026-11-15); a Google accept before S-6 gets `SIGNUP_TICKET_INVALID`, and `GOOGLE_UNAVAILABLE` leaves accept's contract (A-46); the privacy link on both S-1 start screens and Android's set-up sentence (A-47); Android link-screen and picker strings (A-48). New TP-1.44 to TP-1.47. |
+| 0.30    | 2026-11-15 | **Implementation-time amendment A-49** (S-1 test-architect; planner decision; approval stands): the S-1 Android screen and route signatures, stateless screens with fake-able callbacks; TP-1.47 rewritten against them. |
 
 ## Amendments
 
@@ -107,6 +108,7 @@ The rows below are identity's own amendments. Text that cites one says "(A-n)" n
 | A-46 | S-1 code review G-2: S-1 throws `GOOGLE_UNAVAILABLE` for `method.kind: "google"` and lists it in accept's contract errors, which §5's accept row doesn't have | **Follow F-41 step 5:** S-1 builds the ticket lookup, and since no `google_signup` challenge exists before S-6, a Google accept gets `SIGNUP_TICKET_INVALID`. `GOOGLE_UNAVAILABLE` leaves accept's contract errors (and `openapi.json`). Accept never needs Google's configuration: the ticket was issued by a Google flow that already checked it. | F-41, §5 accept row; TP-1.44 | none | planner decision |
 | A-47 | S-1 code review G-3: §8.1 links `/privacy` from the sign-in screen and §8.3 from Android's sign-in and set-up screens, but neither S-1 start screen has the link and Android's set-up sentence isn't tappable | **The link ships in S-1, not S-3:** the notice must be reachable before anyone signs up, and the shells exist now. Web: an inline link `signin.privacy` "Privacy notice" below the invite-only note. Android: a tertiary **Privacy notice** button (`signin_privacy`) there, and the set-up sentence as one link; both open `<origin>/privacy` in a Custom Tab. The label is the notice's own title. | F-155, §8.1, §8.2, §8.3; TP-1.46, TP-1.47 | none | planner decision |
 | A-48 | S-1 code review N-4: Android strings outside §8.2 (`invite_link_title`, `invite_link_field`, `invite_link_open`, `setup_search`, `home_loading`) | **Recorded, aligned with HLD S-17's wireframe:** `invite_link_title` "Open your invitation", `invite_link_field` "Invitation link", `invite_link_paste` "Paste", `setup_search` "Search" stay; `invite_link_open` "Open invitation" is replaced by `invite_link_continue` "Continue" (the HLD's primary); new `invite_link_instruction` "Paste the link from your invitation email." and `invite_link_back` "Back to sign in" from the same wireframe; `home_loading` is removed (unused: the loading screen shows only the wordmark). | §8.2; TP-1.47 | none | planner decision |
+| A-49 | S-1 test-architect: TP-1.47 renders the Android screens, but the LLD gives no composable signatures | **Recorded in §8.2 (S-1 screen signatures), adopting the working tree's names where they fit:** stateless `SignInScreen`, `InvitationLinkScreen`, `InviteCheckingScreen`, `JoinScreen`, `SetUpAccountScreen` (with `SetUpFormState`), `InviteProblemScreen`, `HomeFirstRunScreen`, `SessionLoadingScreen`, `SessionNotLoaded`; state lives in two routes, `InvitationLinkRoute` (the text, the clipboard, the parser) and `InviteFlowRoute` (the ViewModel, Back, a lost token). Corrections to the working tree: the link screen's state and parsing move to its route; `InviteFlowScreen` becomes `InviteFlowRoute`; `ProblemScreen` and `SetUpAccountScreen` become public and stateless; `onOpenPrivacy` is `onPrivacy` everywhere; `InviteViewModel.hasToken` is recorded. | §8.2; TP-1.47 | none | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -2863,6 +2865,42 @@ The identity messages:
 | `InvitePeopleScreen`, `YourDataScreen`, `DeleteAccountScreen` (F-217) | S-12, S-13, S-14. | `invitations_*`, `data_*`, `delete_*` |
 | `PendingDeletionBanner`, sign-out dialog (F-218) | S-15; J-10: `signout_unsynced` (plural) "%d entries haven't synced yet. If you sign out now, they stay on this phone and sync the next time you sign in.", `signout_sync_now` "Sync now", `signout_anyway` "Sign out anyway"; D-23: `outbox_other_user` (plural) "This phone has %d unsynced entries from another user. Delete them to continue?", `outbox_delete_continue` "Delete and continue". | `pending_*`, `signout_*`, `outbox_*` |
 
+**S-1 screen signatures (A-49).** All in `identity/ui/IdentityScreens.kt`, package `com.budmon.app.identity.ui`. Each **screen** takes state and callbacks only (no ViewModel, no `HttpUrl`, no clipboard), so Robolectric tests render it with fake lambdas; the two **routes** hold the state and are the only ones that touch `InviteViewModel`, the parser or the clipboard. Every `modifier` defaults to `Modifier`.
+
+```kotlin
+// Start screen (F-208's S-1 shell). S-3 adds the form's state and callbacks before `modifier`.
+@Composable fun SignInScreen(reason: SignedOutReason, isOnline: Boolean, onHaveLink: () -> Unit, onPrivacy: () -> Unit, modifier: Modifier = Modifier)
+
+// Invitation link (F-211). `error` is a string resource or null; Continue is enabled when text.isNotBlank().
+@Composable fun InvitationLinkScreen(text: String, @StringRes error: Int?, onTextChange: (String) -> Unit, onPaste: () -> Unit, onContinue: () -> Unit, onBack: () -> Unit, modifier: Modifier = Modifier)
+// Its route: `text` in remember (never saved: it can hold the token); onPaste reads LocalClipboardManager once;
+// onContinue: offline → invite_link_offline; else parse: Token → onToken(value), OtherServer → invite_link_other_server,
+// NotAnInvitation → invite_link_not_invitation; typing clears the error; BackHandler → onBack.
+@Composable fun InvitationLinkRoute(apiBaseUrl: HttpUrl, isOnline: Boolean, onToken: (String) -> Unit, onBack: () -> Unit)
+
+// Invitation flow (F-212): one screen per InviteState.
+@Composable fun InviteCheckingScreen(modifier: Modifier = Modifier)
+@Composable fun JoinScreen(preview: InvitationPreview, busy: Boolean, onUsePassword: () -> Unit, modifier: Modifier = Modifier) // S-6 adds onGoogle
+data class SetUpFormState(val name: String, val password: String, val currency: String?, val timeZone: String?, val language: String?,
+    @StringRes val nameError: Int?, @StringRes val passwordError: Int?, @StringRes val currencyError: Int?, @StringRes val timeZoneError: Int?,
+    val formError: UiText?, val busy: Boolean)
+@Composable fun SetUpAccountScreen(email: String, options: SignUpOptions, form: SetUpFormState,
+    onNameChange: (String) -> Unit, onPasswordChange: (String) -> Unit, onCurrencyChange: (String) -> Unit,
+    onTimeZoneChange: (String) -> Unit, onLanguageChange: (String) -> Unit,
+    onSubmit: () -> Unit, onPrivacy: () -> Unit, modifier: Modifier = Modifier) // time zones: ZoneId.getAvailableZoneIds().sorted(), inside
+@Composable fun InviteProblemScreen(problem: InviteProblem, inviter: String?, onRetry: () -> Unit, onSignIn: () -> Unit, modifier: Modifier = Modifier)
+// Its route: BackHandler (SetUp → viewModel.backToJoin(), else onBack); viewModel.hasToken false (a recreated process) → onBack();
+// builds SetUpFormState from the ViewModel's properties; onSubmit = { viewModel.submit(onSignedUp) }; onRetry = viewModel::check.
+@Composable fun InviteFlowRoute(viewModel: InviteViewModel, onBack: () -> Unit, onSignIn: () -> Unit, onSignedUp: (Me?) -> Unit, onPrivacy: () -> Unit)
+
+// Signed in and session states.
+@Composable fun HomeFirstRunScreen(me: Me, modifier: Modifier = Modifier)
+@Composable fun SessionLoadingScreen(modifier: Modifier = Modifier) // the wordmark only
+@Composable fun SessionNotLoaded(isOnline: Boolean, lastError: ApiError?, retrying: Boolean, onRetry: () -> Unit, modifier: Modifier = Modifier)
+```
+
+`InviteViewModel` (F-212) also has `val hasToken: Boolean` (a token was given to `open`). The texts each screen shows are §8.2's and A-45's; its buttons follow A-42's variants (problem: **Sign in**, or **Try again** for `Failed`).
+
 **Accessibility and RTL:** touch targets ≥ 48 dp; TalkBack labels on the show-password toggle ("Show password"), the copy buttons and the QR image (`twostep_qr_alt`); codes and emails wrapped with `BidiFormatter.unicodeWrap` and shown in LTR; Compose RTL test variants for S-1 and S-6 (P-§10.1).
 
 ### 8.3 Privacy notice (HLD §7.5, P-D-29 gate item 15)
@@ -3405,7 +3443,7 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-1.44 | S-1 | I | F-41 step 5, the contract (A-46) | a pending invitation; `openapi.json` | Accept with `method: { kind: "google", ticket: "not-a-ticket" }` and a valid profile; read `paths["/invitations/accept"]`'s documented errors | `400 SIGNUP_TICKET_INVALID`; no user; the invitation still `pending`; no session; the accept errors are exactly §5's list, without `GOOGLE_UNAVAILABLE` |
 | TP-1.45 | S-1 | E | F-159 no inviter (A-45) | invitations from the test route: without `inviterEmail` (inviter `null`); with `inviterEmail: "owner@budmon.local"`; `state: "expired"` without an inviter; for the cap, `page.route("**/api/v1/invitations/accept")` fulfilling `409 USER_CAP_REACHED` after a preview with `inviterName: null` | Open each; on the first, Use a password → fill → Create account (routed) | "This invitation is for {email}." (no text starting with a space or "invited"); "Dev Owner invited {email} to join."; the expired problem with "Ask someone who already has an account to invite you again."; the set-up form shows "There's no room for new people right now. The administrator has been told." |
 | TP-1.46 | S-1 | E | F-155 shell (A-47) | none | Open `/sign-in`; follow **Privacy notice** | A link named "Privacy notice" after the invite-only note, `href="/privacy"`, not a primary button; it opens `/privacy` with the `<h1>` "Privacy notice" |
-| TP-1.47 | S-1 | A | F-208 shell, F-211, F-212 strings (A-45, A-47, A-48) | Robolectric, Compose test rule, `AppTheme`; the screens with fake lambdas; `InviteViewModel` as in TP-1.34 | Join for a preview with `inviterName = null` and with "Mona"; `InviteViewModel.submit` answered `USER_CAP_REACHED` with `inviterName = null`; a problem `Expired` with `inviter = null`; the start screen; the set-up screen; the invitation-link screen | "This invitation is for a@x.test." and "Mona invited a@x.test to join."; `formError == UiText(R.string.invite_full_no_inviter)`; "Ask someone who already has an account to invite you again."; start: a "Privacy notice" button whose click calls `onPrivacy` once; set-up: the `setup_privacy` text has a link and clicking it calls `onPrivacy` once; link screen: heading "Open your invitation", "Paste the link from your invitation email.", the field "Invitation link", **Paste**, primary **Continue**, and **Back to sign in** calling `onBack` |
+| TP-1.47 | S-1 | A | A-49's screens and routes; F-212 (A-45, A-47, A-48) | Robolectric, Compose test rule, `AppTheme`; screens rendered with A-49's signatures and fake lambdas (counters); `InviteViewModel` as in TP-1.34; `InvitationLinkRoute` with `apiBaseUrl` `https://budmon.com/` | `JoinScreen` for a preview with `inviterName = null` and with "Mona"; `InviteViewModel.submit` answered `USER_CAP_REACHED` with `inviterName = null`; `InviteProblemScreen(Expired(at), inviter = null)`; `SignInScreen`; `SetUpAccountScreen`; `InvitationLinkScreen`; `InvitationLinkRoute`: type a full link and tap **Continue**, type `https://budmon.com/x`, then the route with `isOnline = false` | "This invitation is for a@x.test." and "Mona invited a@x.test to join."; `formError == UiText(R.string.invite_full_no_inviter)`; "Ask someone who already has an account to invite you again." and a **Sign in** button calling `onSignIn`; start: "Privacy notice" calls `onPrivacy` once and **I have an invitation link** calls `onHaveLink`; set-up: the `setup_privacy` text has a link that calls `onPrivacy` once, **Create account** calls `onSubmit`, and the name field calls `onNameChange`; link screen: heading "Open your invitation", "Paste the link from your invitation email.", the field "Invitation link", **Paste** calling `onPaste`, primary **Continue** (disabled for blank `text`, else calling `onContinue`), **Back to sign in** calling `onBack`; route: `onToken` with the token; "This isn't an invitation link. Copy the whole link from the email."; "You're offline. Connect to open your invitation." with `onToken` not called |
 | TP-2.1 | S-2 | I | F-45 | empty database | `bootstrapOwner("Owner@X.com")` | Invitation `bootstrap`, no inviter, token hash matches the link's token, no email job |
 | TP-2.2 | S-2 | I | F-45 | owner exists; pending bootstrap; expired pending; user with the email; `"x"`; a pending direct invitation for the email | Call; call with `replace` | `owner_exists`; `pending_exists` / old revoked with an `invitation-ended { revoked }` job and new created; old expired (with an `invitation-ended { expired }` job) and new created; `email_in_use`; `invalid_email`; the direct invitation revoked with its event |
 | TP-2.3 | S-2 | I | F-41 | bootstrap invitation | Accept | `is_product_owner = true`, `invite_allowance = null` |
