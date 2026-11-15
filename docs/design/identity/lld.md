@@ -2,7 +2,7 @@
 module: identity
 doc: lld
 status: approved # draft | in-review | approved
-version: 0.24
+version: 0.25
 hld_version: 0.12
 author: planner
 approved_by: main conversation on the owner's behalf (delegation 2026-10-07, "auto approve the hlds as well just keep going"); the owner reviewed and confirmed every flagged decision on 2026-11-14; plan re-review passed 2026-11-14
@@ -47,6 +47,7 @@ This document doesn't restate the HLD's rationale.
 | 0.22    | 2026-11-15 | **Implementation-time amendment A-27** (S-0b, test-architect; planner decision; approval stands): the contracts behind TP-0b.1, TP-0b.6 and TP-0b.9 are platform A-514 to A-516 (platform LLD v1.36); those three cases are rewritten against them. |
 | 0.23    | 2026-11-15 | **Implementation-time amendment A-28** (S-0b; planner decision; approval stands): the error page's busy state, answered by platform A-519 (platform LLD v1.38). |
 | 0.24    | 2026-11-15 | **Implementation-time amendments A-29 to A-33** (S-0b code review and guide v0.2; approval stands). A-29 the password toggle's name follows its text (owner decision; P-A-520); A-30 `appName` isolated in both email bodies, `unwrapBrand` removed (F-31, TP-0.16); A-31 Android components and the `PlatformUi.kt` migration in S-1 (P-A-524, new TP-1.41); A-32 `Button`'s `ref`/`data-*` and a base link style (P-A-521, P-A-522, new TP-0b.11); A-33 the wDit wordmark and the "D" icon (owner decisions; P-A-523; TP-0b.6, TP-0b.10). Fix in place: TP-0b.6's leftover "the toggle keeps focus and sets `aria-pressed`" removed, matching A-29. |
+| 0.25    | 2026-11-15 | **Implementation-time amendment A-34** (S-0b, test-architect; planner decision; approval stands): Android's system bars take the mode's `canvas` (platform A-525, v1.40); new TP-0b.12. |
 
 ## Amendments
 
@@ -87,6 +88,7 @@ The rows below are identity's own amendments. Text that cites one says "(A-n)" n
 | A-31 | G-2 (S-0b code review): no LLD row owns the Android `PlatformUi.kt` migration (guide §17), and Material 3 buttons stay pills under `AppShapes` | **Platform A-524, built in identity S-1:** `AppButton` (8 dp passed explicitly, 48 dp), `AppTextField`, `AppPasswordField` (UX-D17), `Wordmark()`, Lucide vector drawables, and `PlatformUi.kt` moved onto them. **Lands in S-1** (before its Android screens) | S-1, TP-1.41 (new) | none | planner decision |
 | A-32 | N-1, N-4 (S-0b code review): `Button`'s `ref` and `data-fallback-retry`; links have no base style | **Platform A-521** (`ref` and `data-*` pass-through in A-515 (a)) and **A-522** (a base `a` rule in `app.css`: `accent-fg`, underline 1 px, offset 2 px, 2 px on hover; `Button href` overrides it). **Lands in S-0b** | TP-0b.11 (new) | none | planner decision |
 | A-33 | The wordmark and icon are decided (guide v0.2, `ef9b1a5`; the owner's UX-D11, UX-D12, UX-D15, UX-D16 of 2026-11-15) | **Platform A-523** replaces A-26 (5)'s fallback: the "wDit" wordmark (Plex Sans 600, 20 px; "D" in `accent-fg`; accessible name the visible text; a home link when signed in, plain text when signed out; LTR) and the accent tile with a white "D" (web favicon with 22% corners; Android adaptive and monochrome). The long form isn't used. **Lands in S-0b** (web wordmark, favicon, Android launcher icon); the Android wordmark is A-31's (S-1) | S-1 (visual note), TP-0b.6, TP-0b.10 | none | owner decisions |
+| A-34 | S-0b test-architect: no rule sets Android's status- and navigation-bar colours (guide §15 covers only the window background and bar icons) | **Platform A-525 (v1.40):** both bars take the resolved mode's `canvas`, in `values{,-night}/themes.xml` and in `MainActivity` for an overriding setting on API 26 to 34. The B-1 fix (`4f18d61`) already does this; no code change. **Lands in S-0b** | TP-0b.12 (new) | none | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -2940,7 +2942,7 @@ The build goes on `feat/identity` (PR #2). Status: **S-0 QA passed** (2026-11-15
 | Android `AppTheme`, `ThemeSettingStore`, window background | happy and unhappy | P-A-513 (6) | TP-0b.9 |
 | The visible name: `APP_NAME`, the tab title, `index.html`, Android's label, the favicon, the emails | happy | P-A-513 (7), A-23 | TP-0b.10, TP-0.16 to TP-0.18, TP-0.42 |
 
-- **Tests by part:** tools TP-0b.1, TP-0b.2; web TP-0b.3 to TP-0b.6 (`web-unit`), TP-0b.4, TP-0b.7, TP-0b.8, TP-0b.10, TP-0b.11 (Playwright); Android TP-0b.9; server TP-0.16 to TP-0.18, TP-0.42 (texts per §7.2); plus every existing platform and identity test that asserts the visible product name (P-A-513 (8)).
+- **Tests by part:** tools TP-0b.1, TP-0b.2; web TP-0b.3 to TP-0b.6 (`web-unit`), TP-0b.4, TP-0b.7, TP-0b.8, TP-0b.10, TP-0b.11 (Playwright); Android TP-0b.9, TP-0b.12; server TP-0.16 to TP-0.18, TP-0.42 (texts per §7.2); plus every existing platform and identity test that asserts the visible product name (P-A-513 (8)).
 - **Acceptance criteria:**
   1. Every platform page renders in both modes with tokens only (no raw colour or Tailwind palette class remains; `--color-*: initial`).
   2. A reload in dark mode shows no light frame (TP-0b.4).
@@ -3347,6 +3349,7 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-0b.9 | S-0b | A | P-A-513 (6) | Robolectric; P-A-516's shapes; a `ThemeSettingStore` over `PreferenceDataStoreFactory.create` on a temp file | `set`/`setting` for each value; `"purple"` written to `stringPreferencesKey("theme")` directly; `AppTheme(LIGHT)`, `AppTheme(DARK)`, and `AppTheme(SYSTEM)` with and without the `night` qualifier | Values round-trip; `"purple"` reads as `SYSTEM`; `MaterialTheme.colorScheme.primary` equals `Tokens.Teal.Light.accent` or `Tokens.Teal.Dark.accent` for the resolved mode; dynamic colour never used |
 | TP-0b.10 | S-0b | E | P-A-513 (7), A-23 | the e2e build | Load `/` signed out; read `index.html` before scripts run; fetch `/favicon.svg` | The header wordmark's accessible name is "wDit"; the static `<title>` is "wDit" and page titles end " – wDit"; `/favicon.svg` has a square `<rect>` with `rx` 22% of its size and `fill` equal to `tokens.css`'s light `--c-accent`, a white `<path>` (the "D"), and no `<text>` (P-A-523); the Android test checks `ic_launcher.xml` has background, foreground and `monochrome` layers |
 | TP-0b.11 | S-0b | E | P-A-522 base link style | a fixture route rendering P-F-213 `FormErrorSummary` with one entry and a `Button href` (an existing forms fixture, or one added under `/__fixtures/`) | Read computed styles; hover the summary link | The summary link: `text-decoration-line` underline, 1 px thickness, 2 px offset, colour = `--c-accent-fg` for the mode; 2 px thickness on hover. The `Button` link: no underline, its variant's colours |
+| TP-0b.12 | S-0b | A | P-A-525 system bars (`WindowBackgroundTest`) | Robolectric; the app's theme from `AndroidManifest.xml`; once with the default qualifiers and once with `night` | Read `android:windowBackground`, `android:statusBarColor` and `android:navigationBarColor` from the resolved app theme | All three equal `Tokens.Teal.Light.canvas` by day and `Tokens.Teal.Dark.canvas` at night |
 | TP-1.1 | S-1 | I | F-40 | invitation (factory) | `invitations.preview` | Email, inviter name, expiry, origin |
 | TP-1.2 | S-1 | I | F-40 | none | Token `"x"`; well-formed unknown token | `INVITATION_INVALID` ×2 |
 | TP-1.3 | S-1 | I | F-40 | invitation with `expires_at = now`; one with `now + 1 ms` | Preview each | `INVITATION_EXPIRED { expiredAt }`, row stored `expired`, `invitation-ended` job; second previews fine |
