@@ -1,9 +1,11 @@
 // F-159's S-1 QA fixes (identity LLD v0.32, A-52 to A-57): a later link in the same tab, long
 // text at 360 px, focus on a step change, the set-up privacy link in a new tab, a signed-in visitor.
-// TP-1.48, TP-1.51 to TP-1.54.
+// TP-1.48, TP-1.51 to TP-1.54; TP-1.32x (a bootstrap problem has no ask line, A-58) and TP-1.56
+// (a fragment without t leaves the page alone, A-52), from review B-2.
 import {
   catalogText,
   createInvitation,
+  E2E_PASSWORD,
   expect,
   looseText,
   openInvitation,
@@ -183,6 +185,85 @@ test.describe("TP-1.54: a signed-in visitor on /invite goes home (A-57)", () => 
     await expect(page).toHaveURL(/\/$/);
     await expect(page.locator("main h1")).toHaveText(looseText("Welcome, Signed In."));
     expect(await page.evaluate((k) => sessionStorage.getItem(k), STORED)).toBeNull();
+    expect(previews.n).toBe(0);
+  });
+});
+
+test.describe("TP-1.32x: a bootstrap invitation's problem has no ask line (A-58, review B-2)", () => {
+  for (const [code, status, message, data, text] of [
+    [
+      "INVITATION_REVOKED",
+      410,
+      "Invitation revoked",
+      { inviterName: null, origin: "bootstrap" },
+      "It was cancelled.",
+    ],
+    [
+      "INVITATION_EXPIRED",
+      410,
+      "Invitation expired",
+      { expiredAt: "2026-11-01T10:00:00.000Z", inviterName: null, origin: "bootstrap" },
+      null,
+    ],
+  ] as const) {
+    test(`TP-1.32x: ${code} with origin bootstrap shows neither askInviter nor askAnyone`, async ({
+      page,
+    }) => {
+      // The preview is answered here, so any well-formed token will do.
+      const token = `bmi_${"B".repeat(43)}`;
+      await page.route(`**${PREVIEW}`, (route) =>
+        route.fulfill({
+          status,
+          contentType: "application/json",
+          body: JSON.stringify({ defined: true, code, status, message, data }),
+        }),
+      );
+
+      await page.goto(`/invite#t=${token}`);
+
+      await expect(page.locator("main h1")).toHaveText(
+        catalogText("This invitation can't be used"),
+      );
+      if (text === null) await expect(page.getByText(/It expired on /)).toBeVisible();
+      else await expect(page.getByText(catalogText(text))).toBeVisible();
+      await expect(page.locator("main").getByText(/Ask /)).toHaveCount(0);
+      await expect(
+        page.getByText(catalogText("Ask someone who already has an account to invite you again.")),
+      ).toHaveCount(0);
+    });
+  }
+});
+
+test.describe("TP-1.56: a fragment without t leaves the page alone (A-52, review B-2)", () => {
+  test("TP-1.56: on set-up with a name and password typed, location.hash = #main keeps the state and values and sends no preview", async ({
+    page,
+    request,
+  }) => {
+    const { token } = await createInvitation(request, { email: uniqueEmail() });
+    await openInvitation(page, token);
+    await page.getByRole("button", { name: catalogText("Use a password") }).click();
+    await expect(page.locator("main h1")).toHaveText(catalogText("Set up your account"));
+    const name = page.getByLabel(catalogText("Your name"));
+    const password = page.getByLabel(catalogText("Password"));
+    await name.fill("Mona Hassan");
+    await password.fill(E2E_PASSWORD);
+    const previews = countPreviews(page);
+
+    // Waits for the page's hashchange and two frames, so any handler has run.
+    await page.evaluate(async () => {
+      const fired = new Promise((resolve) => {
+        addEventListener("hashchange", resolve, { once: true });
+      });
+      location.hash = "#main";
+      await fired;
+      await new Promise((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+      });
+    });
+
+    await expect(page.locator("main h1")).toHaveText(catalogText("Set up your account"));
+    await expect(name).toHaveValue("Mona Hassan");
+    await expect(password).toHaveValue(E2E_PASSWORD);
     expect(previews.n).toBe(0);
   });
 });
