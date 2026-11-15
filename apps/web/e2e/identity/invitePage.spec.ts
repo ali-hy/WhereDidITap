@@ -3,6 +3,7 @@
 // TP-1.48, TP-1.51 to TP-1.54, TP-1.56 (a fragment without t, A-65), TP-1.57 to TP-1.59 (stale
 // responses and a hashchange during an accept, A-64), and TP-1.32x (a bootstrap problem has no ask
 // line, A-58; review B-2).
+import type { Request } from "@playwright/test";
 import {
   catalogText,
   createInvitation,
@@ -35,6 +36,14 @@ function countSignUpOptions(page: Page): { readonly n: number } {
     if (new URL(r.url()).pathname === "/api/v1/auth/sign-up-options") seen.n += 1;
   });
   return seen;
+}
+
+/** Resolves once [request] has ended: its body fully received, or failed (aborted by the page). */
+function ended(page: Page, request: Request): Promise<unknown> {
+  return Promise.race([
+    page.waitForEvent("requestfinished", { predicate: (r) => r === request, timeout: 10_000 }),
+    page.waitForEvent("requestfailed", { predicate: (r) => r === request, timeout: 10_000 }),
+  ]);
 }
 
 /** `looseText(text)` without its start anchor: the text at the end of a string. */
@@ -316,11 +325,12 @@ test.describe("TP-1.57 to TP-1.59: stale responses and a hashchange during an ac
 
     await page.goto(`/invite#t=${a.token}`);
     const aRequest = await aSent;
+    const aEnded = ended(page, aRequest);
     await page.evaluate((t) => {
       location.hash = `#t=${t}`;
     }, b.token);
-    // A's response (or null when the page aborted it), then a moment for the page to handle it.
-    await aRequest.response();
+    // A's request fully ended (body received, or aborted), then a moment for the page to handle it.
+    await aEnded;
     await page.evaluate(
       () =>
         new Promise((resolve) => {
@@ -417,6 +427,7 @@ test.describe("TP-1.57 to TP-1.59: stale responses and a hashchange during an ac
     const optionsSent = page.waitForRequest("**/api/v1/auth/sign-up-options");
     await page.getByRole("button", { name: catalogText("Use a password") }).click();
     const optionsRequest = await optionsSent;
+    const optionsEnded = ended(page, optionsRequest);
     await page.evaluate(() => {
       (window as unknown as { h1Focus: string[] }).h1Focus = [];
     });
@@ -425,8 +436,8 @@ test.describe("TP-1.57 to TP-1.59: stale responses and a hashchange during an ac
       location.hash = `#t=${t}`;
     }, b.token);
     await expect(page.getByText(looseText(`This invitation is for ${emailB}.`))).toBeVisible();
-    // A's response (or null when the page aborted it), then a moment for the page to handle it.
-    await optionsRequest.response();
+    // A's request fully ended (body received, or aborted), then a moment for the page to handle it.
+    await optionsEnded;
     await settle(page);
 
     const h1 = page.locator("main h1");
