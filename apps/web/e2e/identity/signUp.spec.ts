@@ -51,7 +51,7 @@ test.describe("TP-1.30: sign-up with a password", () => {
     await expect.poll(() => page.title()).toMatch(/Welcome/);
     const title = await page.title();
     expect(title).not.toMatch(/[⁦-⁩]/);
-    expect(title.replaceAll("‏", "")).toBe("Welcome, Mona Hassan. – wDit");
+    expect(title.replaceAll("\u200f", "")).toBe("Welcome, Mona Hassan. – wDit");
   });
 
   test("TP-1.30x: the token is gone from the address bar while the invitation is checked", async ({
@@ -250,7 +250,10 @@ test.describe("TP-1.37: the privacy notice", () => {
     for (const [i, title] of SECTIONS.entries()) {
       await expect(h2.nth(i)).toHaveText(catalogText(title));
     }
-    await expect(page).toHaveTitle(/Privacy notice.* – wDit$/);
+    // ar-XB adds RLMs around literal segments; the title is otherwise exact.
+    await expect
+      .poll(async () => (await page.title()).replaceAll("\u200f", ""))
+      .toBe("Privacy notice – wDit");
   });
 
   test("TP-1.37: the set-up screen's privacy link opens /privacy", async ({ page, request }) => {
@@ -308,17 +311,19 @@ test.describe("TP-1.38: the first visit and the boot marker", () => {
         catalogText("You need an invitation to join. Got one? Open the link in the email."),
       ),
     ).toBeVisible();
-    await expect(page).toHaveTitle(/^.*Sign in.* – wDit$/);
+    await expect
+      .poll(async () => (await page.title()).replaceAll("\u200f", ""))
+      .toBe("Sign in – wDit");
   });
 
-  test("TP-1.38x: a guarded path signed out redirects to /sign-in?next=<path> with no request", async ({
+  test("TP-1.38x: the guarded / signed out redirects to /sign-in?next=/ with no request", async ({
     page,
   }) => {
     const seen = record(page);
 
-    await page.goto("/settings");
+    await page.goto("/");
 
-    await expect(page).toHaveURL(/\/sign-in\?next=%2Fsettings$|\/sign-in\?next=\/settings$/);
+    await expect(page).toHaveURL(/\/sign-in\?next=(%2F|\/)$/);
     expect(seen.me).toBe(0);
   });
 });

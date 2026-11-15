@@ -150,9 +150,9 @@ for (const mode of ["light", "dark"] as const) {
 
     test(`TP-1.40: a problem whose preview failed (503) (${mode}): one primary, Try again (A-42)`, async ({
       page,
-      request,
     }) => {
-      const { token } = await createInvitation(request, { email: uniqueEmail() });
+      // A well-formed token; the preview is answered here, so no invitation is needed.
+      const token = `bmi_${"A".repeat(43)}`;
       await page.route("**/api/v1/invitations/preview", (route) =>
         route.fulfill({ status: 503, contentType: "text/plain", body: "Service Unavailable" }),
       );
