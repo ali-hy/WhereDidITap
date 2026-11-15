@@ -388,3 +388,194 @@ test.describe("TP-1.39: the e2e invitation route and preview", () => {
     expect(res.status()).toBe(400);
   });
 });
+
+test.describe("TP-1.30x (review B-6): the stored invitation token (F-159)", () => {
+  const STORED = "budmon.invite";
+
+  /** The tokens sent to /api/v1/invitations/preview, in order. */
+  function previews(page: Page): string[] {
+    const sent: string[] = [];
+    page.on("request", (r) => {
+      if (new URL(r.url()).pathname !== "/api/v1/invitations/preview") return;
+      const body = r.postDataJSON() as { token?: unknown } | null;
+      sent.push(typeof body?.token === "string" ? body.token : "");
+    });
+    return sent;
+  }
+
+  test("TP-1.30x: after a successful accept the stored token is gone", async ({
+    page,
+    request,
+  }) => {
+    const { token } = await createInvitation(request, { email: uniqueEmail() });
+
+    await openInvitation(page, token);
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), STORED)).not.toBeNull();
+    await signUpThroughUi(page, token, "Stored Token");
+
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), STORED)).toBeNull();
+  });
+
+  test("TP-1.30x: /invite without a fragment within 30 minutes reuses the stored token (a preview is sent)", async ({
+    page,
+    request,
+  }) => {
+    const { token } = await createInvitation(request, { email: uniqueEmail() });
+    const sent = previews(page);
+    const start = Date.now();
+    await page.clock.setFixedTime(start);
+    await openInvitation(page, token);
+
+    await page.clock.setFixedTime(start + 29 * 60_000);
+    await page.goto("/invite");
+
+    await expect(page.locator("main h1")).toHaveText(catalogText("You've been invited"));
+    expect(sent).toEqual([token, token]);
+  });
+
+  test("TP-1.30x: after 30 minutes /invite without a fragment shows the incomplete problem, sends nothing and removes the entry", async ({
+    page,
+    request,
+  }) => {
+    const { token } = await createInvitation(request, { email: uniqueEmail() });
+    const sent = previews(page);
+    const start = Date.now();
+    await page.clock.setFixedTime(start);
+    await openInvitation(page, token);
+
+    await page.clock.setFixedTime(start + 31 * 60_000);
+    await page.goto("/invite");
+
+    await expect(page.locator("main h1")).toHaveText(catalogText("This invitation can't be used"));
+    await expect(
+      page.getByText(
+        catalogText(
+          "This link isn't complete. Open it again from the email, or copy the whole link.",
+        ),
+      ),
+    ).toBeVisible();
+    expect(sent).toEqual([token]);
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), STORED)).toBeNull();
+  });
+
+  test("TP-1.30x: a valid fragment replaces an older stored token", async ({ page, request }) => {
+    const first = await createInvitation(request, { email: uniqueEmail() });
+    const second = await createInvitation(request, { email: uniqueEmail() });
+    const sent = previews(page);
+    await openInvitation(page, first.token);
+    await openInvitation(page, second.token);
+
+    await page.goto("/invite");
+
+    await expect(page.locator("main h1")).toHaveText(catalogText("You've been invited"));
+    expect(sent).toEqual([first.token, second.token, second.token]);
+  });
+});
+
+test.describe("TP-1.45: no inviter (A-45)", () => {
+  test("TP-1.45: join without an inviter reads 'This invitation is for {email}.', and no text starts with a space or 'invited'", async ({
+    page,
+    request,
+  }) => {
+    const email = uniqueEmail();
+    const { token } = await createInvitation(request, { email });
+
+    await openInvitation(page, token);
+
+    await expect(page.getByText(looseText(`This invitation is for ${email}.`))).toBeVisible();
+    const texts = await page
+      .locator("main p, main span, main div")
+      .evaluateAll((els) =>
+        els.map((el) => el.textContent.replace(/[‏⁦-⁩]/g, "")).filter((t) => t !== ""),
+      );
+    expect(texts.filter((t) => /^\s|^invited/.test(t))).toEqual([]);
+  });
+
+  test("TP-1.45: join with inviterEmail owner@budmon.local reads 'Dev Owner invited {email} to join.'", async ({
+    page,
+    request,
+  }) => {
+    const email = uniqueEmail();
+    const { token } = await createInvitation(request, {
+      email,
+      inviterEmail: "owner@budmon.local",
+    });
+
+    await openInvitation(page, token);
+
+    await expect(page.getByText(looseText(`Dev Owner invited ${email} to join.`))).toBeVisible();
+  });
+
+  test("TP-1.45: an expired invitation without an inviter: 'Ask someone who already has an account to invite you again.'", async ({
+    page,
+    request,
+  }) => {
+    const { token } = await createInvitation(request, { email: uniqueEmail(), state: "expired" });
+
+    await page.goto(`/invite#t=${token}`);
+
+    await expect(page.locator("main h1")).toHaveText(catalogText("This invitation can't be used"));
+    await expect(
+      page.getByText(catalogText("Ask someone who already has an account to invite you again.")),
+    ).toBeVisible();
+  });
+
+  test("TP-1.45: USER_CAP_REACHED without an inviter: the set-up form shows the no-inviter text", async ({
+    page,
+    request,
+  }) => {
+    const { token } = await createInvitation(request, { email: uniqueEmail() });
+    await page.route("**/api/v1/invitations/accept", (route) =>
+      route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          defined: true,
+          code: "USER_CAP_REACHED",
+          status: 409,
+          message: "User cap reached",
+        }),
+      }),
+    );
+    await openInvitation(page, token);
+    await page.getByRole("button", { name: catalogText("Use a password") }).click();
+    await page.getByLabel(catalogText("Your name")).fill("Cap Check");
+    await page.getByLabel(catalogText("Password")).fill(E2E_PASSWORD);
+
+    await page.getByRole("button", { name: catalogText("Create account") }).click();
+
+    await expect(page.locator("main h1")).toHaveText(catalogText("Set up your account"));
+    await expect(
+      page.getByText(
+        catalogText("There's no room for new people right now. The administrator has been told."),
+      ),
+    ).toBeVisible();
+  });
+});
+
+test.describe("TP-1.46: the sign-in shell's privacy link (A-47)", () => {
+  test("TP-1.46: a link 'Privacy notice' after the invite-only note, href /privacy, not a primary button; it opens /privacy", async ({
+    page,
+  }) => {
+    await page.goto("/sign-in");
+    const note = page.getByText(
+      catalogText("You need an invitation to join. Got one? Open the link in the email."),
+    );
+    const link = page.locator("main").getByRole("link", { name: catalogText("Privacy notice") });
+    await expect(note).toBeVisible();
+    await expect(link).toHaveAttribute("href", "/privacy");
+
+    const after = await note.evaluate(
+      (n, l) => Boolean(n.compareDocumentPosition(l) & Node.DOCUMENT_POSITION_FOLLOWING),
+      await link.elementHandle(),
+    );
+    expect(after).toBe(true);
+    expect(await primaryCount(page)).toBe(0);
+    await expect(link).not.toHaveCSS("background-color", await accentRgb(page));
+
+    await link.click();
+
+    await expect(page).toHaveURL(/\/privacy$/);
+    await expect(page.locator("main h1")).toHaveText(catalogText("Privacy notice"));
+  });
+});

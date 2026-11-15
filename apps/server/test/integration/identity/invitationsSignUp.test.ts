@@ -476,6 +476,99 @@ describe("TP-1.7: accept errors", () => {
   });
 });
 
+describe("TP-1.7x (review B-8): accept-side F-41 checks", () => {
+  it("TP-1.7x: accepting an invitation whose expires_at is now → INVITATION_EXPIRED; the row stays expired after the error; one invitation-ended published", async () => {
+    const inv = await invitation({ expiresAt: NOW });
+
+    const res = await accept({ token: inv.token });
+
+    expect(res.status).toBe(410);
+    expect(errorOf(res)).toMatchObject({
+      code: "INVITATION_EXPIRED",
+      data: { expiredAt: wire(NOW) },
+    });
+    expect((await invitationsRepo.findById(h, inv.invitationId))?.status).toBe("expired");
+    expect(await published()).toEqual([{ invitationId: inv.invitationId, reason: "expired" }]);
+    expect(await userByEmail(inv.email)).toBeUndefined();
+  });
+
+  it("TP-1.7x: accepting after the invited email was banned → INVITATION_INVALID, no user", async () => {
+    const inv = await invitation();
+    await banFactory(h, { email: inv.email, now: NOW });
+
+    const res = await accept({ token: inv.token });
+
+    expect(res.status).toBe(400);
+    expect(errorOf(res).code).toBe("INVITATION_INVALID");
+    expect(await userByEmail(inv.email)).toBeUndefined();
+    expect((await invitationsRepo.findById(h, inv.invitationId))?.status).toBe("pending");
+  });
+
+  it("TP-1.7x: the cap with the owner as the inviter → exactly one invitation_cap_failed job, recipient inviter (§7.2: owner only when it isn't the inviter)", async () => {
+    const owner = await userFactory(h, { isProductOwner: true });
+    const inv = await invitation({ inviterUserId: owner.id });
+    await settingsRepo.setUserCap(h, await countUsers());
+
+    const res = await accept({ token: inv.token });
+
+    expect(errorOf(res).code).toBe("USER_CAP_REACHED");
+    expect(
+      (await emailJobs(inv.invitationId)).map((j) => ({
+        kind: j["kind"],
+        recipient: j["recipient"],
+      })),
+    ).toEqual([{ kind: "invitation_cap_failed", recipient: "inviter" }]);
+  });
+
+  it("TP-1.7x: the cap with no inviter (an owner exists) → exactly one invitation_cap_failed job, recipient owner", async () => {
+    await userFactory(h, { isProductOwner: true });
+    const inv = await invitation();
+    await settingsRepo.setUserCap(h, await countUsers());
+
+    const res = await accept({ token: inv.token });
+
+    expect(errorOf(res).code).toBe("USER_CAP_REACHED");
+    expect(
+      (await emailJobs(inv.invitationId)).map((j) => ({
+        kind: j["kind"],
+        recipient: j["recipient"],
+      })),
+    ).toEqual([{ kind: "invitation_cap_failed", recipient: "owner" }]);
+  });
+});
+
+describe("TP-1.44: a Google accept before S-6 (A-46)", () => {
+  it("TP-1.44: method google with ticket 'not-a-ticket' → 400 SIGNUP_TICKET_INVALID; no user, no session, the invitation still pending", async () => {
+    const inv = await invitation();
+
+    const res = await call(
+      api.app,
+      "POST",
+      "/invitations/accept",
+      {
+        token: inv.token,
+        displayName: "Mona Hassan",
+        locale: "en",
+        timeZone: "Africa/Cairo",
+        baseCurrency: "USD",
+        method: { kind: "google", ticket: "not-a-ticket" },
+        tokenDelivery: "body",
+      },
+      { client: "android/1" },
+    );
+
+    expect(res.status).toBe(400);
+    expect(errorOf(res)).toMatchObject({
+      defined: true,
+      code: "SIGNUP_TICKET_INVALID",
+      message: "Sign-up ticket invalid",
+    });
+    expect(await userByEmail(inv.email)).toBeUndefined();
+    expect((await h.executeSql("SELECT count(*)::int AS n FROM sessions")).rows[0]?.["n"]).toBe(0);
+    expect((await invitationsRepo.findById(h, inv.invitationId))?.status).toBe("pending");
+  });
+});
+
 describe("TP-1.8: two concurrent accepts", () => {
   it("TP-1.8: one answers 200, the other INVITATION_USED; one user exists", async () => {
     const inv = await invitation();

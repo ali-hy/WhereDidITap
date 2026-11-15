@@ -71,6 +71,46 @@ describe("TP-0.25: the contract with identity's S-0 part", () => {
   });
 });
 
+describe("TP-1.44: invitations.accept's documented errors (A-46)", () => {
+  it("TP-1.44: the identity errors on POST /invitations/accept are exactly §5.4's list, without GOOGLE_UNAVAILABLE", () => {
+    const document = JSON.parse(readFileSync(path.join(PACKAGE_DIR, "openapi.json"), "utf8")) as {
+      paths: Record<string, Record<string, { responses: Record<string, unknown> }>>;
+    };
+    const responses = document.paths["/invitations/accept"]?.["post"]?.responses ?? {};
+    const codes = new Set<string>();
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        for (const n of node) walk(n);
+      } else if (typeof node === "object" && node !== null) {
+        const record = node as Record<string, unknown>;
+        const code = (record["code"] as { const?: unknown } | undefined)?.const;
+        if (typeof code === "string") codes.add(code);
+        for (const value of Object.values(record)) walk(value);
+      }
+    };
+    walk(responses);
+    const identity = [...codes].filter((c) => Object.hasOwn(IDENTITY_ERRORS, c)).sort();
+
+    expect(identity).toEqual(
+      [
+        "INVITATION_INVALID",
+        "INVITATION_EXPIRED",
+        "INVITATION_REVOKED",
+        "INVITATION_USED",
+        "USER_CAP_REACHED",
+        "PASSWORD_TOO_WEAK",
+        "SIGNUP_TICKET_INVALID",
+        "GOOGLE_ACCOUNT_NOT_ALLOWED",
+        "GOOGLE_ACCOUNT_IN_USE",
+      ].sort(),
+    );
+    expect(codes.has("GOOGLE_UNAVAILABLE")).toBe(false);
+    for (const platform of ["VALIDATION_FAILED", "FORBIDDEN", "RATE_LIMITED"]) {
+      expect(codes.has(platform), platform).toBe(true);
+    }
+  });
+});
+
 describe("TP-0.25x: §5.1's shared schemas", () => {
   it("TP-0.25x: EmailInput is 1..320 characters", () => {
     expect(ok(EmailInput, "a")).toBe(true);
