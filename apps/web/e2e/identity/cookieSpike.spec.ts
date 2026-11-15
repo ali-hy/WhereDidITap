@@ -47,7 +47,10 @@ test("TP-0.30: a Secure HttpOnly SameSite=Strict cookie from http://localhost is
   browserName,
 }, testInfo) => {
   await page.goto(`${origin}/api/v1/spike/set`);
-  const stored = (await context.cookies(origin)).find((c) => c.name === "budmon_at");
+  // context.cookies(url) filters by the URL's path, so ask for a URL inside the cookie's Path.
+  const stored = (await context.cookies(`${origin}/api/v1/spike/echo`)).find(
+    (c) => c.name === "budmon_at",
+  );
   const sent = await page.evaluate(async () => (await fetch("/api/v1/spike/echo")).text());
   const visibleToScript = await page.evaluate(() => document.cookie);
   testInfo.annotations.push({
