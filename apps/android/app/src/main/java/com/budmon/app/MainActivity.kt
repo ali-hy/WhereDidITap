@@ -14,12 +14,22 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Surface
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navigation
+import com.budmon.app.core.update.UpdateState
 import com.budmon.app.identity.InviteViewModel
 import com.budmon.app.identity.SessionUiState
 import com.budmon.app.identity.SessionViewModel
@@ -30,18 +40,6 @@ import com.budmon.app.identity.ui.InviteFlowScreen
 import com.budmon.app.identity.ui.SessionLoadingScreen
 import com.budmon.app.identity.ui.SessionNotLoaded
 import com.budmon.app.identity.ui.SignInScreen
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
-import androidx.navigation.navigation
-import okhttp3.HttpUrl
-import javax.inject.Named
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.unit.dp
-import androidx.core.view.WindowCompat
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.budmon.app.core.update.UpdateState
 import com.budmon.app.ui.platform.OfflineBanner
 import com.budmon.app.ui.platform.PlatformStatusViewModel
 import com.budmon.app.ui.platform.SyncIndicator
@@ -54,7 +52,9 @@ import com.budmon.app.ui.theme.Tokens
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import okhttp3.HttpUrl
 import javax.inject.Inject
+import javax.inject.Named
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -107,8 +107,15 @@ class MainActivity : ComponentActivity() {
                                             navigation(startDestination = ROUTE_HOME, route = ROUTE_SIGNED_IN) {
                                                 composable(ROUTE_HOME) {
                                                     Column {
-                                                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                                            SyncIndicator(pending = status.counts.pending, syncing = status.syncing, failed = status.counts.failed)
+                                                        Column(
+                                                            Modifier.padding(16.dp),
+                                                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                                                        ) {
+                                                            SyncIndicator(
+                                                                pending = status.counts.pending,
+                                                                syncing = status.syncing,
+                                                                failed = status.counts.failed,
+                                                            )
                                                             if (update is UpdateState.Available) {
                                                                 UpdateCard(
                                                                     onUpdate = { status.downloadUrl?.let(::openDownload) },
@@ -121,7 +128,12 @@ class MainActivity : ComponentActivity() {
                                                             HomeFirstRunScreen(me)
                                                         } else {
                                                             val retrying by sessionModel.probing.collectAsStateWithLifecycle()
-                                                            SessionNotLoaded(status.isOnline, current.lastError, retrying, sessionModel::retry)
+                                                            SessionNotLoaded(
+                                                                status.isOnline,
+                                                                current.lastError,
+                                                                retrying,
+                                                                sessionModel::retry,
+                                                            )
                                                         }
                                                     }
                                                 }
@@ -147,7 +159,12 @@ class MainActivity : ComponentActivity() {
         NavHost(nav, startDestination = ROUTE_SIGNED_OUT) {
             navigation(startDestination = ROUTE_SIGN_IN, route = ROUTE_SIGNED_OUT) {
                 composable(ROUTE_SIGN_IN) {
-                    SignInScreen(reason, isOnline, onHaveLink = { nav.navigate(ROUTE_INVITATION_LINK) })
+                    SignInScreen(
+                        reason,
+                        isOnline,
+                        onHaveLink = { nav.navigate(ROUTE_INVITATION_LINK) },
+                        onPrivacy = { openPrivacy() },
+                    )
                 }
                 composable(ROUTE_INVITATION_LINK) { entry ->
                     // The invitation state lives in the graph's view model; the token is never a route.
@@ -168,6 +185,7 @@ class MainActivity : ComponentActivity() {
                         onBack = { nav.popBackStack() },
                         onSignIn = { nav.popBackStack(ROUTE_SIGN_IN, inclusive = false) },
                         onSignedUp = sessionModel::onSignedIn,
+                        onOpenPrivacy = { openPrivacy() },
                         viewModel = invite,
                     )
                 }
@@ -199,6 +217,11 @@ class MainActivity : ComponentActivity() {
         const val ROUTE_INVITE = "invite"
         const val ROUTE_SIGNED_IN = "signed_in"
         const val ROUTE_HOME = "home"
+    }
+
+    /** The privacy notice on the API's origin, in a Custom Tab. */
+    private fun openPrivacy() {
+        openDownload(apiBaseUrl.newBuilder().encodedPath("/privacy").query(null).fragment(null).build().toString())
     }
 
     /** Opens the APK download in a Custom Tab; false when nothing can open it. */

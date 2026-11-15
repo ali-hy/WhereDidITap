@@ -85,17 +85,22 @@ constructor(
 
     /** Starts the flow for [value] from a clean form. The token lives only here, never in saved state. */
     fun open(value: String) {
-        token = value
-        preview = null
-        name = ""
-        password = ""
-        currency = null
-        language = null
-        nameError = null
-        passwordError = null
-        currencyError = null
-        timeZoneError = null
-        formError = null
+        val same = token == value
+        // The same token keeps its state, unless it ended in a problem.
+        if (same && state !is InviteState.Problem) return
+        if (!same) {
+            token = value
+            preview = null
+            name = ""
+            password = ""
+            currency = null
+            language = null
+            nameError = null
+            passwordError = null
+            currencyError = null
+            timeZoneError = null
+            formError = null
+        }
         check()
     }
 
@@ -123,6 +128,8 @@ constructor(
 
     fun usePassword() {
         val p = preview ?: return
+        if (busy) return
+        busy = true
         viewModelScope.launch {
             try {
                 val options = repository.signUpOptions()
@@ -131,6 +138,8 @@ constructor(
                 state = InviteState.SetUp(p, options)
             } catch (e: ApiException) {
                 state = InviteState.Problem(InviteProblem.Failed(e.error), p.inviterName)
+            } finally {
+                busy = false
             }
         }
     }
@@ -235,9 +244,18 @@ constructor(
                     val issues = error.data?.get("issues") as? JsonArray
                     var mapped = false
                     for (issue in issues.orEmpty()) {
-                        val path = ((issue as? JsonObject)?.get("path") as? JsonArray)?.firstOrNull() as? JsonPrimitive
+                        val fields = issue as? JsonObject
+                        val path = (fields?.get("path") as? JsonArray)?.firstOrNull() as? JsonPrimitive
+                        val code = (fields?.get("code") as? JsonPrimitive)?.content
                         when (path?.content) {
-                            "displayName" -> nameError = R.string.profile_name_required
+                            "displayName" ->
+                                nameError =
+                                    when (code) {
+                                        "too_big" -> R.string.profile_name_too_long
+                                        "too_small" -> R.string.profile_name_required
+                                        else -> R.string.error_validation_form
+                                    }
+
                             "baseCurrency" -> currencyError = R.string.profile_currency_required
                             "timeZone" -> timeZoneError = R.string.profile_time_zone_required
                             else -> continue
@@ -248,7 +266,13 @@ constructor(
                 }
 
                 "USER_CAP_REACHED" -> {
-                    formError = UiText(R.string.invite_full, listOf(preview?.inviterName.orEmpty()))
+                    val inviter = preview?.inviterName?.trim().orEmpty()
+                    formError =
+                        if (inviter.isEmpty()) {
+                            UiText(R.string.invite_full_no_inviter)
+                        } else {
+                            UiText(R.string.invite_full, listOf(inviter))
+                        }
                     return
                 }
 

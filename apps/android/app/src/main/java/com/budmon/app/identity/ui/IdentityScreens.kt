@@ -2,6 +2,7 @@
 package com.budmon.app.identity.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -32,7 +34,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -40,27 +41,34 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.core.text.BidiFormatter
 import com.budmon.app.R
 import com.budmon.app.core.error.ErrorMessages
+import com.budmon.app.core.error.Operation
 import com.budmon.app.core.error.UiText
 import com.budmon.app.core.network.ApiError
+import com.budmon.app.identity.IdentityErrorMessages
 import com.budmon.app.identity.InvitationLinkParser
 import com.budmon.app.identity.InviteProblem
 import com.budmon.app.identity.InviteState
 import com.budmon.app.identity.InviteViewModel
 import com.budmon.app.identity.Me
-import com.budmon.app.identity.IdentityErrorMessages
 import com.budmon.app.identity.ParseResult
 import com.budmon.app.identity.SignedOutReason
-import com.budmon.app.core.error.Operation
 import com.budmon.app.ui.components.AppButton
 import com.budmon.app.ui.components.AppButtonVariant
 import com.budmon.app.ui.components.AppPasswordField
 import com.budmon.app.ui.components.AppTextField
 import com.budmon.app.ui.components.Wordmark
+import com.budmon.app.ui.theme.AppColors
 import okhttp3.HttpUrl
 import java.text.DateFormat
 import java.time.Instant
@@ -110,6 +118,7 @@ fun SignInScreen(
     reason: SignedOutReason,
     isOnline: Boolean,
     onHaveLink: () -> Unit,
+    onPrivacy: () -> Unit,
 ) {
     Page {
         Heading(stringResource(R.string.signin_title))
@@ -117,6 +126,7 @@ fun SignInScreen(
         Text(stringResource(R.string.signin_invite_only), color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (!isOnline) Text(stringResource(R.string.signin_offline), color = MaterialTheme.colorScheme.error)
         AppButton(stringResource(R.string.signin_have_link), onHaveLink, Modifier.fillMaxWidth(), AppButtonVariant.Secondary)
+        AppButton(stringResource(R.string.signin_privacy), onPrivacy, variant = AppButtonVariant.Tertiary)
     }
 }
 
@@ -151,6 +161,7 @@ fun InvitationLinkScreen(
     }
     Page {
         Heading(stringResource(R.string.invite_link_title))
+        Text(stringResource(R.string.invite_link_instruction), color = MaterialTheme.colorScheme.onSurfaceVariant)
         AppTextField(
             value = text,
             onValueChange = {
@@ -166,7 +177,8 @@ fun InvitationLinkScreen(
             Modifier.fillMaxWidth(),
             AppButtonVariant.Secondary,
         )
-        AppButton(stringResource(R.string.invite_link_open), ::open, Modifier.fillMaxWidth(), enabled = text.isNotBlank())
+        AppButton(stringResource(R.string.invite_link_continue), ::open, Modifier.fillMaxWidth(), enabled = text.isNotBlank())
+        AppButton(stringResource(R.string.invite_link_back), onBack, variant = AppButtonVariant.Tertiary)
     }
 }
 
@@ -176,6 +188,7 @@ fun InviteFlowScreen(
     onBack: () -> Unit,
     onSignIn: () -> Unit,
     onSignedUp: (Me?) -> Unit,
+    onOpenPrivacy: () -> Unit,
     viewModel: InviteViewModel,
 ) {
     // Back on set-up returns to join; elsewhere it leaves the screen.
@@ -199,20 +212,28 @@ fun InviteFlowScreen(
                 val line =
                     if (p.origin == "bootstrap") {
                         stringResource(R.string.invite_from_owner, isolated(p.email))
+                    } else if (p.inviterName.isNullOrBlank()) {
+                        stringResource(R.string.invite_for_email, isolated(p.email))
                     } else {
-                        stringResource(R.string.invite_from, isolated(p.inviterName.orEmpty()), isolated(p.email))
+                        stringResource(R.string.invite_from, isolated(p.inviterName.trim()), isolated(p.email))
                     }
                 Text(line)
                 Text(
                     stringResource(R.string.invite_expires, formatDate(p.expiresAt)),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                AppButton(stringResource(R.string.invite_use_password), viewModel::usePassword, Modifier.fillMaxWidth(), AppButtonVariant.Secondary)
+                AppButton(
+                    stringResource(R.string.invite_use_password),
+                    viewModel::usePassword,
+                    Modifier.fillMaxWidth(),
+                    AppButtonVariant.Secondary,
+                    busy = viewModel.busy,
+                )
             }
         }
 
         is InviteState.SetUp -> {
-            SetUpAccountScreen(state, viewModel, onSignedUp)
+            SetUpAccountScreen(state, viewModel, onSignedUp, onOpenPrivacy)
         }
 
         is InviteState.Problem -> {
@@ -241,9 +262,15 @@ private fun ProblemScreen(
                 is InviteProblem.Failed -> uiString(IdentityErrorMessages.forError(problem.error, Operation.Read))
             }
         Text(text)
-        val inviter = state.inviter
-        if ((problem is InviteProblem.Expired || problem == InviteProblem.Revoked) && !inviter.isNullOrEmpty()) {
-            Text(stringResource(R.string.invite_problem_ask_inviter, isolated(inviter)), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val inviter = state.inviter?.trim().orEmpty()
+        if (problem is InviteProblem.Expired || problem == InviteProblem.Revoked) {
+            val ask =
+                if (inviter.isEmpty()) {
+                    stringResource(R.string.invite_problem_ask_anyone)
+                } else {
+                    stringResource(R.string.invite_problem_ask_inviter, isolated(inviter))
+                }
+            Text(ask, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (problem is InviteProblem.Failed) {
             AppButton(stringResource(R.string.error_fallback_retry), onRetry, Modifier.fillMaxWidth())
@@ -258,9 +285,10 @@ private fun SetUpAccountScreen(
     state: InviteState.SetUp,
     vm: InviteViewModel,
     onSignedUp: (Me?) -> Unit,
+    onOpenPrivacy: () -> Unit,
 ) {
     val locale = Locale.getDefault()
-    val zones = remember { TimeZone.getAvailableIDs().toList().sorted() }
+    val zones = remember { ZoneId.getAvailableZoneIds().sorted() }
     Page {
         Heading(stringResource(R.string.setup_title))
         Text(isolated(state.preview.email), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -300,12 +328,23 @@ private fun SetUpAccountScreen(
         PickerField(
             label = stringResource(R.string.setup_language),
             hint = null,
-            options = state.options.locales.map { it to Locale.forLanguageTag(it).getDisplayName(Locale.forLanguageTag(it)) },
+            options =
+            state.options.locales.map {
+                it to Locale.forLanguageTag(it).getDisplayName(Locale.forLanguageTag(it))
+            },
             selected = vm.language,
             error = null,
             onSelect = { vm.language = it },
         )
-        Text(stringResource(R.string.setup_privacy), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // Opens the notice on the server's origin in a Custom Tab.
+        val linkStyle = SpanStyle(color = AppColors.extra.accentFg, textDecoration = TextDecoration.Underline)
+        val privacy =
+            buildAnnotatedString {
+                withLink(LinkAnnotation.Clickable("privacy", TextLinkStyles(linkStyle)) { onOpenPrivacy() }) {
+                    append(stringResource(R.string.setup_privacy))
+                }
+            }
+        Text(privacy, style = MaterialTheme.typography.bodySmall, modifier = Modifier.heightIn(min = 48.dp))
         AppButton(
             stringResource(R.string.setup_submit),
             { vm.submit(onSignedUp) },
@@ -381,14 +420,28 @@ fun HomeFirstRunScreen(me: Me) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(painterResource(R.drawable.lucide_wallet), contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
+        Box(
+            Modifier.size(48.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                painterResource(R.drawable.lucide_wallet),
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+        }
         Text(
             stringResource(R.string.home_welcome, isolated(me.displayName)),
-            style = MaterialTheme.typography.headlineSmall,
+            style = MaterialTheme.typography.titleLarge,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(top = 12.dp).semantics { heading() },
         )
-        Text(stringResource(R.string.home_first_run), color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+        Text(
+            stringResource(R.string.home_first_run),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 

@@ -110,7 +110,8 @@ constructor(
 
     private fun JsonObject.flag(key: String): Boolean = (this[key] as? JsonPrimitive)?.booleanOrNull ?: false
 
-    private fun JsonElement.strings(): List<String> = (this as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
+    private fun JsonElement.strings(): List<String> =
+        (this as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
 
     suspend fun getMe(): Me {
         val o = call(Request.Builder().url(url("me")).get().build())

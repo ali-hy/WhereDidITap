@@ -104,7 +104,9 @@
     <string name="invite_link_title">Open your invitation</string>
     <string name="invite_link_paste">Paste</string>
     <string name="invite_link_field">Invitation link</string>
-    <string name="invite_link_open">Open invitation</string>
+    <string name="invite_link_continue">Continue</string>
+    <string name="invite_link_instruction">Paste the link from your invitation email.</string>
+    <string name="invite_link_back">Back to sign in</string>
     <string name="invite_link_not_invitation">This isn't an invitation link. Copy the whole link from the email.</string>
     <string name="invite_link_other_server">This link is for a different server.</string>
     <string name="invite_link_offline">You're offline. Connect to open your invitation.</string>
@@ -121,6 +123,10 @@
     <string name="invite_problem_invalid">This invitation can't be used.</string>
     <string name="invite_problem_ready">Your account is ready. Sign in to continue.</string>
     <string name="invite_problem_ask_inviter">Ask %1$s to send a new one.</string>
+    <string name="invite_for_email">This invitation is for %1$s.</string>
+    <string name="invite_full_no_inviter">There\'s no room for new people right now. The administrator has been told.</string>
+    <string name="invite_problem_ask_anyone">Ask someone who already has an account to invite you again.</string>
+    <string name="signin_privacy">Privacy notice</string>
     <string name="invite_full">There's no room for new people right now. %1$s and the administrator have been told.</string>
     <string name="setup_title">Set up your account</string>
     <string name="setup_name">Your name</string>
@@ -143,5 +149,4 @@
     <string name="profile_time_zone_required">Choose a time zone.</string>
     <string name="home_welcome">Welcome, %1$s.</string>
     <string name="home_first_run">Add your first account to start.</string>
-    <string name="home_loading">Loading…</string>
 </resources>
