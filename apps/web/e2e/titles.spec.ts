@@ -1,12 +1,12 @@
 // Per-page document titles (F-218 setDocumentTitle, F-216 pages, F-209; A-464). TP-11.33.
 import { expect, test } from "./fixtures.js";
 
-test("TP-11.33 (A-464): / is wDit; a client-side Page not found is Page not found – wDit; the error fallback is Something went wrong on our side – wDit", async ({
+test("TP-11.33 (A-464, A-510): the home placeholder is wDit; a client-side Page not found is Page not found – wDit; the error fallback is Something went wrong on our side – wDit", async ({
   page,
 }, testInfo) => {
   test.skip(testInfo.project.name !== "chromium", "chromium project only");
 
-  await page.goto("/");
+  await page.goto("/__fixtures/home-placeholder");
   await expect(page).toHaveTitle("wDit");
 
   await page.evaluate(() => {

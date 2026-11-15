@@ -15,6 +15,7 @@ import { createMemoryEmailSender, type MemoryEmailSender } from "../../src/ident
 import { identityHandlers } from "../../src/identity/identityJobs.js";
 import type { IdentityOverrides } from "../../src/identity/identityModule.js";
 import { buildApiContainer, observed, type InjectedResponse, type Observed } from "./api.js";
+import type { ApiContainerOverrides } from "../../src/platform/container.js";
 import type { ApiContainer } from "../../src/platform/container.js";
 import type { JobContext } from "./jobs.js";
 import { recordingLogger, type LoggedLine } from "./platform.js";
@@ -49,6 +50,8 @@ export async function buildIdentityApi(
     identityOverrides?: IdentityOverrides;
     env?: Record<string, string | undefined>;
     clock?: MutableClock;
+    /** Other container overrides (for example `registry: templateJobRegistry()`). */
+    overrides?: ApiContainerOverrides;
   } = {},
 ): Promise<IdentityApi> {
   const clock = opts.clock ?? fixedClock(T0);
@@ -59,6 +62,7 @@ export async function buildIdentityApi(
       ...obs.overrides,
       clock,
       objectStore: createMemoryObjectStore(clock),
+      ...opts.overrides,
       identityOverrides: {
         sender,
         commonPasswords: TEST_COMMON_PASSWORDS,

@@ -1,9 +1,13 @@
 // Identity's factories (identity LLD §10.1), owned by the test-architect. Each writes through
 // identity's repos on a DbHandle and returns what tests need (plain tokens included). Later slices
-// add the two-step, recovery-code, Google, export and ban factories.
+// add the known-code recovery factory and the export factory.
+import { randomBytes } from "node:crypto";
 import { Temporal, uuidv7Generator } from "@budmon/shared";
 import type { DbHandle } from "../../src/platform/db/types.js";
+import type { ApiSecretsCipher } from "../../src/platform/crypto/apiSecrets.js";
+import * as bansRepo from "../../src/identity/bansRepo.js";
 import * as invitationsRepo from "../../src/identity/invitationsRepo.js";
+import * as twoStepRepo from "../../src/identity/twoStepRepo.js";
 import * as knownDevicesRepo from "../../src/identity/knownDevicesRepo.js";
 import * as resetsRepo from "../../src/identity/resetsRepo.js";
 import * as sessionsRepo from "../../src/identity/sessionsRepo.js";
@@ -182,4 +186,87 @@ export async function knownDeviceFactory(
     expiresAt: toDate(input.expiresAt ?? input.now.add({ hours: 24 * 365 })),
   });
   return { deviceId, token };
+}
+
+/** Marks an invitation accepted by `userId` at `at`. */
+export async function acceptInvitationRow(
+  h: DbHandle,
+  invitationId: string,
+  userId: string,
+  at: Temporal.Instant,
+): Promise<void> {
+  await invitationsRepo.markAccepted(h, invitationId, userId, toDate(at));
+}
+
+/** Bans `email` (no banning user). */
+export async function banFactory(h: DbHandle, input: { email: string; now: Temporal.Instant }) {
+  await bansRepo.insertBan(h, {
+    email: input.email,
+    bannedAt: toDate(input.now),
+    bannedByUserId: null,
+  });
+}
+
+/** A linked Google identity; returns its sub. */
+export async function googleIdentityFactory(
+  h: DbHandle,
+  input: { userId: string; email: string; now: Temporal.Instant; sub?: string },
+): Promise<{ id: string; sub: string }> {
+  const id = ids.next();
+  const sub = input.sub ?? `sub-${id.slice(-12)}`;
+  await credentialsRepo.insertGoogle(h, {
+    id,
+    userId: input.userId,
+    googleSub: sub,
+    emailAtLink: input.email,
+    linkedAt: toDate(input.now),
+  });
+  return { id, sub };
+}
+
+/** §10.1: the known TOTP secret (RFC 6238's test secret). */
+export const TWO_STEP_SECRET = "12345678901234567890";
+
+/**
+ * Two-step enabled with TWO_STEP_SECRET, sealed with `apiSecrets` (SealContext
+ * { table: "two_step_credentials", rowId: userId, purpose: "totp" }), and `recoveryCodes` unused
+ * codes (placeholder HMACs: they count, but don't verify; S-4 adds known codes).
+ */
+export async function twoStepFactory(
+  h: DbHandle,
+  apiSecrets: ApiSecretsCipher,
+  input: {
+    userId: string;
+    now: Temporal.Instant;
+    recoveryCodes?: number;
+    usedRecoveryCodes?: number;
+    codesAcknowledged?: boolean;
+  },
+): Promise<void> {
+  const envelope = apiSecrets.seal(Buffer.from(TWO_STEP_SECRET, "utf8"), {
+    table: "two_step_credentials",
+    rowId: input.userId,
+    purpose: "totp",
+  });
+  await twoStepRepo.upsertPending(
+    h,
+    input.userId,
+    envelope,
+    toDate(input.now.add({ minutes: 15 })),
+  );
+  await twoStepRepo.enable(h, input.userId, toDate(input.now));
+  if (input.codesAcknowledged === true) {
+    await twoStepRepo.setCodesAcknowledged(h, input.userId, true);
+  }
+  const unused = input.recoveryCodes ?? 10;
+  const used = input.usedRecoveryCodes ?? 0;
+  const codes = Array.from({ length: unused + used }, () => ({
+    id: ids.next(),
+    keyId: apiSecrets.currentKeyId(),
+    hmac: randomBytes(32),
+  }));
+  await twoStepRepo.replaceRecoveryCodes(h, input.userId, codes);
+  for (const code of codes.slice(unused)) {
+    await twoStepRepo.markCodeUsed(h, code.id, toDate(input.now));
+  }
 }

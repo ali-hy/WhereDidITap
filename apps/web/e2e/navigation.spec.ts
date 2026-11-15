@@ -18,11 +18,15 @@ async function navigate(page: Page, to: string): Promise<void> {
   }, to);
 }
 
-test("TP-11.15 (A-333): on load focus stays on body and #live-polite is empty; navigating to an unknown path and back to / focuses each h1 and announces its text", async ({
+// A-510: the platform's placeholder lives at /__fixtures/home-placeholder once a module takes /.
+const PLACEHOLDER = "/__fixtures/home-placeholder";
+
+test("TP-11.15 (A-333, A-510): on load focus stays on body and #live-polite is empty; navigating to an unknown path and back home focuses each h1 and announces its text", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto(PLACEHOLDER);
   await expect(page.locator("main h1")).toHaveText(catalogText("wDit"));
+  await expect(page.getByText("Nothing here yet.")).toBeVisible();
   await expect(page.locator("body")).toBeFocused();
   await expect(page.locator("#live-polite")).toHaveText("");
 
@@ -30,16 +34,21 @@ test("TP-11.15 (A-333): on load focus stays on body and #live-polite is empty; n
   await expectFocusedHeading(page, "Page not found");
 
   await page.getByRole("link", { name: "Go to home" }).click();
-  await expect(page).toHaveURL(/\/$/);
-  await expectFocusedHeading(page, "wDit");
-  await expect(page.getByText("Nothing here yet.")).toBeVisible();
+  // Whatever page / resolves to after redirects (signed out: the sign-in page).
+  await expect(page).not.toHaveURL(/\/no-such-page$/);
+  const h1 = page.locator("main h1");
+  await expect(h1).toBeFocused();
+  await expect(h1).toHaveAttribute("tabindex", "-1");
+  const text = (await h1.textContent()) ?? "";
+  expect(text.trim()).not.toBe("");
+  await expect(page.locator("#live-polite")).toHaveText(text);
 });
 
 // A-402 (a): only a pathname change moves focus and announces.
-test("TP-11.15 (A-402): a search-only change on / leaves focus and #live-polite alone", async ({
+test("TP-11.15 (A-402, A-510): a search-only change on the placeholder leaves focus and #live-polite alone", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto(PLACEHOLDER);
   await expect(page.locator("main h1")).toHaveText(catalogText("wDit"));
   // A state where a wrongly fired focus move or announcement would show.
   await page.evaluate(() => {
@@ -48,8 +57,8 @@ test("TP-11.15 (A-402): a search-only change on / leaves focus and #live-polite 
     if (region !== null) region.textContent = "";
   });
 
-  await navigate(page, "/?q=tp-11-15");
-  await expect(page).toHaveURL(/\/\?q=tp-11-15$/);
+  await navigate(page, `${PLACEHOLDER}?q=tp-11-15`);
+  await expect(page).toHaveURL(/\/__fixtures\/home-placeholder\?q=tp-11-15$/);
   // A negative check: give a focus move or announcement time to happen.
   await page.waitForTimeout(1_000);
 

@@ -9,8 +9,10 @@ import { spawn, spawnSync } from "node:child_process";
 import { createServer as createHttpServer, type Server } from "node:http";
 import {
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -342,6 +344,7 @@ describe("TP-2.13: node dist/main/migrate.js with an invalid journal (A-150, A-1
       writeFileSync(path.join(dir, "package.json"), '{"name":"@budmon/server","type":"module"}\n');
       cpSync(path.join(SERVER_DIR, "dist"), path.join(dir, "dist"), { recursive: true });
       symlinkSync(path.join(SERVER_DIR, "node_modules"), path.join(dir, "node_modules"));
+      copyModuleAssets(dir);
       mkdirSync(path.join(dir, "drizzle", "meta"), { recursive: true });
       writeFileSync(path.join(dir, "drizzle", "meta", "_journal.json"), journal);
       for (const file of sqlFiles) writeFileSync(path.join(dir, "drizzle", file), "SELECT 1;\n");
@@ -554,12 +557,13 @@ describe("TP-2.13: node --import ./dist/main/instrument.js dist/main/api.js with
     await testDb.drop();
   });
 
-  it("TP-2.13: exit 1, one startup_failed line with errorClass JournalInvalidError, no canary, no port", async () => {
+  it("TP-2.13 (A-511 (5)): exit 1, one startup_failed line with errorClass JournalInvalidError, no canary, no port", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "budmon-api-journal-"));
     try {
       writeFileSync(path.join(dir, "package.json"), '{"name":"@budmon/server","type":"module"}\n');
       cpSync(path.join(SERVER_DIR, "dist"), path.join(dir, "dist"), { recursive: true });
       symlinkSync(path.join(SERVER_DIR, "node_modules"), path.join(dir, "node_modules"));
+      copyModuleAssets(dir);
       mkdirSync(path.join(dir, "drizzle", "meta"), { recursive: true });
       writeFileSync(
         path.join(dir, "drizzle", "meta", "_journal.json"),
@@ -597,6 +601,19 @@ describe("TP-2.13: node --import ./dist/main/instrument.js dist/main/api.js with
     }
   }, 90_000);
 });
+
+/**
+ * A-511 (5): copies every file under apps/server/src/<module>/assets/ to `dir` at the same
+ * relative path (src/<module>/assets/…), as the image's build stage does.
+ */
+function copyModuleAssets(dir: string): void {
+  const src = path.join(SERVER_DIR, "src");
+  for (const entry of readdirSync(src, { withFileTypes: true })) {
+    const assets = path.join(src, entry.name, "assets");
+    if (!entry.isDirectory() || !existsSync(assets)) continue;
+    cpSync(assets, path.join(dir, "src", entry.name, "assets"), { recursive: true });
+  }
+}
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;

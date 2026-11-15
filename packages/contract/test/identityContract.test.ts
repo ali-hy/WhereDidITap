@@ -1,4 +1,4 @@
-// Identity's S-0 contract (identity LLD F-35, §5.1, §6). TP-0.25 with S-0's expectations, plus
+// Identity's contract (identity LLD F-35, §5.1, §6). TP-0.25 with S-1's expectations, plus
 // extra cases TP-0.25x (the shared schemas) and TP-0.42x (the error map).
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { readFileSync } from "node:fs";
@@ -43,16 +43,31 @@ describe("TP-0.25: the contract with identity's S-0 part", () => {
     expect(await emitOpenapi()).toBe(readFileSync(path.join(PACKAGE_DIR, "openapi.json"), "utf8"));
   });
 
-  it("TP-0.25: in S-0 the document has no identity procedure and API_MINOR is unchanged (0)", async () => {
+  it("TP-0.25 (S-1): the document has S-1's procedures (auth, me, invitations) and API_MINOR went from 0 to 1", async () => {
     const document = JSON.parse(await emitOpenapi()) as {
-      paths: Record<string, unknown>;
+      paths: Record<string, Record<string, { operationId?: string }>>;
       info: { version: string };
     };
+    const operations = Object.entries(document.paths)
+      .flatMap(([route, methods]) =>
+        Object.entries(methods).map(
+          ([method, op]) => `${method.toUpperCase()} ${route} ${String(op.operationId)}`,
+        ),
+      )
+      .sort();
 
-    expect(Object.keys(contract)).toEqual(["meta"]);
-    expect(Object.keys(document.paths)).toEqual(["/meta/client-config"]);
-    expect(API_MINOR).toBe(0);
-    expect(document.info.version).toBe("1.0");
+    expect(Object.keys(contract).sort()).toEqual(["auth", "invitations", "me", "meta"]);
+    expect(operations).toEqual(
+      [
+        "GET /meta/client-config meta.clientConfig",
+        "GET /auth/sign-up-options auth.signUpOptions",
+        "GET /me me.get",
+        "POST /invitations/preview invitations.preview",
+        "POST /invitations/accept invitations.accept",
+      ].sort(),
+    );
+    expect(API_MINOR).toBe(1);
+    expect(document.info.version).toBe("1.1");
   });
 });
 
