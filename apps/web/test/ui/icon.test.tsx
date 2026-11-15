@@ -33,9 +33,9 @@ describe("TP-11.26: Icon (F-215)", () => {
   });
 });
 
-// Review N-4: F-215's eight initial icons, plus P-A-515 (d)'s eye, eye-off and chevron-down (not
-// mirrored), and which ones mirror in RTL.
-describe("TP-11.26: the registry's icons (F-215, P-A-515 (d))", () => {
+// Review N-4: F-215's eight initial icons, plus P-A-515 (d)'s eye, eye-off and chevron-down and
+// identity S-1's wallet (P-A-529; none mirrored), and which ones mirror in RTL.
+describe("TP-11.26: the registry's icons (F-215, P-A-515 (d), P-A-529)", () => {
   const EXPECTED: readonly (readonly [string, boolean])[] = [
     ["alert", false],
     ["info", false],
@@ -48,9 +48,10 @@ describe("TP-11.26: the registry's icons (F-215, P-A-515 (d))", () => {
     ["eye", false],
     ["eye-off", false],
     ["chevron-down", false],
+    ["wallet", false],
   ];
 
-  it("TP-11.26: the registry holds exactly the eight initial icons and P-A-515's three", () => {
+  it("TP-11.26: the registry holds exactly the eight initial icons, P-A-515's three and identity S-1's wallet", () => {
     expect(Object.keys(icons).sort()).toEqual(EXPECTED.map(([name]) => name).sort());
   });
 
