@@ -1464,12 +1464,32 @@
                         },
                         "data": {
                           "properties": {
+                            "inviterName": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "origin": {
+                              "enum": [
+                                "direct",
+                                "account_share",
+                                "bootstrap"
+                              ],
+                              "type": "string"
+                            },
                             "recent": {
                               "type": "boolean"
                             }
                           },
                           "required": [
-                            "recent"
+                            "recent",
+                            "inviterName",
+                            "origin"
                           ],
                           "type": "object"
                         },
@@ -1588,6 +1608,24 @@
                             "expiredAt": {
                               "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
                               "type": "string"
+                            },
+                            "inviterName": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "origin": {
+                              "enum": [
+                                "direct",
+                                "account_share",
+                                "bootstrap"
+                              ],
+                              "type": "string"
                             }
                           },
                           "required": [
@@ -1620,7 +1658,33 @@
                         "code": {
                           "const": "INVITATION_REVOKED"
                         },
-                        "data": {},
+                        "data": {
+                          "properties": {
+                            "inviterName": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "origin": {
+                              "enum": [
+                                "direct",
+                                "account_share",
+                                "bootstrap"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "inviterName",
+                            "origin"
+                          ],
+                          "type": "object"
+                        },
                         "defined": {
                           "const": true
                         },
@@ -1636,7 +1700,8 @@
                         "defined",
                         "code",
                         "status",
-                        "message"
+                        "message",
+                        "data"
                       ],
                       "type": "object"
                     },
@@ -2443,12 +2508,32 @@
                         },
                         "data": {
                           "properties": {
+                            "inviterName": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "origin": {
+                              "enum": [
+                                "direct",
+                                "account_share",
+                                "bootstrap"
+                              ],
+                              "type": "string"
+                            },
                             "recent": {
                               "type": "boolean"
                             }
                           },
                           "required": [
-                            "recent"
+                            "recent",
+                            "inviterName",
+                            "origin"
                           ],
                           "type": "object"
                         },
@@ -2517,6 +2602,24 @@
                             "expiredAt": {
                               "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
                               "type": "string"
+                            },
+                            "inviterName": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "origin": {
+                              "enum": [
+                                "direct",
+                                "account_share",
+                                "bootstrap"
+                              ],
+                              "type": "string"
                             }
                           },
                           "required": [
@@ -2549,7 +2652,33 @@
                         "code": {
                           "const": "INVITATION_REVOKED"
                         },
-                        "data": {},
+                        "data": {
+                          "properties": {
+                            "inviterName": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "origin": {
+                              "enum": [
+                                "direct",
+                                "account_share",
+                                "bootstrap"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "inviterName",
+                            "origin"
+                          ],
+                          "type": "object"
+                        },
                         "defined": {
                           "const": true
                         },
@@ -2565,7 +2694,8 @@
                         "defined",
                         "code",
                         "status",
-                        "message"
+                        "message",
+                        "data"
                       ],
                       "type": "object"
                     },

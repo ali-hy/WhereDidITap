@@ -12,6 +12,7 @@ import { deviceLabelFor } from "./deviceLabel.js";
 import {
   SignupTicketInvalidError,
   InvitationExpiredError,
+  type InvitationContext,
   InvitationInvalidError,
   InvitationRevokedError,
   InvitationUsedError,
@@ -45,6 +46,18 @@ const instant = (d: Date): Temporal.Instant => Temporal.Instant.fromEpochMillise
 type AnyError = BudmonError<Record<string, unknown> | undefined>;
 type Checked = { ok: true; invitation: InvitationRow } | { ok: false; error: AnyError };
 
+/** The inviter's display name (null when none or erased) and the invitation's origin (A-58). */
+async function invitationContext(
+  tx: DbHandle,
+  invitation: InvitationRow,
+): Promise<InvitationContext> {
+  const inviter =
+    invitation.inviterUserId === null
+      ? null
+      : await usersRepo.findById(tx, invitation.inviterUserId);
+  return { inviterName: inviter?.displayName ?? null, origin: invitation.origin };
+}
+
 /**
  * F-40's checks 3 to 6 inside the caller's transaction: lock the invitation, flip an overdue one
  * to expired (publishing the event) and apply the status and ban rules. A failure is returned,
@@ -61,23 +74,33 @@ async function lockAndCheck(deps: IdentityDeps, tx: DbHandle, token: string): Pr
     });
     return {
       ok: false,
-      error: new InvitationExpiredError(toInstantWire(instant(invitation.expiresAt))),
+      error: new InvitationExpiredError(
+        toInstantWire(instant(invitation.expiresAt)),
+        await invitationContext(tx, invitation),
+      ),
     };
   }
   switch (invitation.status) {
     case "expired":
       return {
         ok: false,
-        error: new InvitationExpiredError(toInstantWire(instant(invitation.expiresAt))),
+        error: new InvitationExpiredError(
+          toInstantWire(instant(invitation.expiresAt)),
+          await invitationContext(tx, invitation),
+        ),
       };
     case "revoked":
-      return { ok: false, error: new InvitationRevokedError() };
+      return {
+        ok: false,
+        error: new InvitationRevokedError(await invitationContext(tx, invitation)),
+      };
     case "accepted": {
       const since = deps.clock.now().subtract(RECENT_ACCEPT_WINDOW).epochMilliseconds;
       return {
         ok: false,
         error: new InvitationUsedError(
           invitation.acceptedAt !== null && invitation.acceptedAt.getTime() >= since,
+          await invitationContext(tx, invitation),
         ),
       };
     }
@@ -221,6 +244,7 @@ async function createUser(
   profile: ProfileFieldsRequired,
   passwordHash: string,
 ): Promise<CreateResult> {
+  let context: InvitationContext = { inviterName: null, origin: "direct" };
   try {
     return await withTransaction(
       deps.database,
@@ -228,10 +252,11 @@ async function createUser(
         const checked = await lockAndCheck(deps, tx, token);
         if (!checked.ok) return { kind: "failed", error: checked.error };
         const { invitation } = checked;
+        context = await invitationContext(tx, invitation);
 
         const settings = await settingsRepo.getForUpdate(tx);
         if ((await usersRepo.findByEmail(tx, invitation.email)) !== null) {
-          return { kind: "failed", error: new InvitationUsedError(false) };
+          return { kind: "failed", error: new InvitationUsedError(false, context) };
         }
         if ((await usersRepo.countAll(tx)) + 1 > settings.userCap) {
           return { kind: "cap", invitation };
@@ -283,7 +308,8 @@ async function createUser(
       { tracker: req.tracker },
     );
   } catch (e) {
-    if (isSingleOwnerViolation(e)) return { kind: "failed", error: new InvitationRevokedError() };
+    if (isSingleOwnerViolation(e))
+      return { kind: "failed", error: new InvitationRevokedError(context) };
     throw e;
   }
 }

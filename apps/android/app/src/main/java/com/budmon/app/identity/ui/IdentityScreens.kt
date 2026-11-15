@@ -268,6 +268,7 @@ fun InviteProblemScreen(
     onRetry: () -> Unit,
     onSignIn: () -> Unit,
     modifier: Modifier = Modifier,
+    askInviter: Boolean = true,
 ) {
     Page(modifier) {
         Heading(stringResource(R.string.invite_problem_title))
@@ -283,7 +284,11 @@ fun InviteProblemScreen(
             }
         Text(text)
         val name = inviter?.trim().orEmpty()
-        if (problem is InviteProblem.Expired || problem == InviteProblem.Revoked) {
+        // Whom to ask: for expired, revoked and used (not the recent "ready"); never for an owner invitation.
+        val asks =
+            problem is InviteProblem.Expired || problem == InviteProblem.Revoked ||
+                (problem is InviteProblem.Used && !problem.recent)
+        if (askInviter && asks) {
             val ask =
                 if (name.isEmpty()) {
                     stringResource(R.string.invite_problem_ask_anyone)
@@ -430,7 +435,13 @@ fun InviteFlowRoute(
         }
 
         is InviteState.Problem -> {
-            InviteProblemScreen(state.problem, state.inviter, onRetry = viewModel::check, onSignIn = onSignIn)
+            InviteProblemScreen(
+                state.problem,
+                state.inviter,
+                onRetry = viewModel::check,
+                onSignIn = onSignIn,
+                askInviter = state.askInviter,
+            )
         }
     }
 }

@@ -4,6 +4,11 @@ import { InstantWire } from "../common/dates.js";
 import { UuidSchema } from "../common/ids.js";
 
 const email = z.object({ email: z.string() });
+/** Who the invitation came from (A-58). */
+const invitationContext = {
+  inviterName: z.string().nullable(),
+  origin: z.enum(["direct", "account_share", "bootstrap"]),
+};
 const retryAfter = z.object({ retryAfterSeconds: z.number().int().min(1) });
 
 export const IDENTITY_ERRORS = {
@@ -55,13 +60,20 @@ export const IDENTITY_ERRORS = {
   INVITATION_EXPIRED: {
     status: 410,
     message: "Invitation expired",
-    data: z.object({ expiredAt: InstantWire }),
+    data: z
+      .object({ expiredAt: InstantWire })
+      .extend(invitationContext)
+      .partial({ inviterName: true, origin: true }),
   },
-  INVITATION_REVOKED: { status: 410, message: "Invitation revoked" },
+  INVITATION_REVOKED: {
+    status: 410,
+    message: "Invitation revoked",
+    data: z.object(invitationContext),
+  },
   INVITATION_USED: {
     status: 409,
     message: "Invitation already used",
-    data: z.object({ recent: z.boolean() }),
+    data: z.object({ recent: z.boolean() }).extend(invitationContext),
   },
   USER_CAP_REACHED: { status: 409, message: "User cap reached" },
   INVITE_ALLOWANCE_EXHAUSTED: { status: 409, message: "Invite allowance exhausted" },

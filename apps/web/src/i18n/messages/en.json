@@ -94,6 +94,7 @@
   "setup.password": "Password",
   "setup.passwordHint": "At least 12 characters.",
   "setup.privacy": "By continuing you agree to the privacy notice.",
+  "setup.privacyNewTab": "(opens in a new tab)",
   "setup.submit": "Create account",
   "setup.timeZone": "Time zone",
   "setup.title": "Set up your account",

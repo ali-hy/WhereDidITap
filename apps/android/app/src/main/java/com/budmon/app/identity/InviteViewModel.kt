@@ -41,7 +41,12 @@ sealed interface InviteState {
 
     data class SetUp(val preview: InvitationPreview, val options: SignUpOptions) : InviteState
 
-    data class Problem(val problem: InviteProblem, val inviter: String?) : InviteState
+    /** [askInviter] is false for an owner (bootstrap) invitation: there is nobody to ask. */
+    data class Problem(
+        val problem: InviteProblem,
+        val inviter: String?,
+        val askInviter: Boolean = true,
+    ) : InviteState
 }
 
 private const val MIN_PASSWORD = 12
@@ -121,7 +126,7 @@ constructor(
                 preview = p
                 state = InviteState.Join(p)
             } catch (e: ApiException) {
-                state = InviteState.Problem(problemOf(e.error), preview?.inviterName)
+                state = problemState(e.error)
             }
         }
     }
@@ -137,11 +142,21 @@ constructor(
                 if (language == null) language = defaultLanguage(options.locales)
                 state = InviteState.SetUp(p, options)
             } catch (e: ApiException) {
-                state = InviteState.Problem(InviteProblem.Failed(e.error), p.inviterName)
+                state = problemState(e.error)
             } finally {
                 busy = false
             }
         }
+    }
+
+    /** The problem with the inviter and origin the error carried; the preview's when it carried none. */
+    private fun problemState(error: ApiError): InviteState.Problem {
+        val data = (error as? ApiError.Defined)?.data
+        val named = data?.get("inviterName")
+        val inviter =
+            if (named == null) preview?.inviterName else (named as? JsonPrimitive)?.takeIf { it.isString }?.content
+        val origin = (data?.get("origin") as? JsonPrimitive)?.takeIf { it.isString }?.content ?: preview?.origin
+        return InviteState.Problem(problemOf(error), inviter, askInviter = origin != "bootstrap")
     }
 
     private fun problemOf(error: ApiError): InviteProblem {
@@ -277,7 +292,7 @@ constructor(
                 }
 
                 "INVITATION_INVALID", "INVITATION_EXPIRED", "INVITATION_REVOKED", "INVITATION_USED" -> {
-                    state = InviteState.Problem(problemOf(error), preview?.inviterName)
+                    state = problemState(error)
                     return
                 }
             }

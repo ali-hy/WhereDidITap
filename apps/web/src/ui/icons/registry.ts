@@ -14,7 +14,8 @@ export type IconName =
   | "eye"
   | "eye-off"
   | "chevron-down"
-  | "wallet";
+  | "wallet"
+  | "external";
 
 type SvgComponent = Component<JSX.SvgSVGAttributes<SVGSVGElement>>;
 
@@ -49,6 +50,11 @@ const PATHS: Readonly<Record<IconName, readonly string[]>> = {
     "m2 2 20 20",
   ],
   "chevron-down": ["m6 9 6 6 6-6"],
+  external: [
+    "M15 3h6v6",
+    "M10 14 21 3",
+    "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6",
+  ],
   wallet: [
     "M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1",
     "M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4",
@@ -59,6 +65,7 @@ const MIRROR_IN_RTL: ReadonlySet<IconName> = new Set([
   "chevron-start",
   "chevron-end",
   "arrow-back",
+  "external",
 ]);
 
 export const icons: Record<IconName, { svg: SvgComponent; mirrorInRtl: boolean }> =

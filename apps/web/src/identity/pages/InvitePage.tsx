@@ -1,12 +1,23 @@
 // F-159 (S-1): the invitation page, password path. States: checking, join, setup, problem.
 import { Temporal } from "@budmon/shared";
 import { useNavigate } from "@tanstack/solid-router";
-import { createEffect, createSignal, Match, onMount, Show, Switch, type JSX } from "solid-js";
+import {
+  createEffect,
+  createSignal,
+  Match,
+  on,
+  onCleanup,
+  onMount,
+  Show,
+  Switch,
+  type JSX,
+} from "solid-js";
 import { useApi } from "../../api/ApiProvider.js";
 import { toAppError, type AppError } from "../../api/errors.js";
 import { messages } from "../../i18n/messages.js";
 import { useI18n } from "../../i18n/useI18n.js";
 import { Button } from "../../ui/Button.js";
+import { Icon } from "../../ui/icons/Icon.js";
 import { ComboboxField, type ComboboxOption } from "../../ui/ComboboxField.js";
 import { PasswordField } from "../../ui/PasswordField.js";
 import { Skeleton } from "../../ui/Skeleton.js";
@@ -14,7 +25,12 @@ import { SignedOutColumn } from "../../ui/SignedOutColumn.js";
 import { TextField } from "../../ui/TextField.js";
 import { setDocumentTitle } from "../../ui/a11y.js";
 import { FormErrorSummary } from "../../ui/forms.js";
-import { defaultCurrencyFor, deviceTimeZone, timeZoneOptions } from "../defaults.js";
+import {
+  defaultCurrencyFor,
+  defaultTimeZone,
+  deviceTimeZone,
+  timeZoneOptions,
+} from "../defaults.js";
 import { identityErrorMessage } from "../errorMessages.js";
 import { identityMessages as m } from "../messages.js";
 import { readFragmentToken } from "../session/fragment.js";
@@ -39,10 +55,16 @@ interface Options {
   locales: readonly string[];
 }
 
+/** The inviter and origin the server sent with the error (A-58); absent when it sent none. */
+interface Whose {
+  inviter?: string | null;
+  origin?: string;
+}
+
 type Problem =
-  | { kind: "expired"; at: string }
-  | { kind: "revoked" }
-  | { kind: "used"; recent: boolean }
+  | ({ kind: "expired"; at: string } & Whose)
+  | ({ kind: "revoked" } & Whose)
+  | ({ kind: "used"; recent: boolean } & Whose)
   | { kind: "invalid" }
   | { kind: "incomplete" }
   | { kind: "failed"; error: AppError };
@@ -89,14 +111,29 @@ const length = (s: string): number => Array.from(s).length;
 function problemOf(e: unknown): Problem {
   const error = toAppError(e);
   if (error.kind !== "defined") return { kind: "failed", error };
-  const data = (error.data ?? {}) as { expiredAt?: unknown; recent?: unknown };
+  const data = (error.data ?? {}) as {
+    expiredAt?: unknown;
+    recent?: unknown;
+    inviterName?: unknown;
+    origin?: unknown;
+  };
+  const whose: Whose = {
+    ...("inviterName" in data
+      ? { inviter: typeof data.inviterName === "string" ? data.inviterName : null }
+      : {}),
+    ...(typeof data.origin === "string" ? { origin: data.origin } : {}),
+  };
   switch (error.key) {
     case "INVITATION_EXPIRED":
-      return { kind: "expired", at: typeof data.expiredAt === "string" ? data.expiredAt : "" };
+      return {
+        kind: "expired",
+        at: typeof data.expiredAt === "string" ? data.expiredAt : "",
+        ...whose,
+      };
     case "INVITATION_REVOKED":
-      return { kind: "revoked" };
+      return { kind: "revoked", ...whose };
     case "INVITATION_USED":
-      return { kind: "used", recent: data.recent === true };
+      return { kind: "used", recent: data.recent === true, ...whose };
     case "INVITATION_INVALID":
       return { kind: "invalid" };
     default:
@@ -126,10 +163,16 @@ export function InvitePage(): JSX.Element {
     setDocumentTitle(title(), t);
   });
 
+  /** A problem screen; a spent or bad token is forgotten, a failed load keeps it for Try again. */
+  const showProblem = (problem: Problem): void => {
+    if (problem.kind !== "failed") clearStoredToken();
+    setView({ name: "problem", problem });
+  };
+
   const check = async (): Promise<void> => {
     setView({ name: "checking" });
     if (token === null) {
-      setView({ name: "problem", problem: { kind: "incomplete" } });
+      showProblem({ kind: "incomplete" });
       return;
     }
     try {
@@ -137,12 +180,19 @@ export function InvitePage(): JSX.Element {
       setPreview(result);
       setView({ name: "join" });
     } catch (e) {
-      setView({ name: "problem", problem: problemOf(e) });
+      showProblem(problemOf(e));
     }
   };
 
-  onMount(() => {
+  /** Reads the link, then previews it; a signed-in visitor just goes home. */
+  const begin = async (): Promise<void> => {
     const fromFragment = readFragmentToken("t");
+    if ((await session.ready()) === "signed_in") {
+      clearStoredToken();
+      await navigate({ to: "/", replace: true });
+      return;
+    }
+    token = null;
     if (fromFragment === null) {
       token = loadStoredToken();
     } else if (TOKEN_PATTERN.test(fromFragment)) {
@@ -150,8 +200,30 @@ export function InvitePage(): JSX.Element {
       token = fromFragment;
     }
     // A malformed or empty fragment token is "incomplete": nothing is sent or stored.
-    void check();
+    await check();
+  };
+
+  onMount(() => {
+    void begin();
+    // A link pasted into this tab changes only the fragment.
+    const onHashChange = (): void => {
+      if (location.hash !== "") void begin();
+    };
+    window.addEventListener("hashchange", onHashChange);
+    onCleanup(() => {
+      window.removeEventListener("hashchange", onHashChange);
+    });
   });
+
+  // Each step moves focus to its heading, so a screen reader hears where it is.
+  createEffect(
+    on(
+      () => view().name,
+      () => {
+        setTimeout(() => document.querySelector<HTMLElement>("main h1")?.focus(), 0);
+      },
+    ),
+  );
 
   const openSetup = async (): Promise<void> => {
     if (options().currencies.length === 0) {
@@ -162,7 +234,7 @@ export function InvitePage(): JSX.Element {
           locales: result.locales,
         });
       } catch (e) {
-        setView({ name: "problem", problem: { kind: "failed", error: toAppError(e) } });
+        showProblem({ kind: "failed", error: toAppError(e) });
         return;
       }
     }
@@ -201,7 +273,7 @@ export function InvitePage(): JSX.Element {
           <Show when={preview()}>
             {(p) => (
               <>
-                <p class="mt-3 text-fg">
+                <p class="mt-3 text-fg [overflow-wrap:anywhere]">
                   {p().origin === "bootstrap"
                     ? t(m.inviteFromOwner, { email: p().email })
                     : inviterName() === ""
@@ -228,7 +300,7 @@ export function InvitePage(): JSX.Element {
             preview={preview()}
             options={options()}
             token={token ?? ""}
-            onProblem={(problem) => setView({ name: "problem", problem })}
+            onProblem={showProblem}
             onDone={async () => {
               clearStoredToken();
               await session.markSignedIn();
@@ -277,9 +349,16 @@ function ProblemView(props: {
       }
     }
   };
+  // The inviter from the error; the preview's name when the error had none.
+  const inviter = (): string => {
+    const p = problem();
+    const fromError = "inviter" in p ? p.inviter : undefined;
+    return (fromError === undefined ? props.inviter : (fromError ?? "")).trim();
+  };
   const canAsk = () => {
-    const kind = problem().kind;
-    return kind === "expired" || kind === "revoked";
+    const p = problem();
+    if ("origin" in p && p.origin === "bootstrap") return false;
+    return p.kind === "expired" || p.kind === "revoked" || (p.kind === "used" && !p.recent);
   };
   return (
     <>
@@ -289,9 +368,9 @@ function ProblemView(props: {
       <p class="mt-3 text-fg">{text()}</p>
       <Show when={canAsk()}>
         <p class="mt-2 text-fg-muted">
-          {props.inviter === ""
+          {inviter() === ""
             ? t(m.inviteProblemAskAnyone)
-            : t(m.inviteProblemAskInviter, { inviter: props.inviter })}
+            : t(m.inviteProblemAskInviter, { inviter: inviter() })}
         </p>
       </Show>
       <div class="mt-6">
@@ -341,9 +420,7 @@ function SetupForm(props: {
     defaultCurrencyFor(navigator.language, props.options.currencies),
   );
   const device = deviceTimeZone();
-  const [zone, setZone] = createSignal<string | null>(
-    zones.some((z) => z.id === device) ? device : null,
-  );
+  const [zone, setZone] = createSignal<string | null>(defaultTimeZone(device, zones));
   const [language, setLanguage] = createSignal<string | null>(
     props.options.locales.includes(locale()) ? locale() : "en",
   );
@@ -501,7 +578,7 @@ function SetupForm(props: {
       </h1>
       <Show when={props.preview}>
         {(p) => (
-          <p class="text-fg-muted">
+          <p class="text-fg-muted [overflow-wrap:anywhere]">
             <bdi dir="ltr">{p().email}</bdi>
           </p>
         )}
@@ -567,7 +644,11 @@ function SetupForm(props: {
         onChange={setLanguage}
       />
       <p class="text-sm text-fg-muted">
-        <a href="/privacy">{t(m.setupPrivacy)}</a>
+        <a href="/privacy" target="_blank" rel="noopener">
+          {t(m.setupPrivacy)}
+          <Icon name="external" class="ms-1 inline size-4 align-text-bottom" />
+          <span class="sr-only"> {t(m.setupPrivacyNewTab)}</span>
+        </a>
       </p>
       <Button variant="primary" type="submit" fullWidth busy={busy()}>
         {t(m.setupSubmit)}

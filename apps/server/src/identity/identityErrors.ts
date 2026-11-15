@@ -140,22 +140,28 @@ export class InvitationInvalidError extends BudmonError {
   }
 }
 
+/** Who the invitation came from, so the page can say whom to ask (A-58). */
+export type InvitationContext = {
+  inviterName: string | null;
+  origin: "direct" | "account_share" | "bootstrap";
+};
+
 /** `expiredAt` is an InstantWire string. */
-export class InvitationExpiredError extends BudmonError<{ expiredAt: string }> {
-  constructor(expiredAt: string) {
-    super("INVITATION_EXPIRED", 410, "Invitation expired", { expiredAt });
+export class InvitationExpiredError extends BudmonError<{ expiredAt: string } & InvitationContext> {
+  constructor(expiredAt: string, context: InvitationContext) {
+    super("INVITATION_EXPIRED", 410, "Invitation expired", { expiredAt, ...context });
   }
 }
 
-export class InvitationRevokedError extends BudmonError {
-  constructor() {
-    super("INVITATION_REVOKED", 410, "Invitation revoked");
+export class InvitationRevokedError extends BudmonError<InvitationContext> {
+  constructor(context: InvitationContext) {
+    super("INVITATION_REVOKED", 410, "Invitation revoked", { ...context });
   }
 }
 
-export class InvitationUsedError extends BudmonError<{ recent: boolean }> {
-  constructor(recent: boolean) {
-    super("INVITATION_USED", 409, "Invitation already used", { recent });
+export class InvitationUsedError extends BudmonError<{ recent: boolean } & InvitationContext> {
+  constructor(recent: boolean, context: InvitationContext) {
+    super("INVITATION_USED", 409, "Invitation already used", { recent, ...context });
   }
 }
 

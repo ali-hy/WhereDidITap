@@ -345,4 +345,8 @@ export const identityMessages = defineMessages({
     id: "signin.privacy",
     defaultMessage: "Privacy notice",
   },
+  setupPrivacyNewTab: {
+    id: "setup.privacyNewTab",
+    defaultMessage: "(opens in a new tab)",
+  },
 });

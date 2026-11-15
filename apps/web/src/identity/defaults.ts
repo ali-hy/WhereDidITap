@@ -27,16 +27,53 @@ export interface TimeZoneOption {
   offset: string;
 }
 
-/** Every supported zone by name, labelled like "Africa/Cairo (GMT+3)". */
+/** Every supported zone by name, labelled like "Africa/Cairo (GMT+3)"; UTC is always an option. */
 export function timeZoneOptions(now: Temporal.Instant): TimeZoneOption[] {
   const date = new Date(now.epochMilliseconds);
-  return Intl.supportedValuesOf("timeZone")
+  const ids = Intl.supportedValuesOf("timeZone");
+  return (ids.includes("UTC") ? ids : [...ids, "UTC"])
     .toSorted((a, b) => a.localeCompare(b, "en"))
     .map((id) => {
+      if (id === "UTC") return { id, label: "UTC (GMT)", offset: "GMT" };
       const offset =
         new Intl.DateTimeFormat("en", { timeZone: id, timeZoneName: "shortOffset" })
           .formatToParts(date)
           .find((p) => p.type === "timeZoneName")?.value ?? "GMT";
       return { id, label: `${id} (${offset})`, offset };
     });
+}
+
+const UTC_ALIASES: ReadonlySet<string> = new Set([
+  "UTC",
+  "Etc/UTC",
+  "Etc/UCT",
+  "UCT",
+  "Etc/Universal",
+  "Universal",
+  "Etc/Zulu",
+  "Zulu",
+  "GMT",
+  "Etc/GMT",
+  "Etc/GMT0",
+  "GMT0",
+  "Etc/GMT+0",
+  "Etc/GMT-0",
+  "GMT+0",
+  "GMT-0",
+  "Etc/Greenwich",
+  "Greenwich",
+]);
+
+/** The option for [zone]: UTC aliases map to UTC, other aliases to their canonical name; else null. */
+export function defaultTimeZone(zone: string, options: readonly { id: string }[]): string | null {
+  const listed = (id: string): boolean => options.some((o) => o.id === id);
+  if (UTC_ALIASES.has(zone)) return listed("UTC") ? "UTC" : null;
+  let canonical = zone;
+  try {
+    canonical = new Intl.DateTimeFormat("en", { timeZone: zone }).resolvedOptions().timeZone;
+  } catch {
+    return null;
+  }
+  if (listed(canonical)) return canonical;
+  return listed(zone) ? zone : null;
 }
