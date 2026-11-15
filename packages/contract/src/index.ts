@@ -1,4 +1,5 @@
 // F-346: the contract root and the shared contract building blocks.
+import { identityContract } from "./identity/contract.js";
 import { metaContract } from "./meta/metaContract.js";
 
 export * from "./common/money.js";
@@ -14,5 +15,5 @@ export * from "./identity/index.js";
 
 export const contract = {
   meta: metaContract,
-  // Modules add their keys.
+  ...identityContract,
 };

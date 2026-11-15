@@ -59,4 +59,10 @@ export const authedProcedure = bases.authedProcedure;
 export const ownerProcedure = bases.ownerProcedure;
 
 /** Dotted contract paths of the procedures on publicProcedure. Modules add theirs. */
-export const PUBLIC_PROCEDURES: ReadonlySet<string> = new Set(["meta.clientConfig"]);
+export const PUBLIC_PROCEDURES: ReadonlySet<string> = new Set([
+  "meta.clientConfig",
+  // Identity S-1.
+  "auth.signUpOptions",
+  "invitations.preview",
+  "invitations.accept",
+]);
