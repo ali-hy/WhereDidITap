@@ -6,10 +6,11 @@ import { BudmonError } from "../platform/errors/BudmonError.js";
 import { ValidationFailedError } from "../platform/errors/platformErrors.js";
 import { DEFAULT_INVITE_ALLOWANCE, RECENT_ACCEPT_WINDOW } from "./constants.js";
 import * as bansRepo from "./bansRepo.js";
+import * as challengesRepo from "./challengesRepo.js";
 import * as credentialsRepo from "./credentialsRepo.js";
 import { deviceLabelFor } from "./deviceLabel.js";
 import {
-  GoogleUnavailableError,
+  SignupTicketInvalidError,
   InvitationExpiredError,
   InvitationInvalidError,
   InvitationRevokedError,
@@ -182,7 +183,14 @@ async function accept(
   const { value, issues } = await validateProfile(deps, deps.database.handle, profile);
   if (issues.length > 0) throw new ValidationFailedError(issues);
 
-  if (input.method.kind !== "password") throw new GoogleUnavailableError();
+  if (input.method.kind !== "password") {
+    // The ticket lookup; no google_signup challenge exists before S-6, so this always fails.
+    const hash = hashToken(input.method.ticket);
+    await withTransaction(deps.database, (tx) =>
+      challengesRepo.findByTokenHashForUpdate(tx, "google_signup", hash),
+    );
+    throw new SignupTicketInvalidError();
+  }
 
   // The password is checked and hashed before the main transaction, which holds locks.
   const pending = await invitationsRepo.findByTokenHash(deps.database.handle, hashToken(token));

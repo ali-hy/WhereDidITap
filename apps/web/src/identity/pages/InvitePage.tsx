@@ -169,7 +169,8 @@ export function InvitePage(): JSX.Element {
     setView({ name: "setup" });
   };
 
-  const inviterName = (): string => preview()?.inviterName ?? "";
+  // Blank counts as absent.
+  const inviterName = (): string => preview()?.inviterName?.trim() ?? "";
   const date = (iso: string): string => {
     try {
       return new Intl.DateTimeFormat(locale(), { dateStyle: "long" }).format(
@@ -203,7 +204,9 @@ export function InvitePage(): JSX.Element {
                 <p class="mt-3 text-fg">
                   {p().origin === "bootstrap"
                     ? t(m.inviteFromOwner, { email: p().email })
-                    : t(m.inviteFrom, { inviter: inviterName(), email: p().email })}
+                    : inviterName() === ""
+                      ? t(m.inviteForEmail, { email: p().email })
+                      : t(m.inviteFrom, { inviter: inviterName(), email: p().email })}
                 </p>
                 <p class="mt-2 text-fg-muted">
                   {t(m.inviteExpires, { date: date(p().expiresAt) })}
@@ -276,7 +279,7 @@ function ProblemView(props: {
   };
   const canAsk = () => {
     const kind = problem().kind;
-    return (kind === "expired" || kind === "revoked") && props.inviter !== "";
+    return kind === "expired" || kind === "revoked";
   };
   return (
     <>
@@ -285,7 +288,11 @@ function ProblemView(props: {
       </h1>
       <p class="mt-3 text-fg">{text()}</p>
       <Show when={canAsk()}>
-        <p class="mt-2 text-fg-muted">{t(m.inviteProblemAskInviter, { inviter: props.inviter })}</p>
+        <p class="mt-2 text-fg-muted">
+          {props.inviter === ""
+            ? t(m.inviteProblemAskAnyone)
+            : t(m.inviteProblemAskInviter, { inviter: props.inviter })}
+        </p>
       </Show>
       <div class="mt-6">
         <Show
@@ -331,7 +338,7 @@ function SetupForm(props: {
   const [name, setName] = createSignal("");
   const [password, setPassword] = createSignal("");
   const [currency, setCurrency] = createSignal<string | null>(
-    defaultCurrencyFor(locale(), props.options.currencies),
+    defaultCurrencyFor(navigator.language, props.options.currencies),
   );
   const device = deviceTimeZone();
   const [zone, setZone] = createSignal<string | null>(
@@ -436,18 +443,25 @@ function SetupForm(props: {
         }
       }
       if (error.key === "VALIDATION_FAILED") {
-        const issues = (error.data as { issues?: { path: (string | number)[] }[] } | undefined)
-          ?.issues;
-        const fieldFor: Record<string, [string, () => string | undefined]> = {
-          displayName: ["name", () => t(m.profileNameRequired)],
-          baseCurrency: ["currency", () => t(m.profileCurrencyRequired)],
-          timeZone: ["timeZone", () => t(m.profileTimeZoneRequired)],
+        const issues = (
+          error.data as { issues?: { code?: string; path: (string | number)[] }[] } | undefined
+        )?.issues;
+        const nameMessage = (code: string | undefined): string => {
+          if (code === "too_big") return t(m.profileNameTooLong);
+          if (code === "too_small") return t(m.profileNameRequired);
+          return t(messages.validationInvalid);
         };
+        const fieldFor: Record<string, [string, (code: string | undefined) => string | undefined]> =
+          {
+            displayName: ["name", nameMessage],
+            baseCurrency: ["currency", () => t(m.profileCurrencyRequired)],
+            timeZone: ["timeZone", () => t(m.profileTimeZoneRequired)],
+          };
         let focused = false;
         for (const issue of issues ?? []) {
           const mapped = fieldFor[String(issue.path[0])];
           if (mapped === undefined) continue;
-          setError(mapped[0], mapped[1]());
+          setError(mapped[0], mapped[1](issue.code));
           if (!focused) {
             document.getElementById(FIELD_IDS[mapped[0] as keyof typeof FIELD_IDS])?.focus();
             focused = true;
@@ -456,7 +470,14 @@ function SetupForm(props: {
         if (focused) return;
       }
       if (error.key === "USER_CAP_REACHED") {
-        setSummary([{ text: t(m.inviteFull, { inviter: props.inviterName }) }]);
+        setSummary([
+          {
+            text:
+              props.inviterName === ""
+                ? t(m.inviteFullNoInviter)
+                : t(m.inviteFull, { inviter: props.inviterName }),
+          },
+        ]);
         return;
       }
       if (

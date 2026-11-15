@@ -23,6 +23,9 @@ export function SignInPage(): JSX.Element {
         </p>
       </Show>
       <p class="mt-3 text-fg-muted">{t(identityMessages.signinInviteOnly)}</p>
+      <p class="mt-3">
+        <a href="/privacy">{t(identityMessages.signinPrivacy)}</a>
+      </p>
     </SignedOutColumn>
   );
 }

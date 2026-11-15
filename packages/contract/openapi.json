@@ -1925,31 +1925,6 @@
                     {
                       "properties": {
                         "code": {
-                          "const": "GOOGLE_UNAVAILABLE"
-                        },
-                        "data": {},
-                        "defined": {
-                          "const": true
-                        },
-                        "message": {
-                          "default": "Google unavailable",
-                          "type": "string"
-                        },
-                        "status": {
-                          "const": 503
-                        }
-                      },
-                      "required": [
-                        "defined",
-                        "code",
-                        "status",
-                        "message"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "properties": {
-                        "code": {
                           "type": "string"
                         },
                         "data": {},

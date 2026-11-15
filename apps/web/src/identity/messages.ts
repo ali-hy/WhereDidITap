@@ -329,4 +329,20 @@ export const identityMessages = defineMessages({
     id: "signin.sessionEnded",
     defaultMessage: "Your session ended. Sign in again.",
   },
+  inviteForEmail: {
+    id: "invite.forEmail",
+    defaultMessage: "This invitation is for {email}.",
+  },
+  inviteFullNoInviter: {
+    id: "invite.fullNoInviter",
+    defaultMessage: "There's no room for new people right now. The administrator has been told.",
+  },
+  inviteProblemAskAnyone: {
+    id: "invite.problem.askAnyone",
+    defaultMessage: "Ask someone who already has an account to invite you again.",
+  },
+  signinPrivacy: {
+    id: "signin.privacy",
+    defaultMessage: "Privacy notice",
+  },
 });

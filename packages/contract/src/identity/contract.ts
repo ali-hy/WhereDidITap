@@ -62,7 +62,6 @@ export const identityContract = {
           "SIGNUP_TICKET_INVALID",
           "GOOGLE_ACCOUNT_NOT_ALLOWED",
           "GOOGLE_ACCOUNT_IN_USE",
-          "GOOGLE_UNAVAILABLE",
         ),
       })
       .input(
