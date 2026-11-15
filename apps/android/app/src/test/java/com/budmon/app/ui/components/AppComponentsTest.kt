@@ -8,17 +8,19 @@
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.ui.components
 
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
@@ -30,15 +32,15 @@ import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
-import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasSetTextAction
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.text.style.TextDirection
+import androidx.compose.ui.text.style.ResolvedTextDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.budmon.app.R
@@ -63,7 +65,7 @@ private const val PX_PER_DP = 3f
 @Config(qualifiers = "xxhdpi")
 class AppComponentsTest {
     @get:Rule
-    val compose = createComposeRule()
+    val compose = createAndroidComposeRule<ComponentActivity>()
 
     private val modes = listOf(ThemeSetting.LIGHT to Tokens.Teal.Light, ThemeSetting.DARK to Tokens.Teal.Dark)
 
@@ -91,7 +93,7 @@ class AppComponentsTest {
 
     /** The tagged node's pixel at (x dp, y dp). */
     private fun pixel(xDp: Float, yDp: Float): Color {
-        val map = compose.onNodeWithTag("c").captureToImage().toPixelMap()
+        val map = compose.pixelsOf(compose.onNodeWithTag("c"))
         return map[(xDp * PX_PER_DP).toInt(), (yDp * PX_PER_DP).toInt()]
     }
 
@@ -263,7 +265,12 @@ class AppComponentsTest {
     @Test
     fun `TP-1_41 Wordmark is wDit with the D in accentFg, laid out LTR, with no content description`() {
         for ((setting, t) in modes) {
-            show(setting, t) { Wordmark(modifier = Modifier.testTag("c")) }
+            // Inside a right-to-left layout, so "laid out LTR" is the wordmark's own doing.
+            show(setting, t) {
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                    Wordmark(modifier = Modifier.testTag("c"))
+                }
+            }
             val node = compose.onNodeWithTag("c", useUnmergedTree = true).fetchSemanticsNode()
             val config = node.config
 
@@ -283,7 +290,7 @@ class AppComponentsTest {
             assertNull(config.getOrNull(SemanticsProperties.ContentDescription))
             val layouts = mutableListOf<TextLayoutResult>()
             config[SemanticsActions.GetTextLayoutResult].action?.invoke(layouts)
-            assertEquals(TextDirection.Ltr, layouts.single().layoutInput.style.textDirection)
+            assertEquals(ResolvedTextDirection.Ltr, layouts.single().multiParagraph.getParagraphDirection(0))
         }
     }
 }

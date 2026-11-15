@@ -8,23 +8,22 @@ package com.budmon.app.identity.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.activity.ComponentActivity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isHeading
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performFirstLinkClick
@@ -38,6 +37,7 @@ import com.budmon.app.identity.InvitationPreview
 import com.budmon.app.identity.InviteProblem
 import com.budmon.app.identity.SignUpOptions
 import com.budmon.app.identity.SignedOutReason
+import com.budmon.app.ui.components.pixelsOf
 import com.budmon.app.ui.theme.AppTheme
 import com.budmon.app.ui.theme.ThemeSetting
 import com.budmon.app.ui.theme.Tokens
@@ -59,7 +59,7 @@ private const val PX_PER_DP = 3f
 @Config(qualifiers = "xxhdpi")
 class InviteScreensTest {
     @get:Rule
-    val compose = createComposeRule()
+    val compose = createAndroidComposeRule<ComponentActivity>()
 
     private val context: Context = ApplicationProvider.getApplicationContext()
     private fun text(id: Int) = context.getString(id)
@@ -305,7 +305,7 @@ class InviteScreensTest {
             InvitationLinkScreen(text = fullLink, error = null, onTextChange = {}, onPaste = {}, onContinue = {}, onBack = {})
         }
 
-        val map = button(R.string.invite_link_continue).captureToImage().toPixelMap()
+        val map = compose.pixelsOf(button(R.string.invite_link_continue))
         val actual = map[(4 * PX_PER_DP).toInt(), (24 * PX_PER_DP).toInt()]
         assertColour("Continue's fill at (4, 24) dp", Tokens.Teal.Light.accent, actual)
     }

@@ -89,6 +89,13 @@ class SessionViewModelTest {
     private suspend fun SessionViewModel.settled(): SessionUiState =
         state.first { it !is SessionUiState.Loading }
 
+    /**
+     * The first state other than [after]. A successful probe reads and may rewrite the stored
+     * session (DataStore, on a real thread) before it sets the state, so virtual time alone
+     * can't reach it.
+     */
+    private suspend fun SessionViewModel.next(after: SessionUiState): SessionUiState = state.first { it != after }
+
     /** Exactly one new probe after `seconds` (none a millisecond before), which then fails. */
     private fun TestScope.expectNextProbeAfter(seconds: Long) {
         val before = probes
@@ -192,7 +199,7 @@ class SessionViewModelTest {
         runCurrent()
         assertEquals("one probe when back online", 2, probes)
         idleFor(PROBE_MS)
-        assertEquals(SessionUiState.SignedIn(ME), vm.state.value)
+        assertEquals(SessionUiState.SignedIn(ME), vm.next(after = SessionUiState.SignedIn(null, ApiError.Network)))
         idleFor(10 * 60 * 1_000)
         assertEquals("no probe once signed in", 2, probes)
     }
@@ -248,7 +255,7 @@ class SessionViewModelTest {
         runCurrent()
         assertEquals(2, probes)
         idleFor(PROBE_MS)
-        assertEquals(SessionUiState.SignedIn(ME), vm.state.value)
+        assertEquals(SessionUiState.SignedIn(ME), vm.next(after = SessionUiState.SignedIn(null, ApiError.Network)))
     }
 
     @Test
@@ -289,6 +296,6 @@ class SessionViewModelTest {
         runCurrent()
         idleFor(PROBE_MS)
         assertEquals(1, probes)
-        assertEquals(SessionUiState.SignedIn(ME), vm.state.value)
+        assertEquals(SessionUiState.SignedIn(ME), vm.next(after = SessionUiState.Loading))
     }
 }
