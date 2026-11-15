@@ -112,7 +112,6 @@ constructor(
     /** Back from set-up to the join screen. */
     fun backToJoin() {
         val p = preview ?: return
-        password = ""
         formError = null
         state = InviteState.Join(p)
     }
