@@ -1,6 +1,6 @@
 ---
 doc: ux-guidelines
-version: 0.2
+version: 0.3
 status: draft
 updated: 2026-11-15
 ---
@@ -17,6 +17,7 @@ The visual style of the product's web app (`apps/web`) and Android app (`apps/an
 
 | Version | Date | Change |
 | ------- | ---- | ------ |
+| 0.3 | 2026-11-15 | Owner decision UX-D17: the password toggle's accessible name follows its visible text ("Show password" / "Hide password"), and `aria-pressed` is dropped (§8.2). Found by identity's S-0b code review (WCAG 2.5.3). |
 | 0.2 | 2026-11-15 | Brand changed by the owner: the product is **wDit** (said "dit"), not "Where did I tap?". UX-D10 to UX-D13 revised; new UX-D15 (the wordmark's accessible name) and UX-D16 (the long form). §2 rewritten; §1, §3.1, §3.3, §13, §16, §17 and §18 follow. |
 | 0.1 | 2026-11-15 | First draft. The owner's decisions from the style-guide session (UX-D1 to UX-D14, below; the brand rows were revised in v0.2), plus proposed defaults for everything they didn't decide (marked *default*), for review in the PR. |
 
@@ -42,6 +43,7 @@ The owner made these decisions on 2026-11-15, after comparing mockups of the sig
 | UX-D14 | Empty states | **A Lucide icon in a pale accent circle**, then a heading, one line and one button. No illustrations. | No artwork to produce. It follows the theme and works in RTL (§9.2). |
 | UX-D15 | The wordmark's accessible name | **The visible text, "wDit".** No hidden label with the pronunciation. | Screen readers may say it oddly, but voice control works ("click wDit") and nothing can drift out of sync (WCAG 2.5.3, label in name). |
 | UX-D16 | The long form "Where did I tap" | **Only in a few places, such as the domain name and parts of the website.** The owner: "We can decide more later." | Not used in the apps. Which places use it is open (Q-1, §18). |
+| UX-D17 | The password toggle's accessible name | **The name follows the visible text:** "Show" / "Show password", then "Hide" / "Hide password". No `aria-pressed`. Chosen over keeping the visible text fixed at "Show". | The name always contains the visible word (WCAG 2.5.3), so voice control works ("click Hide"). Identity's A-515 is amended to match (§8.2). |
 
 ## 2. Brand
 
@@ -335,7 +337,8 @@ On Android the same numbers are in dp.
 
 ### 8.2 Password fields
 
-- A tertiary toggle button at the field's inline end, inside the field's border: the `eye` / `eye-off` icon and the text "Show" / "Hide". `aria-pressed` reflects the state, and it's labelled "Show password" for screen readers (identity §4.8). Tapping it never moves focus out of the field.
+- A tertiary toggle button at the field's inline end, inside the field's border: the `eye` / `eye-off` icon and the text "Show" / "Hide". Tapping it never moves focus out of the field.
+- **The accessible name follows the visible text (UX-D17):** "Show password" while the password is hidden, "Hide password" while it's shown, so the name always contains the visible word (WCAG 2.5.3). No `aria-pressed`: the changing name already says the state. On Android, the button's `contentDescription` changes the same way, with no toggle role or state description.
 - The rule ("At least 12 characters.") is the hint under the field.
 
 ### 8.3 Code fields
