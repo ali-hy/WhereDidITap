@@ -1,7 +1,8 @@
 // F-159's S-1 QA fixes (identity LLD v0.32, A-52 to A-57): a later link in the same tab, long
 // text at 360 px, focus on a step change, the set-up privacy link in a new tab, a signed-in visitor.
-// TP-1.48, TP-1.51 to TP-1.54, TP-1.56 (a fragment without t, A-65), TP-1.57 (stale responses,
-// A-64), and TP-1.32x (a bootstrap problem has no ask line, A-58; review B-2).
+// TP-1.48, TP-1.51 to TP-1.54, TP-1.56 (a fragment without t, A-65), TP-1.57 to TP-1.59 (stale
+// responses and a hashchange during an accept, A-64), and TP-1.32x (a bootstrap problem has no ask
+// line, A-58; review B-2).
 import {
   catalogText,
   createInvitation,
@@ -282,7 +283,7 @@ test.describe("TP-1.56: a fragment without t changes nothing (A-65)", () => {
   });
 });
 
-test.describe("TP-1.57: a stale preview response is ignored (A-64)", () => {
+test.describe("TP-1.57 to TP-1.59: stale responses and a hashchange during an accept (A-64)", () => {
   test("TP-1.57: #t=<A> with A's preview delayed 2 s, then at once #t=<B>: join shows B's email after A's response arrives; the join h1 gets focus once", async ({
     page,
     request,
@@ -332,5 +333,108 @@ test.describe("TP-1.57: a stale preview response is ignored (A-64)", () => {
     await expect(page.getByText(new RegExp(emailA.replaceAll(".", "\\.")))).toHaveCount(0);
     const focused = await page.evaluate(() => (window as unknown as { h1Focus: string[] }).h1Focus);
     expect(focused.filter((t) => looseText("You've been invited").test(t))).toHaveLength(1);
+  });
+
+  /** Records the text of every h1 that receives focus, from page load on. */
+  async function recordH1Focus(page: Page): Promise<void> {
+    await page.addInitScript(() => {
+      const w = window as unknown as { h1Focus: string[] };
+      w.h1Focus = [];
+      document.addEventListener("focusin", (e) => {
+        if (e.target instanceof HTMLHeadingElement && e.target.tagName === "H1") {
+          w.h1Focus.push(e.target.textContent);
+        }
+      });
+    });
+  }
+
+  const h1Focus = (page: Page): Promise<string[]> =>
+    page.evaluate(() => (window as unknown as { h1Focus: string[] }).h1Focus);
+
+  /** Two animation frames, so the page has handled whatever just arrived. */
+  const settle = (page: Page): Promise<unknown> =>
+    page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(resolve));
+        }),
+    );
+
+  test("TP-1.58: #t=<B> during A's accept (delayed 2 s): the fragment is stripped at once, no preview or sign-up-options request, set-up stays busy until the accept answers, then / with nothing stored", async ({
+    page,
+    request,
+  }) => {
+    const a = await createInvitation(request, { email: uniqueEmail() });
+    const b = await createInvitation(request, { email: uniqueEmail() });
+    await page.route("**/api/v1/invitations/accept", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      await route.continue();
+    });
+    await openInvitation(page, a.token);
+    await page.getByRole("button", { name: catalogText("Use a password") }).click();
+    const h1 = page.locator("main h1");
+    await expect(h1).toHaveText(catalogText("Set up your account"));
+    await page.getByLabel(catalogText("Your name")).fill("Mona Hassan");
+    await page.getByLabel(catalogText("Password")).fill(E2E_PASSWORD);
+    const acceptSent = page.waitForRequest("**/api/v1/invitations/accept");
+    const submit = page.getByRole("button", { name: catalogText("Create account") });
+    await submit.click();
+    const accept = await acceptSent;
+    const previews = countPreviews(page);
+    const options = countSignUpOptions(page);
+
+    await page.evaluate((t) => {
+      location.hash = `#t=${t}`;
+    }, b.token);
+
+    // Within the accept's 2 s: stripped, still set-up, busy.
+    await expect.poll(() => page.evaluate(() => location.hash), { timeout: 1_000 }).toBe("");
+    await expect(h1).toHaveText(catalogText("Set up your account"));
+    await expect(submit).toHaveAttribute("aria-busy", "true");
+    expect(accept.failure()).toBeNull();
+
+    expect((await accept.response())?.status()).toBe(200);
+    await expect(page).toHaveURL(/\/$/);
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), STORED)).toBeNull();
+    expect(previews.n).toBe(0);
+    expect(options.n).toBe(0);
+  });
+
+  test("TP-1.59: Use a password on A with sign-up-options delayed 2 s, then at once #t=<B>: B's join stays after the response lands, with no set-up and one focus move", async ({
+    page,
+    request,
+  }) => {
+    const emailB = uniqueEmail();
+    const a = await createInvitation(request, { email: uniqueEmail() });
+    const b = await createInvitation(request, { email: emailB });
+    await page.route("**/api/v1/auth/sign-up-options", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      // The page may have aborted it meanwhile; ignoring it is fine too.
+      await route.continue().catch(() => undefined);
+    });
+    await recordH1Focus(page);
+    await openInvitation(page, a.token);
+    const optionsSent = page.waitForRequest("**/api/v1/auth/sign-up-options");
+    await page.getByRole("button", { name: catalogText("Use a password") }).click();
+    const optionsRequest = await optionsSent;
+    await page.evaluate(() => {
+      (window as unknown as { h1Focus: string[] }).h1Focus = [];
+    });
+
+    await page.evaluate((t) => {
+      location.hash = `#t=${t}`;
+    }, b.token);
+    await expect(page.getByText(looseText(`This invitation is for ${emailB}.`))).toBeVisible();
+    // A's response (or null when the page aborted it), then a moment for the page to handle it.
+    await optionsRequest.response();
+    await settle(page);
+
+    const h1 = page.locator("main h1");
+    await expect(h1).toHaveText(catalogText("You've been invited"));
+    await expect(page.getByText(looseText(`This invitation is for ${emailB}.`))).toBeVisible();
+    await expect(page.getByLabel(catalogText("Your name"))).toHaveCount(0);
+    const focused = await h1Focus(page);
+    expect(focused.filter((t) => looseText("You've been invited").test(t))).toHaveLength(1);
+    expect(focused.filter((t) => looseText("Set up your account").test(t))).toEqual([]);
   });
 });

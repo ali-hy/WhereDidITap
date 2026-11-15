@@ -39,7 +39,6 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.text.style.ResolvedTextDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -290,7 +289,7 @@ class AppComponentsTest {
             assertNull(config.getOrNull(SemanticsProperties.ContentDescription))
             val layouts = mutableListOf<TextLayoutResult>()
             config[SemanticsActions.GetTextLayoutResult].action?.invoke(layouts)
-            assertEquals(ResolvedTextDirection.Ltr, layouts.single().multiParagraph.getParagraphDirection(0))
+            assertEquals(LayoutDirection.Ltr, layouts.single().layoutInput.layoutDirection)
         }
     }
 }

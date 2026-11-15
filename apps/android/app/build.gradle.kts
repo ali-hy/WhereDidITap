@@ -201,7 +201,8 @@ tasks.withType<Test>().configureEach {
 // Test infrastructure: TestKit's gradle-api jar registers a shaded FileSystemProvider (Apache SSHD)
 // that stops Robolectric's native graphics runtime from loading in the same JVM. So:
 // - the Android unit-test tasks run without TestKit's jars and skip com.budmon.app.build;
-// - testKitTest runs those TestKit cases with them, after testDebugUnitTest unless --tests is given.
+// - testKitTest runs those TestKit cases with them, after testDebugUnitTest, unless --tests is given
+//   and testKitTest itself wasn't asked for.
 val testKitJars: FileCollection = configurations.detachedConfiguration(dependencies.gradleTestKit())
 val testKitTest =
     tasks.register<Test>("testKitTest") {
@@ -212,7 +213,11 @@ val testKitTest =
         testClassesDirs = files(unit.map { it.testClassesDirs })
         classpath = files(unit.map { it.classpath }) + testKitJars
         filter { includeTestsMatching("com.budmon.app.build.*") }
-        onlyIf { gradle.startParameter.taskRequests.none { "--tests" in it.args } }
+        // Asked for by name, it always runs (its own --tests applies); otherwise a --tests run skips it.
+        onlyIf {
+            gradle.startParameter.taskNames.any { it == "testKitTest" || it.endsWith(":testKitTest") } ||
+                gradle.startParameter.taskRequests.none { "--tests" in it.args }
+        }
     }
 tasks.withType<Test>().matching { it.name.endsWith("UnitTest") }.configureEach {
     filter { excludeTestsMatching("com.budmon.app.build.*") }
