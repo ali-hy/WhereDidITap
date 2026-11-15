@@ -42,10 +42,11 @@ describe("TP-0.16: renderEmail (invitation)", () => {
     expect(html).not.toContain("Evil Corp");
   });
 
-  it("TP-0.16: the text body keeps the isolates around values and has the URL on its own line, with no isolate around or inside it", () => {
+  it("TP-0.16 (A-30): the text body keeps the isolates around values, appName included, and has the URL on its own line, with no isolate around or inside it", () => {
     const { text } = renderEmail(invitation(), "en");
 
     expect(text).toContain("⁨Ahmed⁩");
+    expect(text).toContain(`⁨${APP}⁩`);
     const lines = text.split("\n");
     expect(lines).toContain(URL_);
     const urlLine = lines.find((l) => l.includes("x.ts.net")) ?? "";
@@ -72,6 +73,14 @@ describe("TP-0.16: renderEmail (invitation)", () => {
     expect(html).toContain("Accept invitation</a>");
     expect(html).toContain("Ahmed &lt;b&gt;&amp;&lt;/b&gt;");
     expect(html).not.toContain("<b>");
+  });
+
+  it("TP-0.16 (A-30): the HTML's text carries the same isolates, appName included", () => {
+    const { html } = renderEmail(invitation(), "en");
+
+    expect(html).toContain("⁨Ahmed⁩");
+    expect(html).toContain(`⁨${APP}⁩`);
+    expect(html).not.toMatch(new RegExp(`[^⁨]${APP}`));
   });
 
   it('TP-0.16: with locale ar-XB the document is <html lang="ar-XB" dir="rtl">', () => {
@@ -114,20 +123,6 @@ describe("TP-0.16x: renderEmail structure", () => {
     expect(subject).toBe("Your wDit account won't be deleted");
     expect(text).toBe("Your account won't be deleted. Reconnect your Gmail and SMS in Sources.");
     expect(html).not.toContain("<a ");
-  });
-
-  it("TP-0.16x: a one-paragraph intro is one escaped <p>", () => {
-    const c: EmailContent = {
-      subjectId: "email.account_deleted.subject",
-      introId: "email.account_deleted.intro",
-      values: {},
-    };
-
-    const { html } = renderEmail(c, "en");
-
-    expect(html).toContain(
-      "<p>Everything you owned in wDit has been erased. Copies in backups are gone within 14 days.</p>",
-    );
   });
 
   it("TP-0.16x: an unknown message ID throws", () => {

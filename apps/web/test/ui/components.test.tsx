@@ -2,11 +2,11 @@
 // TP-0b.6x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 //
 // Shapes per P-A-515: one module per component, apps/web/src/ui/<Name>.tsx exporting <Name>;
-// callers pass translated strings. The Wordmark's visual treatment waits for the guide's brand
-// section (A-26); only its name and direction are checked here.
+// callers pass translated strings.
 import { fireEvent, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
+import { APP_NAME } from "../../src/app/brand.js";
 import { Button } from "../../src/ui/Button.js";
 import { CodeField } from "../../src/ui/CodeField.js";
 import { EmptyState } from "../../src/ui/EmptyState.js";
@@ -313,13 +313,14 @@ describe("TP-0b.6: PasswordField", () => {
     };
   };
 
-  it("TP-0b.6: clicking the toggle: name stays 'Show password', aria-pressed false → true, visible Show → Hide, the input becomes text and keeps focus", () => {
+  it("TP-0b.6 (A-29, A-520): clicking the toggle: 'Show'/'Show password' becomes 'Hide'/'Hide password', no aria-pressed, the input becomes text and keeps focus", () => {
     const { input, toggle } = field();
     input.focus();
 
     expect(toggle.getAttribute("type")).toBe("button");
-    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(toggle.hasAttribute("aria-pressed")).toBe(false);
     expect(toggle.textContent).toContain("Show");
+    expect(toggle.textContent).not.toContain("Hide");
     expect(input.getAttribute("type")).toBe("password");
 
     const pointerDownNotPrevented = fireEvent.pointerDown(toggle);
@@ -327,14 +328,15 @@ describe("TP-0b.6: PasswordField", () => {
 
     expect(pointerDownNotPrevented).toBe(false);
     expect(document.activeElement).toBe(input);
-    expect(screen.getByRole("button", { name: "Show password" })).toBe(toggle);
-    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Hide password" })).toBe(toggle);
+    expect(screen.queryByRole("button", { name: "Show password" })).toBeNull();
+    expect(toggle.hasAttribute("aria-pressed")).toBe(false);
     expect(toggle.textContent).toContain("Hide");
     expect(toggle.textContent).not.toContain("Show");
     expect(input.getAttribute("type")).toBe("text");
   });
 
-  it("TP-0b.6: by keyboard: the toggle is a focusable native button, and activating it toggles back", () => {
+  it("TP-0b.6 (A-29, A-520): by keyboard: the focused native button toggles to 'Hide password' and back, never sets aria-pressed, and keeps focus", () => {
     const { input, toggle } = field();
 
     expect(toggle.tagName).toBe("BUTTON");
@@ -343,14 +345,19 @@ describe("TP-0b.6: PasswordField", () => {
     expect(document.activeElement).toBe(toggle);
 
     toggle.click();
-    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(document.activeElement).toBe(toggle);
+    expect(screen.getByRole("button", { name: "Hide password" })).toBe(toggle);
+    expect(toggle.textContent).toContain("Hide");
+    expect(toggle.hasAttribute("aria-pressed")).toBe(false);
     expect(input.getAttribute("type")).toBe("text");
 
     toggle.click();
-    expect(toggle.getAttribute("aria-pressed")).toBe("false");
-    expect(toggle.textContent).toContain("Show");
-    expect(input.getAttribute("type")).toBe("password");
+    expect(document.activeElement).toBe(toggle);
     expect(screen.getByRole("button", { name: "Show password" })).toBe(toggle);
+    expect(toggle.textContent).toContain("Show");
+    expect(toggle.textContent).not.toContain("Hide");
+    expect(toggle.hasAttribute("aria-pressed")).toBe(false);
+    expect(input.getAttribute("type")).toBe("password");
   });
 
   it("TP-0b.6x: autocomplete is passed to the input", () => {
@@ -430,24 +437,65 @@ describe("TP-0b.6: EmptyState", () => {
 });
 
 describe("TP-0b.6: Wordmark", () => {
-  it('TP-0b.6: without href it is a <span dir="ltr"> with the one accessible name wDit and no link', () => {
+  /** The wordmark's text split by whether it sits inside the accent element, empty text dropped. */
+  const parts = (root: Element, accent: Element) => {
+    const out: { text: string; accent: boolean }[] = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) {
+      const text = n.textContent ?? "";
+      if (text === "") continue;
+      const inAccent = accent.contains(n);
+      const last = out.at(-1);
+      if (last?.accent === inAccent) last.text += text;
+      else out.push({ text, accent: inAccent });
+    }
+    return out;
+  };
+
+  /** A-523: one accent span holding "D" alone, "w" and "it" outside it, the parts joining to APP_NAME. */
+  const expectMark = (root: Element) => {
+    expect(root.textContent).toBe("wDit");
+    expect(root.getAttribute("dir")).toBe("ltr");
+    expect(root.hasAttribute("aria-label")).toBe(false);
+    expect(root.querySelector("[aria-label]")).toBeNull();
+    expect(root.classList.contains("font-semibold")).toBe(true);
+    expect(root.classList.contains("text-[1.25rem]")).toBe(true);
+
+    const accents = root.querySelectorAll(".text-accent-fg");
+    expect(accents).toHaveLength(1);
+    const accent = accents[0];
+    expect(accent?.tagName).toBe("SPAN");
+    expect(accent?.hasAttribute("role")).toBe(false);
+    expect(accent?.textContent).toBe("D");
+
+    const split = parts(root, accent as Element);
+    expect(split).toEqual([
+      { text: "w", accent: false },
+      { text: "D", accent: true },
+      { text: "it", accent: false },
+    ]);
+    expect(split.map((p) => p.text).join("")).toBe(APP_NAME);
+  };
+
+  it('TP-0b.6 (A-33, A-523): without href it is a <span dir="ltr"> reading wDit, with the "D" alone in the accent span, and no link', () => {
     const { container } = renderWithI18n(() => <Wordmark />);
 
-    const mark = screen.getByText("wDit");
-    expect(mark.tagName).toBe("SPAN");
-    expect(mark.getAttribute("dir")).toBe("ltr");
+    const root = container.firstElementChild as Element;
+    expect(container.children).toHaveLength(1);
+    expect(root.tagName).toBe("SPAN");
     expect(screen.queryByRole("link")).toBeNull();
-    expect(container.textContent).toBe("wDit");
+    expectMark(root);
     expect(badClasses(container)).toEqual([]);
   });
 
-  it('TP-0b.6: with href it is an <a href dir="ltr"> named wDit', () => {
-    renderWithI18n(() => <Wordmark href="/" />);
+  it('TP-0b.6 (A-33, A-523): with href="/" it is an <a href="/"> whose accessible name is the visible wDit', () => {
+    const { container } = renderWithI18n(() => <Wordmark href="/" />);
 
     const link = screen.getByRole("link", { name: "wDit" });
+    expect(container.firstElementChild).toBe(link);
     expect(link.tagName).toBe("A");
     expect(link.getAttribute("href")).toBe("/");
-    expect(link.getAttribute("dir")).toBe("ltr");
-    expect(link.textContent).toBe("wDit");
+    expectMark(link);
+    expect(badClasses(container)).toEqual([]);
   });
 });
