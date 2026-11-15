@@ -22,6 +22,7 @@ import { useSession } from "../session/SessionProvider.js";
 
 const STORE_KEY = "budmon.invite";
 const KEEP_MS = 30 * 60 * 1000;
+const TOKEN_PATTERN = /^bmi_[A-Za-z0-9_-]{43}$/;
 const MIN_PASSWORD = 12;
 const MAX_PASSWORD = 128;
 const MAX_NAME = 80;
@@ -142,8 +143,13 @@ export function InvitePage(): JSX.Element {
 
   onMount(() => {
     const fromFragment = readFragmentToken("t");
-    if (fromFragment !== null) storeToken(fromFragment);
-    token = fromFragment ?? loadStoredToken();
+    if (fromFragment === null) {
+      token = loadStoredToken();
+    } else if (TOKEN_PATTERN.test(fromFragment)) {
+      storeToken(fromFragment);
+      token = fromFragment;
+    }
+    // A malformed or empty fragment token is "incomplete": nothing is sent or stored.
     void check();
   });
 
@@ -206,7 +212,7 @@ export function InvitePage(): JSX.Element {
             )}
           </Show>
           <div class="mt-6">
-            <Button variant="primary" fullWidth onClick={() => void openSetup()}>
+            <Button variant="secondary" fullWidth onClick={() => void openSetup()}>
               {t(m.inviteUsePassword)}
             </Button>
           </div>
