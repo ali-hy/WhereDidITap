@@ -1,4 +1,5 @@
 // F-200: the application entry.
+import "@budmon/contract/web";
 import { resolveLocale } from "@budmon/shared";
 import { QueryClientProvider } from "@tanstack/solid-query";
 import { RouterProvider } from "@tanstack/solid-router";
