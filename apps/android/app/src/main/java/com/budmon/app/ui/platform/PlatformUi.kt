@@ -15,12 +15,10 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,6 +42,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.text.BidiFormatter
 import com.budmon.app.R
+import com.budmon.app.ui.components.AppButton
+import com.budmon.app.ui.components.AppButtonVariant
 import kotlinx.coroutines.delay
 import java.text.NumberFormat
 import java.util.Locale
@@ -84,12 +84,11 @@ fun UpdateRequiredScreen(
                 textAlign = TextAlign.Center,
             )
         }
-        Button(
+        AppButton(
+            text = stringResource(R.string.update_required_button),
             onClick = { downloadFailed = downloadUrl == null || !onOpenDownload(downloadUrl) },
             modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(stringResource(R.string.update_required_button))
-        }
+        )
         if (downloadFailed) {
             Text(
                 stringResource(R.string.update_download_failed),
@@ -100,7 +99,7 @@ fun UpdateRequiredScreen(
         }
         // The offline route belongs to `transactions`; until it exists the button is hidden.
         if (onRecordOffline != null) {
-            TextButton(onClick = onRecordOffline) { Text(stringResource(R.string.update_required_offline)) }
+            AppButton(stringResource(R.string.update_required_offline), onRecordOffline, variant = AppButtonVariant.Tertiary)
         }
     }
 }
@@ -112,8 +111,8 @@ fun UpdateCard(onUpdate: () -> Unit, onLater: () -> Unit, modifier: Modifier = M
         Column(Modifier.padding(16.dp)) {
             Text(stringResource(R.string.update_available))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onUpdate) { Text(stringResource(R.string.update_action)) }
-                TextButton(onClick = onLater) { Text(stringResource(R.string.update_later)) }
+                AppButton(stringResource(R.string.update_action), onUpdate)
+                AppButton(stringResource(R.string.update_later), onLater, variant = AppButtonVariant.Tertiary)
             }
         }
     }
@@ -158,15 +157,16 @@ fun ErrorFallbackScreen(
             Text(stringResource(R.string.error_fallback_body_no_reference))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
+            AppButton(
+                text = stringResource(R.string.error_fallback_retry),
                 onClick = onRetry,
                 enabled = !busy,
                 modifier =
                 Modifier.focusRequester(retryFocus).semantics {
                     if (stillFailing) stateDescription = stillFailingText
                 },
-            ) { Text(stringResource(R.string.error_fallback_retry)) }
-            TextButton(onClick = onHome) { Text(stringResource(R.string.error_fallback_home)) }
+            )
+            AppButton(stringResource(R.string.error_fallback_home), onHome, variant = AppButtonVariant.Tertiary)
         }
         Text(
             if (stillFailing) stillFailingText else "",

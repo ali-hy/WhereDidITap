@@ -1,0 +1,165 @@
+// F-207 (S-1): the app-wide session state. Refresh arrives with S-3.
+package com.budmon.app.identity
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.budmon.app.core.network.ApiError
+import com.budmon.app.core.network.ConnectivityMonitor
+import com.budmon.app.identity.store.TokenStore
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import java.time.Clock
+import javax.inject.Inject
+
+enum class SignedOutReason { None, Ended }
+
+sealed interface SessionUiState {
+    data object Loading : SessionUiState
+
+    data class SignedOut(val reason: SignedOutReason = SignedOutReason.None) : SessionUiState
+
+    /** [me] is null while the probe failed; [lastError] says why. */
+    data class SignedIn(val me: Me?, val lastError: ApiError? = null) : SessionUiState
+}
+
+@HiltViewModel
+class SessionViewModel
+internal constructor(
+    private val repository: AuthRepository,
+    private val tokenStore: TokenStore,
+    private val connectivity: ConnectivityMonitor,
+    private val clock: Clock,
+    scopeOverride: CoroutineScope?,
+) : ViewModel() {
+    @Inject
+    constructor(
+        repository: AuthRepository,
+        tokenStore: TokenStore,
+        connectivity: ConnectivityMonitor,
+        clock: Clock,
+    ) : this(repository, tokenStore, connectivity, clock, null)
+
+    private val scope: CoroutineScope = scopeOverride ?: viewModelScope
+    private val mutableState = MutableStateFlow<SessionUiState>(SessionUiState.Loading)
+    val state: StateFlow<SessionUiState> = mutableState.asStateFlow()
+
+    private var probing = false
+    private var foreground = false
+    private var backoffMs = FIRST_DELAY_MS
+    private var timer: Job? = null
+
+    init {
+        scope.launch { start() }
+        scope.launch {
+            connectivity.isOnline.collect { online ->
+                if (online) trigger() else timer?.cancel()
+            }
+        }
+    }
+
+    private suspend fun start() {
+        val stored = tokenStore.read()
+        when {
+            stored == null -> mutableState.value = SessionUiState.SignedOut()
+
+            // An expired refresh token needs no network to be known.
+            !stored.refreshExpiresAt.isAfter(clock.instant()) -> {
+                tokenStore.clear()
+                mutableState.value = SessionUiState.SignedOut(SignedOutReason.Ended)
+            }
+
+            else -> {
+                probe()
+                scheduleRetry()
+            }
+        }
+    }
+
+    private val waitingForMe: Boolean
+        get() = (mutableState.value as? SessionUiState.SignedIn)?.me == null && mutableState.value is SessionUiState.SignedIn
+
+    /** One `me.get` at a time; a call while one runs is ignored. */
+    private suspend fun probe() {
+        if (probing) return
+        probing = true
+        try {
+            mutableState.value = SessionUiState.SignedIn(repository.getMe())
+        } catch (e: ApiException) {
+            val error = e.error
+            if (error is ApiError.Defined && error.key == "UNAUTHENTICATED") {
+                tokenStore.clear()
+                mutableState.value = SessionUiState.SignedOut(SignedOutReason.Ended)
+            } else {
+                mutableState.value = SessionUiState.SignedIn(null, error)
+            }
+        } finally {
+            probing = false
+        }
+    }
+
+    private fun canRetry(): Boolean = waitingForMe && foreground && connectivity.isOnline.value
+
+    /** The next probes at 15 s, 30 s, … capped at 5 minutes, while online and in the foreground. */
+    private fun scheduleRetry() {
+        timer?.cancel()
+        if (!canRetry()) return
+        timer =
+            scope.launch {
+                while (canRetry()) {
+                    delay(backoffMs)
+                    if (!canRetry()) break
+                    probe()
+                    backoffMs = minOf(backoffMs * 2, MAX_DELAY_MS)
+                }
+            }
+    }
+
+    /** Connectivity, foreground and Try again: start over from the short delay. */
+    private fun trigger() {
+        if (!waitingForMe) return
+        backoffMs = FIRST_DELAY_MS
+        timer?.cancel()
+        scope.launch {
+            probe()
+            scheduleRetry()
+        }
+    }
+
+    fun retry() {
+        trigger()
+    }
+
+    fun onForeground() {
+        foreground = true
+        trigger()
+    }
+
+    fun onBackground() {
+        foreground = false
+        timer?.cancel()
+    }
+
+    /** After a sign-up or sign-in stored a session. */
+    fun onSignedIn(me: Me?) {
+        if (me != null) {
+            mutableState.value = SessionUiState.SignedIn(me)
+            return
+        }
+        mutableState.value = SessionUiState.Loading
+        scope.launch {
+            probe()
+            scheduleRetry()
+        }
+    }
+
+    private companion object {
+        const val FIRST_DELAY_MS = 15_000L
+        const val MAX_DELAY_MS = 300_000L
+    }
+}

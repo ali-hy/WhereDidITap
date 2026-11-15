@@ -1,0 +1,241 @@
+// F-212 (S-1): the invitation flow's state, from the preview to the new account (password path).
+package com.budmon.app.identity
+
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.budmon.app.R
+import com.budmon.app.core.error.Operation
+import com.budmon.app.core.error.UiText
+import com.budmon.app.core.network.ApiError
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import java.time.Instant
+import java.time.ZoneId
+import java.util.Currency
+import java.util.Locale
+import javax.inject.Inject
+
+sealed interface InviteProblem {
+    data class Expired(val at: Instant?) : InviteProblem
+
+    data object Revoked : InviteProblem
+
+    data class Used(val recent: Boolean) : InviteProblem
+
+    data object Invalid : InviteProblem
+
+    /** Anything else: shown through the error mapping, with Try again. */
+    data class Failed(val error: ApiError) : InviteProblem
+}
+
+sealed interface InviteState {
+    data object Checking : InviteState
+
+    data class Join(val preview: InvitationPreview) : InviteState
+
+    data class SetUp(val preview: InvitationPreview, val options: SignUpOptions) : InviteState
+
+    data class Problem(val problem: InviteProblem, val inviter: String?) : InviteState
+}
+
+private const val MIN_PASSWORD = 12
+private const val MAX_PASSWORD = 128
+private const val MAX_NAME = 80
+
+/** A field's error as a string resource, or null. */
+typealias FieldError = Int?
+
+@HiltViewModel
+class InviteViewModel
+@Inject
+constructor(
+    private val repository: AuthRepository,
+) : ViewModel() {
+    var state by mutableStateOf<InviteState>(InviteState.Checking)
+        private set
+
+    var name by mutableStateOf("")
+    var password by mutableStateOf("")
+    var currency by mutableStateOf<String?>(null)
+    var timeZone by mutableStateOf<String?>(ZoneId.systemDefault().id)
+    var language by mutableStateOf<String?>(null)
+    var nameError by mutableStateOf<FieldError>(null)
+    var passwordError by mutableStateOf<FieldError>(null)
+    var currencyError by mutableStateOf<FieldError>(null)
+    var timeZoneError by mutableStateOf<FieldError>(null)
+
+    /** A message for a failure that has no field (rate limit, outage, no room). */
+    var formError by mutableStateOf<UiText?>(null)
+        private set
+    var busy by mutableStateOf(false)
+        private set
+
+    private var token: String? = null
+    private var preview: InvitationPreview? = null
+
+    /** Starts (or restarts) the flow for [value]; the same token already in progress is kept. */
+    fun open(value: String) {
+        if (token == value && state !is InviteState.Problem) return
+        token = value
+        check()
+    }
+
+    fun check() {
+        val current = token ?: return
+        state = InviteState.Checking
+        viewModelScope.launch {
+            try {
+                val p = repository.previewInvitation(current)
+                preview = p
+                state = InviteState.Join(p)
+            } catch (e: ApiException) {
+                state = InviteState.Problem(problemOf(e.error), preview?.inviterName)
+            }
+        }
+    }
+
+    fun usePassword() {
+        val p = preview ?: return
+        viewModelScope.launch {
+            try {
+                val options = repository.signUpOptions()
+                if (currency == null) currency = defaultCurrency(options.currencies)
+                if (language == null) language = defaultLanguage(options.locales)
+                state = InviteState.SetUp(p, options)
+            } catch (e: ApiException) {
+                state = InviteState.Problem(InviteProblem.Failed(e.error), p.inviterName)
+            }
+        }
+    }
+
+    private fun problemOf(error: ApiError): InviteProblem {
+        if (error !is ApiError.Defined) return InviteProblem.Failed(error)
+        return when (error.key) {
+            "INVITATION_EXPIRED" ->
+                InviteProblem.Expired(
+                    (error.data?.get("expiredAt") as? JsonPrimitive)?.content?.let {
+                        try {
+                            Instant.parse(it)
+                        } catch (_: java.time.format.DateTimeParseException) {
+                            null
+                        }
+                    },
+                )
+
+            "INVITATION_REVOKED" -> InviteProblem.Revoked
+            "INVITATION_USED" -> InviteProblem.Used((error.data?.get("recent") as? JsonPrimitive)?.content == "true")
+            "INVITATION_INVALID" -> InviteProblem.Invalid
+            else -> InviteProblem.Failed(error)
+        }
+    }
+
+    private fun defaultCurrency(active: List<String>): String =
+        try {
+            Currency.getInstance(Locale.getDefault()).currencyCode.takeIf { it in active }
+        } catch (_: IllegalArgumentException) {
+            null
+        } ?: "USD"
+
+    private fun defaultLanguage(locales: List<String>): String {
+        val tag = Locale.getDefault().toLanguageTag()
+        return locales.firstOrNull { it == tag } ?: locales.firstOrNull { it == Locale.getDefault().language } ?: "en"
+    }
+
+    private fun validate(): Boolean {
+        val nameLength = name.trim().codePointCount(0, name.trim().length)
+        nameError =
+            when {
+                nameLength == 0 -> R.string.profile_name_required
+                nameLength > MAX_NAME -> R.string.profile_name_too_long
+                else -> null
+            }
+        val passwordLength = password.codePointCount(0, password.length)
+        passwordError =
+            when {
+                passwordLength < MIN_PASSWORD -> R.string.password_too_short
+                passwordLength > MAX_PASSWORD -> R.string.password_too_long
+                else -> null
+            }
+        currencyError = if (currency == null) R.string.profile_currency_required else null
+        timeZoneError = if (timeZone == null) R.string.profile_time_zone_required else null
+        return nameError == null && passwordError == null && currencyError == null && timeZoneError == null
+    }
+
+    /** Creates the account; [onDone] gets the new user (null when it couldn't be read yet). */
+    fun submit(onDone: (Me?) -> Unit) {
+        val current = token ?: return
+        formError = null
+        if (busy || !validate()) return
+        busy = true
+        viewModelScope.launch {
+            try {
+                val me =
+                    repository.acceptInvitation(
+                        token = current,
+                        displayName = name.trim(),
+                        locale = language ?: "en",
+                        timeZone = timeZone ?: ZoneId.systemDefault().id,
+                        baseCurrency = currency ?: "USD",
+                        password = password,
+                    )
+                password = ""
+                onDone(me)
+            } catch (e: ApiException) {
+                fail(e.error)
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    private fun fail(error: ApiError) {
+        if (error is ApiError.Defined) {
+            when (error.key) {
+                "PASSWORD_TOO_WEAK" -> {
+                    passwordError =
+                        when ((error.data?.get("reason") as? JsonPrimitive)?.content) {
+                            "too_short" -> R.string.password_too_short
+                            "too_long" -> R.string.password_too_long
+                            "common" -> R.string.password_common
+                            "contains_email" -> R.string.password_contains_email
+                            else -> null
+                        }
+                    if (passwordError != null) return
+                }
+
+                "VALIDATION_FAILED" -> {
+                    val issues = error.data?.get("issues") as? JsonArray
+                    var mapped = false
+                    for (issue in issues.orEmpty()) {
+                        val path = ((issue as? JsonObject)?.get("path") as? JsonArray)?.firstOrNull() as? JsonPrimitive
+                        when (path?.content) {
+                            "displayName" -> nameError = R.string.profile_name_required
+                            "baseCurrency" -> currencyError = R.string.profile_currency_required
+                            "timeZone" -> timeZoneError = R.string.profile_time_zone_required
+                            else -> continue
+                        }
+                        mapped = true
+                    }
+                    if (mapped) return
+                }
+
+                "USER_CAP_REACHED" -> {
+                    formError = UiText(R.string.invite_full, listOf(preview?.inviterName.orEmpty()))
+                    return
+                }
+
+                "INVITATION_INVALID", "INVITATION_EXPIRED", "INVITATION_REVOKED", "INVITATION_USED" -> {
+                    state = InviteState.Problem(problemOf(error), preview?.inviterName)
+                    return
+                }
+            }
+        }
+        formError = IdentityErrorMessages.forError(error, Operation.Create)
+    }
+}
