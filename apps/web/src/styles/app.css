@@ -169,6 +169,13 @@
     :focus-visible {
       outline-color: Highlight;
     }
+
+    /* Text-only buttons keep a visible edge when the system draws the colours. */
+    button {
+      border-width: 1px;
+      border-style: solid;
+      border-color: ButtonText;
+    }
   }
 }
 

@@ -20,10 +20,17 @@ const OPTIONS: ComboboxOption[] = [
 
 const VARIANTS = ["primary", "secondary", "tertiary", "destructive"] as const;
 
-function Section(props: { name: string; children: JSX.Element }): JSX.Element {
+/** [ownHeading]: the children already render the section's one h2. */
+function Section(props: {
+  name: string;
+  ownHeading?: boolean;
+  children: JSX.Element;
+}): JSX.Element {
   return (
     <section data-component={props.name} class="mt-8">
-      <h2 class="mb-3 text-lg font-semibold text-fg">{props.name}</h2>
+      {props.ownHeading === true ? null : (
+        <h2 class="mb-3 text-lg font-semibold text-fg">{props.name}</h2>
+      )}
       <div class="flex flex-col gap-4">{props.children}</div>
     </section>
   );
@@ -121,10 +128,10 @@ export function ComponentsFixture(): JSX.Element {
           onChange={setRadio}
         />
       </Section>
-      <Section name="EmptyState">
+      <Section name="EmptyState" ownHeading>
         <EmptyState
           icon="wallet"
-          title="Nothing here yet"
+          title="EmptyState"
           body="Add your first item to start."
           action={<Button variant="primary">Add item</Button>}
         />
