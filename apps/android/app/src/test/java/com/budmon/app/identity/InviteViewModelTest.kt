@@ -364,7 +364,7 @@ class InviteViewModelTest {
     }
 
     @Test
-    fun `TP-1_55 a preview answered INVITATION_EXPIRED with inviterName Mona - Problem(Expired(at), inviter = Mona)`() = runTest {
+    fun `TP-1_55 a preview INVITATION_EXPIRED with inviterName Mona - Problem(Expired(at), inviter Mona, origin direct)`() = runTest {
         answers["/api/v1/invitations/preview"] = {
             defined(
                 "INVITATION_EXPIRED",
@@ -378,7 +378,9 @@ class InviteViewModelTest {
         vm.open(token)
         await("Problem") { vm.state is InviteState.Problem }
 
-        assertEquals(InviteState.Problem(InviteProblem.Expired(Instant.parse("2026-11-01T10:00:00Z")), inviter = "Mona"), vm.state)
+        val at = Instant.parse("2026-11-01T10:00:00Z")
+        val expected = InviteState.Problem(InviteProblem.Expired(at), inviter = "Mona", origin = "direct")
+        assertEquals(expected, vm.state)
     }
 
     @Test
@@ -394,6 +396,6 @@ class InviteViewModelTest {
         vm.submit { }
         await("Problem") { vm.state is InviteState.Problem }
 
-        assertEquals(InviteState.Problem(InviteProblem.Revoked, inviter = "Mona"), vm.state)
+        assertEquals(InviteState.Problem(InviteProblem.Revoked, inviter = "Mona", origin = "direct"), vm.state)
     }
 }

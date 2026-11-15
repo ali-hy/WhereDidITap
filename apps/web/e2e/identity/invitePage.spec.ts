@@ -1,7 +1,7 @@
 // F-159's S-1 QA fixes (identity LLD v0.32, A-52 to A-57): a later link in the same tab, long
 // text at 360 px, focus on a step change, the set-up privacy link in a new tab, a signed-in visitor.
-// TP-1.48, TP-1.51 to TP-1.54; TP-1.32x (a bootstrap problem has no ask line, A-58) and TP-1.56
-// (a fragment without t leaves the page alone, A-52), from review B-2.
+// TP-1.48, TP-1.51 to TP-1.54, TP-1.56 (a fragment without t, A-65), TP-1.57 (stale responses,
+// A-64), and TP-1.32x (a bootstrap problem has no ask line, A-58; review B-2).
 import {
   catalogText,
   createInvitation,
@@ -23,6 +23,15 @@ function countPreviews(page: Page): { readonly n: number } {
   const seen = { n: 0 };
   page.on("request", (r) => {
     if (new URL(r.url()).pathname === PREVIEW) seen.n += 1;
+  });
+  return seen;
+}
+
+/** The number of sign-up-options requests from now on. */
+function countSignUpOptions(page: Page): { readonly n: number } {
+  const seen = { n: 0 };
+  page.on("request", (r) => {
+    if (new URL(r.url()).pathname === "/api/v1/auth/sign-up-options") seen.n += 1;
   });
   return seen;
 }
@@ -234,20 +243,22 @@ test.describe("TP-1.32x: a bootstrap invitation's problem has no ask line (A-58,
   }
 });
 
-test.describe("TP-1.56: a fragment without t leaves the page alone (A-52, review B-2)", () => {
-  test("TP-1.56: on set-up with a name and password typed, location.hash = #main keeps the state and values and sends no preview", async ({
+test.describe("TP-1.56: a fragment without t changes nothing (A-65)", () => {
+  test("TP-1.56: on set-up with a typed name, location.hash = #main keeps set-up and the name, sends no preview or sign-up-options request, leaves focus off the h1, and keeps #main", async ({
     page,
     request,
   }) => {
     const { token } = await createInvitation(request, { email: uniqueEmail() });
     await openInvitation(page, token);
     await page.getByRole("button", { name: catalogText("Use a password") }).click();
-    await expect(page.locator("main h1")).toHaveText(catalogText("Set up your account"));
-    const name = page.getByLabel(catalogText("Your name"));
+    const h1 = page.locator("main h1");
+    await expect(h1).toHaveText(catalogText("Set up your account"));
     const password = page.getByLabel(catalogText("Password"));
-    await name.fill("Mona Hassan");
+    const name = page.getByLabel(catalogText("Your name"));
     await password.fill(E2E_PASSWORD);
+    await name.fill("Mona Hassan");
     const previews = countPreviews(page);
+    const options = countSignUpOptions(page);
 
     // Waits for the page's hashchange and two frames, so any handler has run.
     await page.evaluate(async () => {
@@ -261,9 +272,65 @@ test.describe("TP-1.56: a fragment without t leaves the page alone (A-52, review
       });
     });
 
-    await expect(page.locator("main h1")).toHaveText(catalogText("Set up your account"));
+    await expect(h1).toHaveText(catalogText("Set up your account"));
     await expect(name).toHaveValue("Mona Hassan");
     await expect(password).toHaveValue(E2E_PASSWORD);
+    await expect(h1).not.toBeFocused();
+    expect(await page.evaluate(() => location.hash)).toBe("#main");
     expect(previews.n).toBe(0);
+    expect(options.n).toBe(0);
+  });
+});
+
+test.describe("TP-1.57: a stale preview response is ignored (A-64)", () => {
+  test("TP-1.57: #t=<A> with A's preview delayed 2 s, then at once #t=<B>: join shows B's email after A's response arrives; the join h1 gets focus once", async ({
+    page,
+    request,
+  }) => {
+    const emailA = uniqueEmail();
+    const emailB = uniqueEmail();
+    const a = await createInvitation(request, { email: emailA });
+    const b = await createInvitation(request, { email: emailB });
+    await page.route(`**${PREVIEW}`, async (route) => {
+      const body = route.request().postDataJSON() as { token?: unknown } | null;
+      if (body?.token === a.token) await new Promise((resolve) => setTimeout(resolve, 2_000));
+      // The page may have aborted A's request meanwhile; ignoring it is fine too.
+      await route.continue().catch(() => undefined);
+    });
+    // The text of every h1 that receives focus, in order.
+    await page.addInitScript(() => {
+      const w = window as unknown as { h1Focus: string[] };
+      w.h1Focus = [];
+      document.addEventListener("focusin", (e) => {
+        if (e.target instanceof HTMLHeadingElement && e.target.tagName === "H1") {
+          w.h1Focus.push(e.target.textContent);
+        }
+      });
+    });
+    const aSent = page.waitForRequest(
+      (r) =>
+        new URL(r.url()).pathname === PREVIEW &&
+        (r.postDataJSON() as { token?: unknown } | null)?.token === a.token,
+    );
+
+    await page.goto(`/invite#t=${a.token}`);
+    const aRequest = await aSent;
+    await page.evaluate((t) => {
+      location.hash = `#t=${t}`;
+    }, b.token);
+    // A's response (or null when the page aborted it), then a moment for the page to handle it.
+    await aRequest.response();
+    await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(resolve));
+        }),
+    );
+
+    await expect(page.locator("main h1")).toHaveText(catalogText("You've been invited"));
+    await expect(page.getByText(looseText(`This invitation is for ${emailB}.`))).toBeVisible();
+    await expect(page.getByText(new RegExp(emailA.replaceAll(".", "\\.")))).toHaveCount(0);
+    const focused = await page.evaluate(() => (window as unknown as { h1Focus: string[] }).h1Focus);
+    expect(focused.filter((t) => looseText("You've been invited").test(t))).toHaveLength(1);
   });
 });

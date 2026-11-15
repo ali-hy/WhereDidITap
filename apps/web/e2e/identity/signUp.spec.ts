@@ -263,6 +263,36 @@ test.describe("TP-1.32: invitation problems (A-41, A-43, A-56, A-58)", () => {
       expect(await page.evaluate(() => sessionStorage.getItem("budmon.invite"))).toBeNull();
     });
   }
+
+  // A-62: the opened link wins, so a token stored before the page loads is removed too.
+  for (const [label, path] of [
+    ["an empty #t=", "/invite#t="],
+    ["a malformed token", "/invite#t=bmi_short"],
+  ] as const) {
+    test(`TP-1.32 (A-62): an incomplete link (${label}) with a token stored before the load: the incomplete text, no preview, the stored token removed`, async ({
+      page,
+    }) => {
+      await page.addInitScript(
+        ([key, token]) => {
+          sessionStorage.setItem(key, JSON.stringify({ t: token, at: Date.now() }));
+        },
+        [STORED, `bmi_${"S".repeat(43)}`] as const,
+      );
+      let previews = 0;
+      page.on("request", (r) => {
+        if (new URL(r.url()).pathname === "/api/v1/invitations/preview") previews += 1;
+      });
+
+      await page.goto(path);
+
+      await expect(page.locator("main h1")).toHaveText(
+        catalogText("This invitation can't be used"),
+      );
+      await expect(page.getByText(catalogText(INCOMPLETE))).toBeVisible();
+      expect(previews).toBe(0);
+      await expectNothingStored(page);
+    });
+  }
 });
 
 test.describe("TP-1.37: the privacy notice", () => {

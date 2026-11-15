@@ -1,5 +1,5 @@
 // S-1's Android screens and the link route (identity LLD §8.2, A-49's signatures; F-208, F-211, F-212;
-// A-45 texts, A-47 privacy links, A-48 link-screen strings). TP-1.47, plus TP-1.47x.
+// A-45 texts, A-47 privacy links, A-48 link-screen strings, A-60 ask lines). TP-1.47, plus TP-1.47x.
 // Screens get fake lambdas that count their calls; InvitationLinkRoute runs with https://budmon.com/.
 // TP-1.47's ViewModel part (formError with no inviter) is in InviteViewModelTest.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
@@ -125,7 +125,13 @@ class InviteScreensTest {
         val signIn = Counter()
         val retry = Counter()
         show {
-            InviteProblemScreen(problem = InviteProblem.Expired(expiresAt), inviter = null, onRetry = retry.call, onSignIn = signIn.call)
+            InviteProblemScreen(
+                problem = InviteProblem.Expired(expiresAt),
+                inviter = null,
+                origin = "direct",
+                onRetry = retry.call,
+                onSignIn = signIn.call,
+            )
         }
 
         compose.onNodeWithText("Ask someone who already has an account to invite you again.").assertIsDisplayed()
@@ -133,6 +139,47 @@ class InviteScreensTest {
 
         assertEquals(1, signIn.calls)
         assertEquals(0, retry.calls)
+    }
+
+    /** Shows the problem screen with no-op callbacks. */
+    private fun showProblem(problem: InviteProblem, inviter: String?, origin: String?) {
+        show { InviteProblemScreen(problem = problem, inviter = inviter, origin = origin, onRetry = {}, onSignIn = {}) }
+    }
+
+    private val askMona = "Ask Mona to send a new one."
+    private val askAnyone = "Ask someone who already has an account to invite you again."
+
+    @Test
+    fun `TP-1_47 InviteProblemScreen Expired with inviter Mona and origin direct - Ask Mona to send a new one`() {
+        showProblem(InviteProblem.Expired(expiresAt), inviter = "Mona", origin = "direct")
+
+        compose.onNodeWithText(askMona).assertIsDisplayed()
+    }
+
+    @Test
+    fun `TP-1_47 InviteProblemScreen Expired with origin bootstrap - no ask line`() {
+        showProblem(InviteProblem.Expired(expiresAt), inviter = null, origin = "bootstrap")
+
+        compose.onNodeWithText(text(R.string.invite_problem_title)).assertIsDisplayed()
+        compose.onNodeWithText("Ask", substring = true).assertDoesNotExist()
+        compose.onNodeWithText(askAnyone).assertDoesNotExist()
+    }
+
+    @Test
+    fun `TP-1_47 InviteProblemScreen Used(recent = true) with inviter Mona - ready text, no ask line`() {
+        showProblem(InviteProblem.Used(recent = true), inviter = "Mona", origin = "direct")
+
+        compose.onNodeWithText(text(R.string.invite_problem_ready)).assertIsDisplayed()
+        compose.onNodeWithText(askMona).assertDoesNotExist()
+        compose.onNodeWithText(askAnyone).assertDoesNotExist()
+    }
+
+    @Test
+    fun `TP-1_47 InviteProblemScreen Used(recent = false) with inviter Mona - used text and Ask Mona to send a new one`() {
+        showProblem(InviteProblem.Used(recent = false), inviter = "Mona", origin = "direct")
+
+        compose.onNodeWithText(text(R.string.invite_problem_used)).assertIsDisplayed()
+        compose.onNodeWithText(askMona).assertIsDisplayed()
     }
 
     // ---- Start (F-208, A-47) ----
