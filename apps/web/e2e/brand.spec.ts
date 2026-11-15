@@ -37,13 +37,15 @@ test("TP-0b.10: signed out, the header's wordmark has the accessible name wDit a
 }, testInfo) => {
   test.skip(testInfo.project.name !== "chromium", "chromium project only");
 
+  // Signed out, / lands on the sign-in page (identity S-1, A-510).
   await page.goto("/");
+  await expect(page).toHaveURL(/\/sign-in(\?.*)?$/);
   const wordmark = page.getByRole("banner").getByText(APP, { exact: true });
 
   await expect(wordmark).toHaveCount(1);
   await expect(wordmark).toHaveAttribute("dir", "ltr");
   await expect(wordmark).not.toHaveAttribute("aria-label", /.*/);
-  await expect(page).toHaveTitle(APP);
+  await expect(page).toHaveTitle(`Sign in – ${APP}`);
 
   await page.evaluate(() => {
     history.pushState({}, "", "/no-such-page");

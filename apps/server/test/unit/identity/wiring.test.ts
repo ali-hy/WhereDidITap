@@ -1,5 +1,5 @@
 // Identity's wiring into the platform's composition points (identity LLD §1.1, A-26, A-202). TP-0.32's
-// static (U) half with S-0's expectations; the container half is in
+// static (U) half with S-1's expectations; the container half is in
 // test/integration/identity/wiring.test.ts.
 import { contract } from "@budmon/contract";
 import { describe, expect, it } from "vitest";
@@ -22,18 +22,32 @@ const PLATFORM_TABLES = [
   "rate_limit_counters",
 ];
 
-describe("TP-0.32 (U): S-0's wiring points", () => {
-  it("TP-0.32: appRouter and the contract have only meta (no identity procedures in S-0)", () => {
-    expect(Object.keys(appRouter)).toEqual(["meta"]);
-    expect(Object.keys(contract)).toEqual(["meta"]);
+describe("TP-0.32 (U): the wiring points, as of S-1", () => {
+  it("TP-0.32 (S-1): appRouter and the contract have meta plus identity's auth, me and invitations", () => {
+    expect(Object.keys(appRouter).sort()).toEqual(["auth", "invitations", "me", "meta"]);
+    expect(Object.keys(contract).sort()).toEqual(["auth", "invitations", "me", "meta"]);
   });
 
-  it("TP-0.32: identityRouter is {} in S-0", () => {
-    expect(identityRouter).toEqual({});
+  it("TP-0.32 (S-1): identityRouter has S-1's procedures: auth.signUpOptions, me.get, invitations.preview and invitations.accept", () => {
+    const procedures = Object.entries(identityRouter as Record<string, object>)
+      .flatMap(([group, router]) => Object.keys(router).map((name) => `${group}.${name}`))
+      .sort();
+
+    expect(procedures).toEqual([
+      "auth.signUpOptions",
+      "invitations.accept",
+      "invitations.preview",
+      "me.get",
+    ]);
   });
 
-  it("TP-0.32: PUBLIC_PROCEDURES is only meta.clientConfig", () => {
-    expect([...PUBLIC_PROCEDURES]).toEqual(["meta.clientConfig"]);
+  it("TP-0.32 (S-1): PUBLIC_PROCEDURES is meta.clientConfig plus §5.1's S-1 entries", () => {
+    expect([...PUBLIC_PROCEDURES].sort()).toEqual([
+      "auth.signUpOptions",
+      "invitations.accept",
+      "invitations.preview",
+      "meta.clientConfig",
+    ]);
   });
 
   it("TP-0.32: buildJobRegistry() has the platform's jobs plus identity.email-send", () => {
