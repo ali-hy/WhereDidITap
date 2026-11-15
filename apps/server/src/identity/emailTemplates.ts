@@ -51,12 +51,9 @@ function escapeHtml(text: string): string {
     .replaceAll("'", "&#39;");
 }
 
-/** The brand is Latin, so the HTML part drops its bidi isolate. */
-const unwrapBrand = (text: string): string => text.replaceAll(`⁨${APP_NAME}⁩`, APP_NAME);
-
 /** Blank-line separated paragraphs, each escaped and wrapped in <p>. */
 function paragraphs(text: string): string {
-  return unwrapBrand(text)
+  return text
     .split(/\n{2,}/)
     .map((p) => `<p>${escapeHtml(p)}</p>`)
     .join("");

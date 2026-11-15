@@ -18,10 +18,10 @@ export interface ButtonProps {
   href?: string;
   onClick?: (e: MouseEvent) => void;
   "aria-describedby"?: string;
-  /** The rendered button, for callers that move focus to it. */
-  ref?: (el: HTMLButtonElement) => void;
-  /** Marks the error page's Try again for focus handling (A-456). */
-  "data-fallback-retry"?: boolean;
+  /** The rendered element, for callers that move focus to it. */
+  ref?: (el: HTMLButtonElement | HTMLAnchorElement) => void;
+  /** Every `data-*` prop reaches the rendered element. */
+  [data: `data-${string}`]: string | boolean | undefined;
 }
 
 const VARIANT: Readonly<Record<ButtonProps["variant"], string>> = {
@@ -56,6 +56,8 @@ export function Button(props: ButtonProps): JSX.Element {
     "fullWidth",
     "href",
     "onClick",
+    "ref",
+    "aria-describedby",
   ]);
   const classes = () => buttonClasses(local);
   // Busy keeps the label and focus: it swaps the icon for a spinner and ignores activation.
@@ -77,13 +79,13 @@ export function Button(props: ButtonProps): JSX.Element {
       when={local.href}
       fallback={
         <button
-          ref={rest.ref}
-          data-fallback-retry={rest["data-fallback-retry"] === true ? "" : undefined}
+          {...rest}
+          ref={(el) => local.ref?.(el)}
           type={local.type ?? "button"}
           class={classes()}
           disabled={local.disabled === true}
           aria-busy={local.busy === true ? "true" : undefined}
-          aria-describedby={rest["aria-describedby"]}
+          aria-describedby={local["aria-describedby"]}
           onClick={(e) => {
             if (local.busy === true) {
               e.preventDefault();
@@ -98,9 +100,11 @@ export function Button(props: ButtonProps): JSX.Element {
     >
       {(href) => (
         <a
+          {...rest}
+          ref={(el) => local.ref?.(el)}
           href={href()}
           class={classes()}
-          aria-describedby={rest["aria-describedby"]}
+          aria-describedby={local["aria-describedby"]}
           onClick={(e) => local.onClick?.(e)}
         >
           {content()}

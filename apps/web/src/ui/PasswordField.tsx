@@ -31,11 +31,10 @@ export function PasswordField(props: PasswordFieldProps): JSX.Element {
           }}
           onBlur={() => props.onBlur?.()}
         />
-        {/* The name stays "Show password"; aria-pressed carries the state. */}
+        {/* The accessible name follows the visible text: Show password, then Hide password. */}
         <button
           type="button"
-          aria-label={t(messages.uiPasswordToggleLabel)}
-          aria-pressed={shown() ? "true" : "false"}
+          aria-label={shown() ? t(messages.uiPasswordHideLabel) : t(messages.uiPasswordShowLabel)}
           class="absolute inset-y-0 end-0 inline-flex min-w-11 items-center gap-1 rounded-control px-3 text-sm font-semibold text-accent-fg hover:underline"
           onPointerDown={(e) => {
             e.preventDefault();

@@ -1,5 +1,6 @@
-// P-A-515 (c): the product name as the header's wordmark. Plain `APP_NAME` text in `fg` for now
-// (identity A-26): one accessible name, always left to right.
+// P-A-515 (c), A-523: the product name as the header's wordmark (UX guide §2.1): "wDit" in Plex Sans
+// 600 at 20 px, the "D" in the accent colour. One accessible name (the visible text), always left
+// to right.
 import { Show, type JSX } from "solid-js";
 import { APP_NAME } from "../app/brand.js";
 
@@ -8,7 +9,21 @@ export interface WordmarkProps {
   href?: string;
 }
 
-const CLASSES = "text-lg font-semibold text-fg no-underline";
+// The parts join to APP_NAME; anything else renders the plain name.
+const PARTS = ["w", "D", "it"] as const;
+const CLASSES = "text-[1.25rem] font-semibold text-fg no-underline";
+
+function Name(): JSX.Element {
+  return PARTS.join("") === APP_NAME ? (
+    <>
+      {PARTS[0]}
+      <span class="text-accent-fg">{PARTS[1]}</span>
+      {PARTS[2]}
+    </>
+  ) : (
+    <>{APP_NAME}</>
+  );
+}
 
 export function Wordmark(props: WordmarkProps): JSX.Element {
   return (
@@ -16,13 +31,13 @@ export function Wordmark(props: WordmarkProps): JSX.Element {
       when={props.href}
       fallback={
         <span dir="ltr" class={CLASSES}>
-          {APP_NAME}
+          <Name />
         </span>
       }
     >
       {(href) => (
         <a href={href()} dir="ltr" class={CLASSES}>
-          {APP_NAME}
+          <Name />
         </a>
       )}
     </Show>

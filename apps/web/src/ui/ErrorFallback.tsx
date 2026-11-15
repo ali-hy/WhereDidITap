@@ -21,7 +21,7 @@ export function ErrorFallback(props: {
   const [busy, setBusy] = createSignal(false);
   const [stillFailing, setStillFailing] = createSignal(false);
   const statusId = createUniqueId();
-  let button: HTMLButtonElement | undefined;
+  let button: HTMLElement | undefined;
 
   // A-464: the tab title follows the <h1>.
   createEffect(() => {
