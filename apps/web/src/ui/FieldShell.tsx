@@ -5,8 +5,8 @@ import { FieldError } from "./forms.js";
 export interface FieldProps {
   id: string;
   label: string;
-  hint?: string;
-  error?: string;
+  hint?: string | undefined;
+  error?: string | undefined;
 }
 
 /** `<id>-hint` then `<id>-error`, each only when shown. */

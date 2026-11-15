@@ -1,7 +1,9 @@
 // The fixture routes (§8.1, A-328, A-330 to A-332): development and E2E builds only
 // (VITE_FIXTURES=1). Their literal strings are exempt from the catalog rules.
 import { createRoute, type AnyRoute } from "@tanstack/solid-router";
+import { HomePlaceholder } from "../pages/HomePlaceholder.js";
 import { A11yViolationFixture } from "./A11yViolationFixture.js";
+import { ComponentsFixture } from "./ComponentsFixture.js";
 import { failingLoader, FailingLoaderFixture } from "./FailingLoaderFixture.js";
 import { flakyLoader, FlakyLoaderFixture } from "./FlakyLoaderFixture.js";
 import { invalidateLoader, InvalidateFixture } from "./InvalidateFixture.js";
@@ -19,6 +21,8 @@ export function createFixtureRoutes(rootRoute: AnyRoute): AnyRoute[] {
     }) as unknown as AnyRoute;
   return [
     route("/__fixtures/rtl-probe", RtlProbeFixture),
+    route("/__fixtures/home-placeholder", HomePlaceholder),
+    route("/__fixtures/components", ComponentsFixture),
     route("/__fixtures/flaky-loader", FlakyLoaderFixture, flakyLoader),
     route("/__fixtures/failing-loader", FailingLoaderFixture, failingLoader),
     route("/__fixtures/invalidate", InvalidateFixture, invalidateLoader),

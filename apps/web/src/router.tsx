@@ -1,6 +1,6 @@
 // F-216: the router (TanStack Router, code-based).
 import {
-  createRootRoute,
+  createRootRouteWithContext,
   createRoute,
   createRouter,
   Outlet,
@@ -8,23 +8,30 @@ import {
   type ErrorComponentProps,
 } from "@tanstack/solid-router";
 import { createSignal, type JSX } from "solid-js";
+import { AppHeader } from "./identity/components/AppHeader.js";
+import { HomeFirstRun } from "./identity/components/HomeFirstRun.js";
+import { InvitePage } from "./identity/pages/InvitePage.js";
+import { PrivacyNoticePage } from "./identity/pages/PrivacyNoticePage.js";
+import { SignInPage } from "./identity/pages/SignInPage.js";
+import { requireSignedIn, requireSignedOut, safeNext } from "./identity/routes/guards.js";
+import { useSession } from "./identity/session/SessionProvider.js";
+import type { SessionStore } from "./identity/session/sessionStore.js";
 import { toAppError } from "./api/errors.js";
-import { HomePlaceholder } from "./pages/HomePlaceholder.js";
 import { NotFound } from "./pages/NotFound.js";
 import { announce } from "./ui/a11y.js";
 import { ErrorFallback } from "./ui/ErrorFallback.js";
-import { Wordmark } from "./ui/Wordmark.js";
 
 /** The layout's frame; the error fallback renders inside it too (§4.18, Q-D2). */
 function Shell(props: { children: JSX.Element }): JSX.Element {
+  const session = useSession();
   return (
     <>
-      <header class="border-b border-line bg-surface">
-        <div class="mx-auto flex min-h-14 max-w-[40rem] items-center px-4 min-[600px]:px-6">
-          <Wordmark />
-        </div>
-      </header>
-      <main id="main" class="mx-auto max-w-[40rem] px-4 pt-8 pb-8 min-[600px]:px-6">
+      <AppHeader />
+      <main
+        id="main"
+        aria-busy={session.status() === "loading" ? "true" : undefined}
+        class="mx-auto max-w-[40rem] px-4 pt-8 pb-8 min-[600px]:px-6"
+      >
         {props.children}
       </main>
     </>
@@ -39,13 +46,13 @@ function RootLayout(): JSX.Element {
   );
 }
 
-export async function createAppRouter() {
+export async function createAppRouter(opts: { session: SessionStore }) {
   // A-397: whether the last Try again failed. It lives here, above the error component, which the
   // router remounts after invalidate(); cleared on success and on a pathname change.
   const [retryFailed, setRetryFailed] = createSignal(false);
   // Assigned below; the error component only runs once the router exists.
   let retry: () => Promise<void> = () => Promise.resolve();
-  const rootRoute = createRootRoute({
+  const rootRoute = createRootRouteWithContext<{ session: SessionStore }>()({
     component: RootLayout,
     errorComponent: (props: ErrorComponentProps) => {
       const error = toAppError(props.error);
@@ -63,20 +70,60 @@ export async function createAppRouter() {
     },
     notFoundComponent: NotFound,
   });
-  const indexRoute = createRoute({
+  // Pathless groups: they only carry the guards.
+  const signedIn = createRoute({
     getParentRoute: () => rootRoute,
+    id: "signedIn",
+    beforeLoad: requireSignedIn,
+  });
+  const signedOut = createRoute({
+    getParentRoute: () => rootRoute,
+    id: "signedOut",
+    beforeLoad: requireSignedOut,
+  });
+  const indexRoute = createRoute({
+    getParentRoute: () => signedIn,
     path: "/",
-    component: HomePlaceholder,
+    component: HomeFirstRun,
+  });
+  const signInRoute = createRoute({
+    getParentRoute: () => signedOut,
+    path: "/sign-in",
+    validateSearch: (search: Record<string, unknown>): { next?: string; reason?: string } => ({
+      ...(typeof search.next === "string" ? { next: safeNext(search.next) } : {}),
+      ...(typeof search.reason === "string" && /^[a-z]{1,16}$/.test(search.reason)
+        ? { reason: search.reason }
+        : {}),
+    }),
+    component: SignInPage,
+  });
+  const inviteRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/invite",
+    component: InvitePage,
+  });
+  const privacyRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/privacy",
+    component: PrivacyNoticePage,
   });
 
-  const children: AnyRoute[] = [indexRoute];
+  const children: AnyRoute[] = [
+    signedIn.addChildren([indexRoute]),
+    signedOut.addChildren([signInRoute]),
+    inviteRoute,
+    privacyRoute,
+  ];
   // A-332: fixtures are only reachable in fixture builds; a normal build folds this away.
   if (import.meta.env.VITE_FIXTURES === "1") {
     const { createFixtureRoutes } = await import("./fixtures/routes.js");
     children.push(...createFixtureRoutes(rootRoute));
   }
 
-  const router = createRouter({ routeTree: rootRoute.addChildren(children) });
+  const router = createRouter({
+    routeTree: rootRoute.addChildren(children),
+    context: { session: opts.session },
+  });
   // A-397: Try again re-runs the loaders and rejects while any match is still in error.
   retry = async () => {
     await router.invalidate();
