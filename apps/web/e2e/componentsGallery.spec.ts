@@ -16,6 +16,7 @@ const COMPONENTS = [
   "EmptyState",
   "Skeleton",
   "Wordmark",
+  "Link",
   "SignedOutColumn",
 ];
 

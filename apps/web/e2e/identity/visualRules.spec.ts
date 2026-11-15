@@ -1,14 +1,16 @@
 // A-25's visual rules on S-1's screens (identity LLD S-1 "Visual style", guide §16). TP-1.40:
 // light and dark here, pseudo-RTL through the pseudo-rtl project. Each screen: axe clean, the
 // wordmark in the header, computed colours only from the token custom properties, nothing
-// overflowing at 360 px; the join screen (S-5) has no primary button and the set-up screen (S-6)
-// exactly one.
+// overflowing at 360 px; A-42's primary counts: sign-in shell 0, join 0, set-up 1, problem 1
+// (Sign in), failed preview 1 (Try again), first-run home 0.
 import AxeBuilder from "@axe-core/playwright";
 import {
+  accentRgb,
   catalogText,
   createInvitation,
   expect,
   openInvitation,
+  primaryCount,
   signUpThroughUi,
   test,
   uniqueEmail,
@@ -67,16 +69,6 @@ async function offTokenColours(page: Page): Promise<string[]> {
 }
 
 /** Buttons and button-links painted with the accent fill (a primary Button, guide §7.1). */
-async function primaryCount(page: Page): Promise<number> {
-  const accent = await accentRgb(page);
-  return page
-    .locator("main button, main a")
-    .evaluateAll(
-      (els, fill) => els.filter((el) => getComputedStyle(el).backgroundColor === fill).length,
-      accent,
-    );
-}
-
 async function expectCommonRules(page: Page): Promise<void> {
   const axe = await new AxeBuilder({ page }).analyze();
   expect(axe.violations.map((v) => v.id)).toEqual([]);
@@ -96,11 +88,12 @@ for (const mode of ["light", "dark"] as const) {
   test.describe(`TP-1.40: S-1's screens in ${mode} mode`, () => {
     test.use({ colorScheme: mode });
 
-    test(`TP-1.40: sign-in (${mode})`, async ({ page }) => {
+    test(`TP-1.40: the sign-in shell (${mode}): no primary button (A-42)`, async ({ page }) => {
       await page.goto("/sign-in");
       await expect(page.locator("main h1")).toHaveText(catalogText("Sign in"));
 
       await expectCommonRules(page);
+      expect(await primaryCount(page)).toBe(0);
       await expectNoOverflowAt360(page);
     });
 
@@ -134,7 +127,10 @@ for (const mode of ["light", "dark"] as const) {
       await expectNoOverflowAt360(page);
     });
 
-    test(`TP-1.40: an invitation problem, S-7 (${mode})`, async ({ page, request }) => {
+    test(`TP-1.40: an invitation problem, S-7 (${mode}): one primary, Sign in (A-42)`, async ({
+      page,
+      request,
+    }) => {
       const { token } = await createInvitation(request, {
         email: uniqueEmail(),
         state: "revoked",
@@ -145,10 +141,32 @@ for (const mode of ["light", "dark"] as const) {
       );
 
       await expectCommonRules(page);
+      expect(await primaryCount(page)).toBe(1);
+      await expect(
+        page.locator("main").getByRole("link", { name: catalogText("Sign in") }),
+      ).toHaveCSS("background-color", await accentRgb(page));
       await expectNoOverflowAt360(page);
     });
 
-    test(`TP-1.40: the first-run home (${mode}): the header wordmark is a link home`, async ({
+    test(`TP-1.40: a problem whose preview failed (503) (${mode}): one primary, Try again (A-42)`, async ({
+      page,
+      request,
+    }) => {
+      const { token } = await createInvitation(request, { email: uniqueEmail() });
+      await page.route("**/api/v1/invitations/preview", (route) =>
+        route.fulfill({ status: 503, contentType: "text/plain", body: "Service Unavailable" }),
+      );
+      await page.goto(`/invite#t=${token}`);
+      const retry = page.locator("main").getByRole("button", { name: /Try again/ });
+      await expect(retry).toBeVisible();
+
+      await expectCommonRules(page);
+      expect(await primaryCount(page)).toBe(1);
+      await expect(retry).toHaveCSS("background-color", await accentRgb(page));
+      await expectNoOverflowAt360(page);
+    });
+
+    test(`TP-1.40: the first-run home (${mode}): no primary button, the header wordmark a link home`, async ({
       page,
       request,
     }) => {
@@ -157,23 +175,12 @@ for (const mode of ["light", "dark"] as const) {
 
       const axe = await new AxeBuilder({ page }).analyze();
       expect(axe.violations.map((v) => v.id)).toEqual([]);
+      expect(await primaryCount(page)).toBe(0);
       const home = page.getByRole("banner").getByRole("link", { name: "wDit" });
       await expect(home).toHaveAttribute("href", "/");
       await expect(home).toHaveAttribute("dir", "ltr");
       expect(await offTokenColours(page)).toEqual([]);
       await expectNoOverflowAt360(page);
     });
-  });
-}
-
-async function accentRgb(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    const raw = getComputedStyle(document.documentElement).getPropertyValue("--c-accent").trim();
-    const probe = document.createElement("div");
-    probe.style.color = raw;
-    document.body.append(probe);
-    const rgb = getComputedStyle(probe).color;
-    probe.remove();
-    return rgb;
   });
 }

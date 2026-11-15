@@ -76,3 +76,27 @@ export async function signUpThroughUi(page: Page, token: string, name: string): 
   await page.getByRole("button", { name: catalogText("Create account") }).click();
   await expect(page).toHaveURL(/\/$/);
 }
+
+/** The accent token (--c-accent) as the browser computes it. */
+export async function accentRgb(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const raw = getComputedStyle(document.documentElement).getPropertyValue("--c-accent").trim();
+    const probe = document.createElement("div");
+    probe.style.color = raw;
+    document.body.append(probe);
+    const rgb = getComputedStyle(probe).color;
+    probe.remove();
+    return rgb;
+  });
+}
+
+/** Buttons and button-links in <main> painted with the accent fill: primary Buttons (A-515). */
+export async function primaryCount(page: Page): Promise<number> {
+  const accent = await accentRgb(page);
+  return page
+    .locator("main button, main a")
+    .evaluateAll(
+      (els, fill) => els.filter((el) => getComputedStyle(el).backgroundColor === fill).length,
+      accent,
+    );
+}

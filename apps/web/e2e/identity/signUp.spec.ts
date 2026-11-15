@@ -1,11 +1,14 @@
 // S-1 sign-up from an invitation (identity LLD §8.1, §8.3, F-152, F-159, F-170, F-173).
-// TP-1.30, TP-1.32, TP-1.37, TP-1.38, TP-1.39, plus extra cases ending in "x".
+// TP-1.30, TP-1.32, TP-1.37, TP-1.38, TP-1.39 (LLD v0.27: A-41, A-43), plus extra cases ending in "x".
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import {
+  accentRgb,
   catalogText,
   createInvitation,
+  E2E_PASSWORD,
   expect,
   looseText,
+  primaryCount,
   openInvitation,
   signUpThroughUi,
   test,
@@ -44,7 +47,11 @@ test.describe("TP-1.30: sign-up with a password", () => {
 
     await expect(page.locator("main h1")).toHaveText(looseText("Welcome, Mona Hassan."));
     await expect(page.getByText(catalogText("Add your first account to start."))).toBeVisible();
-    await expect(page).toHaveTitle(/^.*Welcome, .*Mona Hassan.*\. – wDit$/);
+    // app.documentTitle (A-26): no isolates; ar-XB's RLMs aside, exactly "{h1} – wDit".
+    await expect.poll(() => page.title()).toMatch(/Welcome/);
+    const title = await page.title();
+    expect(title).not.toMatch(/[⁦-⁩]/);
+    expect(title.replaceAll("‏", "")).toBe("Welcome, Mona Hassan. – wDit");
   });
 
   test("TP-1.30x: the token is gone from the address bar while the invitation is checked", async ({
@@ -86,14 +93,23 @@ test.describe("TP-1.30: sign-up with a password", () => {
   });
 });
 
-test.describe("TP-1.32: invitation problems", () => {
-  const problemTitle = (page: Page) =>
-    expect(page.locator("main h1")).toHaveText(catalogText("This invitation can't be used"));
+test.describe("TP-1.32: invitation problems (A-41, A-43)", () => {
+  const INCOMPLETE =
+    "This link isn't complete. Open it again from the email, or copy the whole link.";
 
-  test("TP-1.32: an expired link: 'It expired on {date}.' with the date, and 'Ask {inviter} to send a new one.'", async ({
+  /** The problem page: its h1, and exactly one primary Button, **Sign in**, linking to /sign-in. */
+  async function expectProblemWithSignIn(page: Page): Promise<void> {
+    await expect(page.locator("main h1")).toHaveText(catalogText("This invitation can't be used"));
+    const signIn = page.locator("main").getByRole("link", { name: catalogText("Sign in") });
+    await expect(signIn).toHaveAttribute("href", "/sign-in");
+    expect(await primaryCount(page)).toBe(1);
+    await expect(signIn).toHaveCSS("background-color", await accentRgb(page));
+  }
+
+  test("TP-1.32: an expired link: 'It expired on {date}.' with the long date, and Sign in", async ({
     page,
     request,
-  }) => {
+  }, testInfo) => {
     const { token } = await createInvitation(request, {
       email: uniqueEmail(),
       state: "expired",
@@ -102,28 +118,93 @@ test.describe("TP-1.32: invitation problems", () => {
 
     await page.goto(`/invite#t=${token}`);
 
-    await problemTitle(page);
+    await expectProblemWithSignIn(page);
     const expired = page.getByText(/It expired on .+\.‏?$/);
     await expect(expired).toBeVisible();
-    expect(await expired.textContent()).not.toContain("{date}");
-    expect(await expired.textContent()).toMatch(/\d/);
-    await expect(page.getByText(looseText("Ask Dev Owner to send a new one."))).toBeVisible();
+    if (testInfo.project.name === "chromium") {
+      // The test route stores expires_at = now − 1 day; chromium runs in UTC and en-US.
+      const long = (ms: number) =>
+        new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeZone: "UTC" }).format(ms);
+      const yesterday = Date.now() - 24 * 3600 * 1000;
+      expect([
+        `It expired on ${long(yesterday)}.`,
+        `It expired on ${long(yesterday - 60_000)}.`,
+      ]).toContain((await expired.textContent())?.replace(/[⁦-⁩]/g, ""));
+    } else {
+      expect(await expired.textContent()).toMatch(/\d/);
+    }
   });
 
-  test("TP-1.32: a revoked link: 'It was cancelled.'", async ({ page, request }) => {
+  test("TP-1.32: a revoked link: 'It was cancelled.' and Sign in", async ({ page, request }) => {
     const { token } = await createInvitation(request, { email: uniqueEmail(), state: "revoked" });
 
     await page.goto(`/invite#t=${token}`);
 
-    await problemTitle(page);
+    await expectProblemWithSignIn(page);
     await expect(page.getByText(catalogText("It was cancelled."))).toBeVisible();
+  });
+
+  test("TP-1.32 (A-41): used just before (recent: true): 'Your account is ready. Sign in to continue.' and Sign in", async ({
+    page,
+    request,
+  }) => {
+    const email = uniqueEmail();
+    const { token } = await createInvitation(request, { email });
+    const accepted = await request.post("/api/v1/invitations/accept", {
+      headers: { "X-Budmon-Client": "web/1" },
+      data: {
+        token,
+        displayName: "Used Already",
+        locale: "en",
+        timeZone: "UTC",
+        baseCurrency: "USD",
+        method: { kind: "password", password: E2E_PASSWORD },
+        tokenDelivery: "body",
+      },
+    });
+    expect(accepted.status(), await accepted.text()).toBe(200);
+
+    await page.goto(`/invite#t=${token}`);
+
+    await expectProblemWithSignIn(page);
+    await expect(
+      page.getByText(catalogText("Your account is ready. Sign in to continue.")),
+    ).toBeVisible();
+  });
+
+  test("TP-1.32 (A-41): used earlier (recent: false): 'It has already been used. If that was you, sign in.' and Sign in", async ({
+    page,
+    request,
+  }) => {
+    const { token } = await createInvitation(request, { email: uniqueEmail() });
+    await page.route("**/api/v1/invitations/preview", (route) =>
+      route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          defined: true,
+          code: "INVITATION_USED",
+          status: 409,
+          message: "Invitation already used",
+          data: { recent: false },
+        }),
+      }),
+    );
+
+    await page.goto(`/invite#t=${token}`);
+
+    await expectProblemWithSignIn(page);
+    await expect(
+      page.getByText(catalogText("It has already been used. If that was you, sign in.")),
+    ).toBeVisible();
   });
 
   for (const [label, path] of [
     ["no fragment", "/invite"],
+    ["an empty #t=", "/invite#t="],
     ["a malformed token", "/invite#t=bmi_short"],
   ] as const) {
-    test(`TP-1.32: an incomplete link (${label}): 'This link isn't complete. …', and no preview request`, async ({
+    test(`TP-1.32 (A-43): an incomplete link (${label}): the incomplete text, no preview request, nothing stored`, async ({
       page,
     }) => {
       let previews = 0;
@@ -133,22 +214,18 @@ test.describe("TP-1.32: invitation problems", () => {
 
       await page.goto(path);
 
-      await problemTitle(page);
-      await expect(
-        page.getByText(
-          catalogText(
-            "This link isn't complete. Open it again from the email, or copy the whole link.",
-          ),
-        ),
-      ).toBeVisible();
+      await expect(page.locator("main h1")).toHaveText(
+        catalogText("This invitation can't be used"),
+      );
+      await expect(page.getByText(catalogText(INCOMPLETE))).toBeVisible();
       expect(previews).toBe(0);
+      expect(await page.evaluate(() => sessionStorage.getItem("budmon.invite"))).toBeNull();
     });
   }
 });
 
 test.describe("TP-1.37: the privacy notice", () => {
-  const TITLES = [
-    "Privacy notice",
+  const SECTIONS = [
     "What we keep",
     "Signing in with Google",
     "Emails we send",
@@ -159,16 +236,19 @@ test.describe("TP-1.37: the privacy notice", () => {
     "Questions",
   ];
 
-  test("TP-1.37: /privacy has the h1 'Privacy notice' and nine sections with §8.3's titles, in order", async ({
+  test("TP-1.37: /privacy has one h1 'Privacy notice' with the intro and 'Last updated', then exactly eight h2s in §8.3's order", async ({
     page,
   }) => {
     await page.goto("/privacy");
 
-    await expect(page.locator("main h1")).toHaveText(catalogText("Privacy notice"));
-    const headings = page.locator("main h1, main h2");
-    await expect(headings).toHaveCount(9);
-    for (const [i, title] of TITLES.entries()) {
-      await expect(headings.nth(i)).toHaveText(catalogText(title));
+    const h1 = page.locator("main h1");
+    await expect(h1).toHaveCount(1);
+    await expect(h1).toHaveText(catalogText("Privacy notice"));
+    await expect(page.locator("main")).toContainText("Last updated");
+    const h2 = page.locator("main h2");
+    await expect(h2).toHaveCount(8);
+    for (const [i, title] of SECTIONS.entries()) {
+      await expect(h2.nth(i)).toHaveText(catalogText(title));
     }
     await expect(page).toHaveTitle(/Privacy notice.* – wDit$/);
   });
