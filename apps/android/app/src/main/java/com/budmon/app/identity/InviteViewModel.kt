@@ -79,11 +79,32 @@ constructor(
     private var token: String? = null
     private var preview: InvitationPreview? = null
 
-    /** Starts (or restarts) the flow for [value]; the same token already in progress is kept. */
+    /** Whether a link was opened; false after the process was recreated. */
+    val hasToken: Boolean
+        get() = token != null
+
+    /** Starts the flow for [value] from a clean form. The token lives only here, never in saved state. */
     fun open(value: String) {
-        if (token == value && state !is InviteState.Problem) return
         token = value
+        preview = null
+        name = ""
+        password = ""
+        currency = null
+        language = null
+        nameError = null
+        passwordError = null
+        currencyError = null
+        timeZoneError = null
+        formError = null
         check()
+    }
+
+    /** Back from set-up to the join screen. */
+    fun backToJoin() {
+        val p = preview ?: return
+        password = ""
+        formError = null
+        state = InviteState.Join(p)
     }
 
     fun check() {
@@ -178,6 +199,7 @@ constructor(
                 val me =
                     repository.acceptInvitation(
                         token = current,
+                        email = preview?.email.orEmpty(),
                         displayName = name.trim(),
                         locale = language ?: "en",
                         timeZone = timeZone ?: ZoneId.systemDefault().id,

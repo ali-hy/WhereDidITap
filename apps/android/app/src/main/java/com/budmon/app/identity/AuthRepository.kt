@@ -35,7 +35,8 @@ import javax.inject.Named
 import javax.inject.Singleton
 
 /** A failed call, as P-F-252's [ApiError]. */
-class ApiException(val error: ApiError) : Exception(error.toString())
+class ApiException(val error: ApiError) :
+    Exception("ApiError ${if (error is ApiError.Defined) error.key else error::class.simpleName}")
 
 data class Me(
     val id: String,
@@ -144,6 +145,7 @@ constructor(
     /** Creates the account with a password, stores the session and returns the new user. */
     suspend fun acceptInvitation(
         token: String,
+        email: String,
         displayName: String,
         locale: String,
         timeZone: String,
@@ -172,17 +174,16 @@ constructor(
         val session = tokens.toSession(userId = "")
         tokenStore.save(session)
         // The access token is stored, so this call carries it and tells who signed in.
+        // The device token and last email are kept even when reading the user fails.
+        tokens.strOrNull("deviceToken")?.let { tokenStore.saveDeviceToken(email, it) }
+        tokenStore.saveLastEmail(email)
         val me =
             try {
                 getMe()
             } catch (_: ApiException) {
                 null
             }
-        if (me != null) {
-            tokenStore.save(session.copy(userId = me.id))
-            tokens.strOrNull("deviceToken")?.let { tokenStore.saveDeviceToken(me.email, it) }
-            tokenStore.saveLastEmail(me.email)
-        }
+        if (me != null) tokenStore.save(session.copy(userId = me.id))
         return me
     }
 

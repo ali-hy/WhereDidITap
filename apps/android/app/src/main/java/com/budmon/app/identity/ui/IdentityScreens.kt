@@ -36,7 +36,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -114,7 +116,7 @@ fun SignInScreen(
         if (reason == SignedOutReason.Ended) Text(stringResource(R.string.signin_session_ended))
         Text(stringResource(R.string.signin_invite_only), color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (!isOnline) Text(stringResource(R.string.signin_offline), color = MaterialTheme.colorScheme.error)
-        AppButton(stringResource(R.string.signin_have_link), onHaveLink, Modifier.fillMaxWidth(), AppButtonVariant.Primary)
+        AppButton(stringResource(R.string.signin_have_link), onHaveLink, Modifier.fillMaxWidth(), AppButtonVariant.Secondary)
     }
 }
 
@@ -128,7 +130,8 @@ fun InvitationLinkScreen(
 ) {
     BackHandler(onBack = onBack)
     val clipboard = LocalClipboardManager.current
-    var text by rememberSaveable { mutableStateOf("") }
+    // Not saved: the pasted link holds the invitation token.
+    var text by remember { mutableStateOf("") }
     var error by rememberSaveable { mutableStateOf<Int?>(null) }
     fun open() {
         error =
@@ -170,14 +173,17 @@ fun InvitationLinkScreen(
 /** Join (preview) and set-up, for one invitation token. */
 @Composable
 fun InviteFlowScreen(
-    token: String,
     onBack: () -> Unit,
     onSignIn: () -> Unit,
     onSignedUp: (Me?) -> Unit,
     viewModel: InviteViewModel,
 ) {
-    BackHandler(onBack = onBack)
-    LaunchedEffect(token) { viewModel.open(token) }
+    // Back on set-up returns to join; elsewhere it leaves the screen.
+    BackHandler {
+        if (viewModel.state is InviteState.SetUp) viewModel.backToJoin() else onBack()
+    }
+    // After the process was recreated the token is gone: back to the link screen.
+    LaunchedEffect(Unit) { if (!viewModel.hasToken) onBack() }
     when (val state = viewModel.state) {
         InviteState.Checking -> {
             Page {
@@ -201,7 +207,7 @@ fun InviteFlowScreen(
                     stringResource(R.string.invite_expires, formatDate(p.expiresAt)),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                AppButton(stringResource(R.string.invite_use_password), viewModel::usePassword, Modifier.fillMaxWidth())
+                AppButton(stringResource(R.string.invite_use_password), viewModel::usePassword, Modifier.fillMaxWidth(), AppButtonVariant.Secondary)
             }
         }
 
@@ -393,12 +399,17 @@ fun SessionLoadingScreen() {
     }
 }
 
-/** Shown in place of a screen's content while the session's `me` couldn't be loaded. */
+/**
+ * Shown in place of a screen's content while the session's `me` couldn't be loaded. Try again follows
+ * the busy rule: a spinner while [retrying], still enabled, taps ignored.
+ */
 @Composable
 fun SessionNotLoaded(
     isOnline: Boolean,
     lastError: ApiError?,
+    retrying: Boolean,
     onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val message =
         when {
@@ -409,11 +420,11 @@ fun SessionNotLoaded(
             else -> uiString(ErrorMessages.forError(lastError, Operation.Read))
         }
     Column(
-        Modifier.fillMaxSize().padding(24.dp),
+        modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(message, textAlign = TextAlign.Center)
-        AppButton(stringResource(R.string.error_fallback_retry), onRetry, Modifier.padding(top = 16.dp))
+        Text(message, textAlign = TextAlign.Center, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+        AppButton(stringResource(R.string.error_fallback_retry), onRetry, Modifier.padding(top = 16.dp), busy = retrying)
     }
 }

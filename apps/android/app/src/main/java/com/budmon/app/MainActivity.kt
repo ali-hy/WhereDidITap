@@ -16,9 +16,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.budmon.app.identity.InviteViewModel
@@ -31,6 +30,10 @@ import com.budmon.app.identity.ui.InviteFlowScreen
 import com.budmon.app.identity.ui.SessionLoadingScreen
 import com.budmon.app.identity.ui.SessionNotLoaded
 import com.budmon.app.identity.ui.SignInScreen
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navigation
 import okhttp3.HttpUrl
 import javax.inject.Named
 import androidx.compose.ui.Modifier
@@ -57,7 +60,6 @@ import javax.inject.Inject
 class MainActivity : ComponentActivity() {
     private val platform: PlatformStatusViewModel by viewModels()
     private val sessionModel: SessionViewModel by viewModels()
-    private val inviteModel: InviteViewModel by viewModels()
 
     @Inject @field:Named("apiBaseUrl") lateinit var apiBaseUrl: HttpUrl
 
@@ -99,20 +101,31 @@ class MainActivity : ComponentActivity() {
                                     }
 
                                     is SessionUiState.SignedIn -> {
-                                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                            SyncIndicator(pending = status.counts.pending, syncing = status.syncing, failed = status.counts.failed)
-                                            if (update is UpdateState.Available) {
-                                                UpdateCard(
-                                                    onUpdate = { status.downloadUrl?.let(::openDownload) },
-                                                    onLater = platform::dismissUpdate,
-                                                )
+                                        val nav = rememberNavController()
+                                        // Two hosts, so a switch drops the other graph's back stack.
+                                        NavHost(nav, startDestination = ROUTE_SIGNED_IN) {
+                                            navigation(startDestination = ROUTE_HOME, route = ROUTE_SIGNED_IN) {
+                                                composable(ROUTE_HOME) {
+                                                    Column {
+                                                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                                            SyncIndicator(pending = status.counts.pending, syncing = status.syncing, failed = status.counts.failed)
+                                                            if (update is UpdateState.Available) {
+                                                                UpdateCard(
+                                                                    onUpdate = { status.downloadUrl?.let(::openDownload) },
+                                                                    onLater = platform::dismissUpdate,
+                                                                )
+                                                            }
+                                                        }
+                                                        val me = current.me
+                                                        if (me != null) {
+                                                            HomeFirstRunScreen(me)
+                                                        } else {
+                                                            val retrying by sessionModel.probing.collectAsStateWithLifecycle()
+                                                            SessionNotLoaded(status.isOnline, current.lastError, retrying, sessionModel::retry)
+                                                        }
+                                                    }
+                                                }
                                             }
-                                        }
-                                        val me = current.me
-                                        if (me != null) {
-                                            HomeFirstRunScreen(me)
-                                        } else {
-                                            SessionNotLoaded(status.isOnline, current.lastError, sessionModel::retry)
                                         }
                                     }
                                 }
@@ -124,39 +137,40 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** The signed-out graph: start, invitation link, then join and set-up. */
+    /** The signed-out graph: start, invitation link, then the invitation. */
     @Composable
     private fun SignedOutHost(
         reason: SignedOutReason,
         isOnline: Boolean,
     ) {
-        var route by rememberSaveable { mutableStateOf(ROUTE_START) }
-        var token by rememberSaveable { mutableStateOf("") }
-        when (route) {
-            ROUTE_LINK -> {
-                InvitationLinkScreen(
-                    apiBaseUrl = apiBaseUrl,
-                    isOnline = isOnline,
-                    onToken = {
-                        token = it
-                        route = ROUTE_INVITE
-                    },
-                    onBack = { route = ROUTE_START },
-                )
-            }
-
-            ROUTE_INVITE -> {
-                InviteFlowScreen(
-                    token = token,
-                    onBack = { route = ROUTE_LINK },
-                    onSignIn = { route = ROUTE_START },
-                    onSignedUp = sessionModel::onSignedIn,
-                    viewModel = inviteModel,
-                )
-            }
-
-            else -> {
-                SignInScreen(reason, isOnline, onHaveLink = { route = ROUTE_LINK })
+        val nav = rememberNavController()
+        NavHost(nav, startDestination = ROUTE_SIGNED_OUT) {
+            navigation(startDestination = ROUTE_SIGN_IN, route = ROUTE_SIGNED_OUT) {
+                composable(ROUTE_SIGN_IN) {
+                    SignInScreen(reason, isOnline, onHaveLink = { nav.navigate(ROUTE_INVITATION_LINK) })
+                }
+                composable(ROUTE_INVITATION_LINK) { entry ->
+                    // The invitation state lives in the graph's view model; the token is never a route.
+                    val invite: InviteViewModel = hiltViewModel(remember(entry) { nav.getBackStackEntry(ROUTE_SIGNED_OUT) })
+                    InvitationLinkScreen(
+                        apiBaseUrl = apiBaseUrl,
+                        isOnline = isOnline,
+                        onToken = {
+                            invite.open(it)
+                            nav.navigate(ROUTE_INVITE)
+                        },
+                        onBack = { nav.popBackStack() },
+                    )
+                }
+                composable(ROUTE_INVITE) { entry ->
+                    val invite: InviteViewModel = hiltViewModel(remember(entry) { nav.getBackStackEntry(ROUTE_SIGNED_OUT) })
+                    InviteFlowScreen(
+                        onBack = { nav.popBackStack() },
+                        onSignIn = { nav.popBackStack(ROUTE_SIGN_IN, inclusive = false) },
+                        onSignedUp = sessionModel::onSignedIn,
+                        viewModel = invite,
+                    )
+                }
             }
         }
     }
@@ -179,9 +193,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private companion object {
-        const val ROUTE_START = "start"
-        const val ROUTE_LINK = "invitation_link"
+        const val ROUTE_SIGNED_OUT = "signed_out"
+        const val ROUTE_SIGN_IN = "sign_in"
+        const val ROUTE_INVITATION_LINK = "invitation_link"
         const val ROUTE_INVITE = "invite"
+        const val ROUTE_SIGNED_IN = "signed_in"
+        const val ROUTE_HOME = "home"
     }
 
     /** Opens the APK download in a Custom Tab; false when nothing can open it. */

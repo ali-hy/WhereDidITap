@@ -49,7 +49,12 @@ internal constructor(
     private val mutableState = MutableStateFlow<SessionUiState>(SessionUiState.Loading)
     val state: StateFlow<SessionUiState> = mutableState.asStateFlow()
 
-    private var probing = false
+    private val mutableProbing = MutableStateFlow(false)
+
+    /** True while a `me.get` probe runs (the Try again button's busy state). */
+    val probing: StateFlow<Boolean> = mutableProbing.asStateFlow()
+
+    private var inFlight = false
     private var foreground = false
     private var backoffMs = FIRST_DELAY_MS
     private var timer: Job? = null
@@ -86,10 +91,15 @@ internal constructor(
 
     /** One `me.get` at a time; a call while one runs is ignored. */
     private suspend fun probe() {
-        if (probing) return
-        probing = true
+        if (inFlight) return
+        inFlight = true
+        mutableProbing.value = true
         try {
-            mutableState.value = SessionUiState.SignedIn(repository.getMe())
+            val me = repository.getMe()
+            // A sign-up stored the session before the user's id was known.
+            val stored = tokenStore.read()
+            if (stored != null && stored.userId != me.id) tokenStore.save(stored.copy(userId = me.id))
+            mutableState.value = SessionUiState.SignedIn(me)
         } catch (e: ApiException) {
             val error = e.error
             if (error is ApiError.Defined && error.key == "UNAUTHENTICATED") {
@@ -99,7 +109,8 @@ internal constructor(
                 mutableState.value = SessionUiState.SignedIn(null, error)
             }
         } finally {
-            probing = false
+            inFlight = false
+            mutableProbing.value = false
         }
     }
 

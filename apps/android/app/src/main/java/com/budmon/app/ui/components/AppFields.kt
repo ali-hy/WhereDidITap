@@ -1,6 +1,7 @@
 // P-A-524: the shared text fields and the wordmark (UX guide §8, §2.1, §15).
 package com.budmon.app.ui.components
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -40,6 +41,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.budmon.app.R
+import com.budmon.app.ui.theme.AppColors
 import com.budmon.app.ui.theme.PlexSans
 
 private val FieldShape = RoundedCornerShape(8.dp)
@@ -83,10 +85,20 @@ fun AppTextField(
             keyboardActions = keyboardActions,
             trailingIcon = trailing,
         )
-        if (error != null) {
-            Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-        } else if (hint != null) {
+        // The hint, then the error row; both show when both are given.
+        if (hint != null) {
             Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (error != null) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Icon(
+                    painterResource(R.drawable.lucide_circle_alert),
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.error,
+                )
+                Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
         }
     }
 }
@@ -137,7 +149,7 @@ fun AppPasswordField(
 /** "wDit" in Plex Sans 600 at 20 sp with the "D" in the accent colour; one name, always left to right. */
 @Composable
 fun Wordmark(modifier: Modifier = Modifier) {
-    val accent = MaterialTheme.colorScheme.primary
+    val accent = AppColors.extra.accentFg
     val text: AnnotatedString =
         buildAnnotatedString {
             append("w")
