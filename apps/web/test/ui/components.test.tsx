@@ -228,6 +228,44 @@ describe("TP-0b.6: Button", () => {
     expect(classes(link)).toEqual(classes(button));
     expect(badClasses(container)).toEqual([]);
   });
+
+  it("TP-0b.6x (A-521): ref receives the rendered element, an HTMLButtonElement without href and an HTMLAnchorElement with it", () => {
+    const got: Element[] = [];
+    renderWithI18n(() => (
+      <>
+        <Button variant="primary" ref={(el) => got.push(el)}>
+          Save
+        </Button>
+        <Button variant="secondary" href="/" ref={(el) => got.push(el)}>
+          Go to home
+        </Button>
+      </>
+    ));
+
+    const button = screen.getByRole("button", { name: "Save" });
+    const link = screen.getByRole("link", { name: "Go to home" });
+    expect(got).toHaveLength(2);
+    expect(got).toContain(button);
+    expect(got).toContain(link);
+    expect(got.find((el) => el === button)).toBeInstanceOf(HTMLButtonElement);
+    expect(got.find((el) => el === link)).toBeInstanceOf(HTMLAnchorElement);
+  });
+
+  it('TP-0b.6x (A-521): a data-* prop such as data-x="1" reaches the rendered <button> and <a>', () => {
+    renderWithI18n(() => (
+      <>
+        <Button variant="primary" data-x="1">
+          Save
+        </Button>
+        <Button variant="secondary" href="/" data-x="1">
+          Go to home
+        </Button>
+      </>
+    ));
+
+    expect(screen.getByRole("button", { name: "Save" }).getAttribute("data-x")).toBe("1");
+    expect(screen.getByRole("link", { name: "Go to home" }).getAttribute("data-x")).toBe("1");
+  });
 });
 
 describe("TP-0b.6: TextField", () => {
@@ -368,6 +406,19 @@ describe("TP-0b.6: PasswordField", () => {
 });
 
 describe("TP-0b.6: CodeField", () => {
+  it.each(["numeric", "text"] as const)(
+    "TP-0b.6x (guide §8.3, review B-4): the %s kind's input is 12 em wide (w-[12em]), not full width",
+    (kind) => {
+      renderWithI18n(() => (
+        <CodeField id="code" label="Code" value="" onInput={() => undefined} kind={kind} />
+      ));
+      const input = screen.getByLabelText("Code");
+
+      expect(input.classList.contains("w-[12em]")).toBe(true);
+      expect(input.classList.contains("w-full")).toBe(false);
+    },
+  );
+
   it('TP-0b.6: the numeric kind (the default) has dir="ltr", inputmode numeric and autocomplete one-time-code', () => {
     renderWithI18n(() => <CodeField id="code" label="Code" value="" onInput={() => undefined} />);
     const input = screen.getByLabelText("Code");
