@@ -679,6 +679,23 @@ describe("TP-1.55: the invitation errors carry the inviter's name and origin (A-
     });
   });
 
+  it("TP-1.55: pending with expires_at just passed (F-40 step 4) → INVITATION_EXPIRED { expiredAt, inviterName: Dev Owner, origin: direct }; the row is now expired", async () => {
+    const owner = await userFactory(h, { displayName: "Dev Owner" });
+    const dueAt = NOW.subtract({ milliseconds: 1 });
+    const inv = await invitation({ inviterUserId: owner.id, expiresAt: dueAt });
+
+    const res = await preview(inv.token);
+
+    expect(res.status).toBe(410);
+    expect(errorOf(res)).toMatchObject({ code: "INVITATION_EXPIRED" });
+    expect(errorOf(res).data).toEqual({
+      expiredAt: wire(dueAt),
+      inviterName: "Dev Owner",
+      origin: "direct",
+    });
+    expect((await invitationsRepo.findById(h, inv.invitationId))?.status).toBe("expired");
+  });
+
   it("TP-1.55: revoked → INVITATION_REVOKED { inviterName: Dev Owner, origin: direct }", async () => {
     const inv = await fromDevOwner("revoked");
 
