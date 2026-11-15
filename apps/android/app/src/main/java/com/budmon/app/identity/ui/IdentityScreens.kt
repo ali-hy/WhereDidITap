@@ -265,10 +265,10 @@ data class SetUpFormState(
 fun InviteProblemScreen(
     problem: InviteProblem,
     inviter: String?,
+    origin: String?,
     onRetry: () -> Unit,
     onSignIn: () -> Unit,
     modifier: Modifier = Modifier,
-    askInviter: Boolean = true,
 ) {
     Page(modifier) {
         Heading(stringResource(R.string.invite_problem_title))
@@ -288,7 +288,7 @@ fun InviteProblemScreen(
         val asks =
             problem is InviteProblem.Expired || problem == InviteProblem.Revoked ||
                 (problem is InviteProblem.Used && !problem.recent)
-        if (askInviter && asks) {
+        if (origin != "bootstrap" && asks) {
             val ask =
                 if (name.isEmpty()) {
                     stringResource(R.string.invite_problem_ask_anyone)
@@ -438,9 +438,9 @@ fun InviteFlowRoute(
             InviteProblemScreen(
                 state.problem,
                 state.inviter,
+                state.origin,
                 onRetry = viewModel::check,
                 onSignIn = onSignIn,
-                askInviter = state.askInviter,
             )
         }
     }

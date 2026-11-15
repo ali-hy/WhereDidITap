@@ -41,11 +41,11 @@ sealed interface InviteState {
 
     data class SetUp(val preview: InvitationPreview, val options: SignUpOptions) : InviteState
 
-    /** [askInviter] is false for an owner (bootstrap) invitation: there is nobody to ask. */
+    /** [origin] is the invitation's origin, when known; the screen decides the ask line from it. */
     data class Problem(
         val problem: InviteProblem,
         val inviter: String?,
-        val askInviter: Boolean = true,
+        val origin: String? = null,
     ) : InviteState
 }
 
@@ -156,7 +156,7 @@ constructor(
         val inviter =
             if (named == null) preview?.inviterName else (named as? JsonPrimitive)?.takeIf { it.isString }?.content
         val origin = (data?.get("origin") as? JsonPrimitive)?.takeIf { it.isString }?.content ?: preview?.origin
-        return InviteState.Problem(problemOf(error), inviter, askInviter = origin != "bootstrap")
+        return InviteState.Problem(problemOf(error), inviter, origin)
     }
 
     private fun problemOf(error: ApiError): InviteProblem {

@@ -169,7 +169,12 @@ export function InvitePage(): JSX.Element {
     setView({ name: "problem", problem });
   };
 
+  // Each run of the mount steps takes a number; answers for an older run are ignored.
+  let sequence = 0;
+  let accepting = false;
+
   const check = async (): Promise<void> => {
+    const mine = sequence;
     setView({ name: "checking" });
     if (token === null) {
       showProblem({ kind: "incomplete" });
@@ -177,17 +182,23 @@ export function InvitePage(): JSX.Element {
     }
     try {
       const result = await api.invitations.preview({ token });
+      if (mine !== sequence) return;
       setPreview(result);
       setView({ name: "join" });
     } catch (e) {
+      if (mine !== sequence) return;
       showProblem(problemOf(e));
     }
   };
 
   /** Reads the link, then previews it; a signed-in visitor just goes home. */
   const begin = async (): Promise<void> => {
+    sequence += 1;
+    const mine = sequence;
     const fromFragment = readFragmentToken("t");
-    if ((await session.ready()) === "signed_in") {
+    const state = await session.ready();
+    if (mine !== sequence) return;
+    if (state === "signed_in") {
       clearStoredToken();
       await navigate({ to: "/", replace: true });
       return;
@@ -207,7 +218,14 @@ export function InvitePage(): JSX.Element {
     void begin();
     // A link pasted into this tab changes only the fragment.
     const onHashChange = (): void => {
-      if (location.hash !== "") void begin();
+      // Only a fragment with a `t` counts; any other leaves the page alone.
+      if (!new URLSearchParams(location.hash.slice(1)).has("t")) return;
+      // During an accept the link is only stripped.
+      if (accepting) {
+        readFragmentToken("t");
+        return;
+      }
+      void begin();
     };
     window.addEventListener("hashchange", onHashChange);
     onCleanup(() => {
@@ -226,14 +244,17 @@ export function InvitePage(): JSX.Element {
   );
 
   const openSetup = async (): Promise<void> => {
+    const mine = sequence;
     if (options().currencies.length === 0) {
       try {
         const result = await api.auth.signUpOptions();
+        if (mine !== sequence) return;
         setOptions({
           currencies: result.currencies.map((c) => c.code),
           locales: result.locales,
         });
       } catch (e) {
+        if (mine !== sequence) return;
         showProblem({ kind: "failed", error: toAppError(e) });
         return;
       }
@@ -301,6 +322,9 @@ export function InvitePage(): JSX.Element {
             options={options()}
             token={token ?? ""}
             onProblem={showProblem}
+            onAccepting={(value) => {
+              accepting = value;
+            }}
             onDone={async () => {
               clearStoredToken();
               await session.markSignedIn();
@@ -397,6 +421,7 @@ function SetupForm(props: {
   token: string;
   inviterName: string;
   onProblem: (p: Problem) => void;
+  onAccepting: (accepting: boolean) => void;
   onDone: () => Promise<void>;
 }): JSX.Element {
   const { t, locale } = useI18n();
@@ -489,6 +514,7 @@ function SetupForm(props: {
     setSummary([]);
     if (busy() || !validate()) return;
     setBusy(true);
+    props.onAccepting(true);
     try {
       await api.invitations.accept({
         token: props.token,
@@ -503,6 +529,7 @@ function SetupForm(props: {
     } catch (err) {
       handleFailure(err);
     } finally {
+      props.onAccepting(false);
       setBusy(false);
     }
   };
