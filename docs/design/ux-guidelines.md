@@ -1,6 +1,6 @@
 ---
 doc: ux-guidelines
-version: 0.1
+version: 0.2
 status: draft
 updated: 2026-11-15
 ---
@@ -17,7 +17,8 @@ The visual style of the product's web app (`apps/web`) and Android app (`apps/an
 
 | Version | Date | Change |
 | ------- | ---- | ------ |
-| 0.1 | 2026-11-15 | First draft. The owner's decisions from the style-guide session (UX-D1 to UX-D14, below), plus proposed defaults for everything they didn't decide (marked *default*), for review in the PR. |
+| 0.2 | 2026-11-15 | Brand changed by the owner: the product is **wDit** (said "dit"), not "Where did I tap?". UX-D10 to UX-D13 revised; new UX-D15 (the wordmark's accessible name) and UX-D16 (the long form). §2 rewritten; §1, §3.1, §3.3, §13, §16, §17 and §18 follow. |
+| 0.1 | 2026-11-15 | First draft. The owner's decisions from the style-guide session (UX-D1 to UX-D14, below; the brand rows were revised in v0.2), plus proposed defaults for everything they didn't decide (marked *default*), for review in the PR. |
 
 ## 1. Decisions
 
@@ -25,7 +26,7 @@ The owner made these decisions on 2026-11-15, after comparing mockups of the sig
 
 | ID | Topic | Decision | Consequence |
 | -- | ----- | -------- | ----------- |
-| UX-D1 | Accent colour | **Teal**, chosen over indigo and amber. | Primary buttons, links, focus rings and the wordmark's "?" are teal. Red stays for errors, amber for warnings. |
+| UX-D1 | Accent colour | **Teal**, chosen over indigo and amber. | Primary buttons, links, focus rings and the wordmark's "D" are teal. Red stays for errors, amber for warnings. |
 | UX-D2 | Themes | Colours are **generated from one base colour**, so a theme can later be made from another base colour (owner: "start doing this in a way that allows us to make themes based on different base colors"). | Tokens come from recipes (§3.1), not hand-picked hex values. A new theme is one base hue and chroma, checked by the same contrast test. Only teal ships. |
 | UX-D3 | Typeface | **IBM Plex Sans** for Latin text, **Noto Sans Arabic** for Arabic. | Both are bundled and self-hosted (§4). This satisfies platform D-38 rule 12 (a font stack that covers Arabic). |
 | UX-D4 | Dark mode | **A setting: System (default), Light, Dark.** The owner first said "no theme settings in the first version", then chose the setting. | Every screen is designed and checked in both modes. The setting needs an identity amendment (§3.5). |
@@ -34,45 +35,48 @@ The owner made these decisions on 2026-11-15, after comparing mockups of the sig
 | UX-D7 | Android colours | **The product's own theme**, not Material dynamic colour (wallpaper-based). | Web and Android match. Dynamic colour may return later as an extra theme option. |
 | UX-D8 | Money amounts | **Income tinted green; spending in the normal text colour with a minus sign.** | Spending is never shown in red (P8: never guilt-inducing). Every amount carries a sign, so colour is never the only cue (§9.6). |
 | UX-D9 | Icons | **Lucide on both platforms.** | The web keeps its current icon drawings. Android imports the same SVGs instead of Material icons (§10). |
-| UX-D10 | Product name | The product will be called **"Where did I tap?"**, not Budmon. | Outside this guide's scope: a rename pass is needed across code, designs and emails (§17). This guide uses the new name. |
-| UX-D11 | Wordmark | **The full name, "Where did I tap?", with the "?" in the accent colour.** | Text only, no logo artwork. It follows the theme (§2). |
-| UX-D12 | App icon and favicon | **An accent-coloured tile with a white "?".** | Replaces today's grey "B" tile (§2.2). |
-| UX-D13 | The name in sentences | **Screens don't repeat the name**, because the header wordmark already shows it ("Sign in", "Welcome, Mona."). Emails and the browser tab title use the full name. | The planner rewrites the strings that name the product (§2.3). |
+| UX-D10 | Product name | **wDit**, pronounced "dit" (owner: "as a general style guide wDit is the better approach"). Revised in v0.2: it replaces "Where did I tap?", which replaced Budmon. | A rename pass is needed across code, designs and emails (§17). |
+| UX-D11 | Wordmark | **"wDit" as text, with the capital "D" in the accent colour** ("w" and "it" in the text colour). | Text only, no logo artwork. It follows the theme (§2.1). |
+| UX-D12 | App icon and favicon | **An accent-coloured tile with a white "D".** | Replaces today's grey "B" tile (§2.2). |
+| UX-D13 | The name in sentences | **Screens don't repeat the name**, because the header wordmark already shows it ("Sign in", "Welcome, Mona."). Emails, tab titles and legal pages say "wDit". Kept after the rename. | The identity wording already planned name-free stays (§2.3). |
 | UX-D14 | Empty states | **A Lucide icon in a pale accent circle**, then a heading, one line and one button. No illustrations. | No artwork to produce. It follows the theme and works in RTL (§9.2). |
+| UX-D15 | The wordmark's accessible name | **The visible text, "wDit".** No hidden label with the pronunciation. | Screen readers may say it oddly, but voice control works ("click wDit") and nothing can drift out of sync (WCAG 2.5.3, label in name). |
+| UX-D16 | The long form "Where did I tap" | **Only in a few places, such as the domain name and parts of the website.** The owner: "We can decide more later." | Not used in the apps. Which places use it is open (Q-1, §18). |
 
 ## 2. Brand
 
-### 2.1 Wordmark (UX-D11)
+### 2.1 Wordmark (UX-D11, UX-D15)
 
-- **Text:** "Where did I tap?" in IBM Plex Sans **semibold (600)**: 18 px on web, 18 sp on Android (the same size at every breakpoint).
-- **Colour:** the text colour (`fg`), with the question mark in `accent-fg`. It's one element with one accessible name ("Where did I tap?"). The "?" is a `<span>` with no role of its own.
+- **Text:** "wDit", exactly this casing, in IBM Plex Sans **semibold (600)**: 20 px on web, 20 sp on Android (the same size at every breakpoint). Never "WDIT", "Wdit" or "wdit".
+- **Colour:** "w" and "it" in the text colour (`fg`), the capital "D" in `accent-fg`. The "D" is a `<span>` with no role of its own.
+- **Accessible name:** the visible text, "wDit" (UX-D15). No `aria-label` with the pronunciation, so voice control matches what users see.
 - **Placement:** the header's inline start. On signed-in screens it's a link to home. On signed-out screens it's plain text.
-- **RTL:** the name is English and is never translated (as `APP_NAME` today). It's always isolated as LTR (`<bdi dir="ltr">` or `dir="ltr"`, `BidiFormatter` on Android), so the "?" stays at the end of the name in Arabic layouts.
+- **RTL:** the name is never translated (as `APP_NAME`). It's always isolated as LTR (`<bdi dir="ltr">` or `dir="ltr"`, `BidiFormatter` on Android) in Arabic layouts.
 - **Boot screen:** the wordmark alone in the header, with an empty `<main aria-busy="true">` (identity LLD §8.1).
 - **Not a logo:** if a real logo is made later, it replaces this section.
 
 ### 2.2 App icon and favicon (UX-D12)
 
-- A square tile in the theme's `accent` colour, with corners at 22% of its size and a white "?" in Plex Sans bold, centred, about 62% of the tile's height.
-- The mark is symmetric in use and **never mirrored** in RTL.
+- A square tile in the theme's `accent` colour, with corners at 22% of its size and a white capital "D" in Plex Sans bold, centred, about 62% of the tile's height.
+- It's a letter, so it's **never mirrored** in RTL.
 - **Web:** `public/favicon.svg` (replaces the grey "B").
-- **Android:** an adaptive launcher icon (the tile as background, the "?" as foreground) plus a monochrome layer for themed icons.
+- **Android:** an adaptive launcher icon (the tile as background, the "D" as foreground) plus a monochrome layer for themed icons.
 - **Theme:** the icon uses the default theme's colour (teal), even when another theme exists, because launchers and browser tabs can't follow an in-app setting.
 
-### 2.3 The product's name in text (UX-D13)
+### 2.3 The product's name in text (UX-D13, UX-D16)
 
 - **Screens:** don't name the product in headings, buttons or sentences. The header shows it.
   - Instead of "Sign in to Budmon", write "Sign in".
   - Instead of "Join Budmon", write "You've been invited".
   - Instead of "Welcome to Budmon, {name}.", write "Welcome, {name}."
-- **Where the name stays:**
-  - the browser tab title ("Sign in – Where did I tap?", P-F-218's pattern);
+- **Where the name stays,** as "wDit":
+  - the browser tab title ("Sign in – wDit", P-F-218's pattern);
   - email subjects and bodies;
   - the Android app label;
   - About and legal pages;
   - places where leaving it out would be unclear (the privacy notice).
-- **Inside a sentence:** when the name must appear, it's written in full and passed as `{appName}` (an isolated placeholder).
-- **Android launcher label:** "Where did I tap?" is 16 characters and some launchers truncate it. See open question Q-1 (§18).
+- **Inside a sentence:** when the name must appear, it's passed as `{appName}` (an isolated placeholder). It's never split, styled or recased inside running text: the accent "D" is only for the wordmark.
+- **The long form, "Where did I tap":** not used in the apps. It's for the domain name and some parts of the website; the exact places are open (Q-1, §18).
 
 ## 3. Colour
 
@@ -100,7 +104,7 @@ Every colour is a **token** with a role (`accent`, `fg-muted`, `danger-tint`, �
 | `accent` | Primary button fill, selected states | 0.50, C | 0.80, C |
 | `accent-hover` | Primary button hover and pressed | 0.44, C | 0.86, C |
 | `on-accent` | Text and icons on `accent` | 1, 0 | 0.20, 0.04 |
-| `accent-fg` | Links, the wordmark "?", accent text on surfaces | 0.47, C | 0.82, C |
+| `accent-fg` | Links, the wordmark's "D", accent text on surfaces | 0.47, C | 0.82, C |
 | `accent-tint` | Empty-state circle, selected rows, avatar | 0.955, 0.03 | 0.30, 0.05 |
 | `on-accent-tint` | Text and icons on `accent-tint` | 0.38, C | 0.88, C |
 | `focus` | Focus ring | 0.50, C | 0.80, C |
@@ -150,7 +154,7 @@ Generated from the recipes, for reference and for the build's first tokens file.
 
 - **One accent per view:**
   - **Filled accent:** only the screen's one primary button (identity §4.0).
-  - **Accent text:** links and the wordmark's "?".
+  - **Accent text:** links and the wordmark's "D".
   - **Accent tint:** the empty-state circle, the avatar and selected rows.
 - **Status colours mean status only:** danger for errors and destructive actions, warning for things that need attention (the pending-deletion banner, an overspent budget), success for completed actions and income, info for neutral notices.
 - **Colour is never the only cue:** every status has an icon and text, and every amount has a sign (platform D-39, identity §4.8).
@@ -498,7 +502,7 @@ This builds on platform D-39 (the baseline) and identity §4.8. Contrast is in �
 Platform D-38 is the rulebook (logical properties only, mirrored icons by tag, bidi isolation, always-LTR data, tables, charts, keyboard). This guide adds the visual details:
 
 - **Fonts:** Arabic text renders in Noto Sans Arabic, with the line heights in §4.2. No letter spacing, uppercase or italics on Arabic.
-- **The name:** the wordmark and `{appName}` are isolated as LTR (§2.1), so "?" stays at the end of the name. The "?" app icon isn't mirrored.
+- **The name:** the wordmark and `{appName}` are isolated as LTR (§2.1). The "D" app icon isn't mirrored.
 - **Alignment:** everything is start-aligned, so it flips automatically. Centred text (empty states) stays centred. Nothing is aligned with `left` or `right`.
 - **Layout:** button rows, icons in buttons and fields, toggles inside fields, the toast's tone bar, and the header's wordmark and avatar all sit at their logical side, so they flip with the direction.
 - **Shadows:** they have no x-offset, so they need no RTL variant.
@@ -581,14 +585,14 @@ Identity's S-1 builds the invitation sign-up (S-5, S-6, S-7), the home first-run
 
 1. **Tokens and theme plumbing** (§3, §14, §15): the generated teal tokens in both modes, `data-theme`/`data-mode` on `<html>` before first paint (System only, until the setting exists), and Android's `AppTheme` with the colour scheme, typography and shapes. Without these, nothing else can be styled.
 2. **Fonts** (§4.1): Plex Sans, Plex Mono and Noto Sans Arabic, self-hosted and bundled, with `unicode-range` on web.
-3. **The header** (§2.1, §5.2): 56 px, the "Where did I tap?" wordmark with the accent "?", LTR-isolated; the account menu slot comes in S-3.
+3. **The header** (§2.1, §5.2): 56 px, the "wDit" wordmark with the accent "D", LTR-isolated, its accessible name the visible text; the account menu slot comes in S-3.
 4. **The signed-out column** (§5.2): 420 px, the card from 600 px, and the spacing in §5.1.
 5. **Buttons** (§7): primary, secondary (S-5's two equal choices), the Google button exception, busy state and full width in the column.
 6. **Text fields** (§8.1 to §8.4): label, field, hint and error; the password show/hide toggle; the currency and time-zone comboboxes; the read-only email on S-6.
 7. **The empty state** (§9.2): the home first-run page's icon circle, heading, line and **Add account** button.
 8. **The S-7 invitation problem and the error page** (§9.3): the page pattern, which also closes platform FU-1 (**Try again** primary, **Go to home** secondary; not-found's **Go to home** primary).
 9. **Skeletons** (§9.1): "Checking your invitation…".
-10. **The favicon** (§2.2): the "?" tile.
+10. **The favicon** (§2.2): the "D" tile.
 11. **Focus, targets and contrast** (§12), and the RTL details (§13) for the pseudo-RTL run.
 
 Not needed by S-1: the theme setting itself (it waits for the identity amendment, §17), dialogs, chips, banners and toasts (later slices), and the money styles.
@@ -599,7 +603,7 @@ These are follow-ups for the planner. None of them is made by this guide.
 
 | Item | What | Where |
 | ---- | ---- | ----- |
-| Product rename (UX-D10, UX-D13) | "Budmon" becomes "Where did I tap?": `APP_NAME`, the Android app label and strings, the HLD wording tables, email subjects, and the strings that name the product, rewritten name-free on screens. | Identity and platform HLD/LLD, code (via the pipeline) |
+| Product rename (UX-D10, UX-D13) | "Budmon" becomes "wDit": `APP_NAME`, the Android app label and strings, the HLD wording tables, email subjects, and the strings that name the product, rewritten name-free on screens. | Identity and platform HLD/LLD, code (via the pipeline) |
 | Theme setting (UX-D4, UX-D5) | A `theme` preference (System, Light, Dark; default System) on the user, in `me.get` / `me.update`, on S-9, with the device cache and the resolution order in §3.5. | Identity HLD §4 and D-17, LLD |
 | Platform FU-1 | Styling of the error page's **Try again** and the not-found page's **Go to home** is now defined (§9.3). | Platform LLD (close FU-1) |
 | Existing platform components | `OfflineBanner`, `Toaster`, `ErrorFallback`, `NotFound`, `FieldError`, `FormErrorSummary`, `RateLimitNotice`, and Android's `PlatformUi.kt` move to tokens, Lucide and the patterns here. | Platform LLD amendment, or folded into identity S-1's theme work |
@@ -609,7 +613,7 @@ These are follow-ups for the planner. None of them is made by this guide.
 
 | ID | Question | Proposal |
 | -- | -------- | -------- |
-| Q-1 | The Android launcher label: "Where did I tap?" is 16 characters, and some launchers truncate it. | Keep the full name; check on a real phone and decide on a short label then. |
+| Q-1 | Where the long form "Where did I tap" appears (UX-D16): the domain, which parts of the website, and whether it ever appears in the apps (About, emails' footer). | The owner decides later; until then the apps use only "wDit". |
 | Q-2 | Dynamic colour on Android, as a theme option (UX-D7). | Later, with a theme picker. |
-| Q-3 | A real logo to replace the text wordmark and the "?" tile. | Later; §2 is replaced when one exists. |
+| Q-3 | A real logo to replace the text wordmark and the "D" tile. | Later; §2 is replaced when one exists. |
 | Q-4 | Real Arabic review of the fonts, line heights and digits (D-38's after-MVP testing). | With the first Arabic catalogue. |
