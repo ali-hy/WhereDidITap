@@ -1,6 +1,6 @@
 ---
 doc: ux-guidelines
-version: 0.3
+version: 0.4
 status: draft
 updated: 2026-11-15
 ---
@@ -17,6 +17,7 @@ The visual style of the product's web app (`apps/web`) and Android app (`apps/an
 
 | Version | Date | Change |
 | ------- | ---- | ------ |
+| 0.4 | 2026-11-15 | The owner answered the open questions: Android's wallpaper-based colours return later as an option (UX-D18), a real logo will replace the "D" tile (UX-D19), and Claude checks the Arabic screens for now (UX-D20). Where the long form appears (Q-1) is settled as the work goes. §1, §2.2, §13, §15 and §18 follow. |
 | 0.3 | 2026-11-15 | Owner decision UX-D17: the password toggle's accessible name follows its visible text ("Show password" / "Hide password"), and `aria-pressed` is dropped (§8.2). Found by identity's S-0b code review (WCAG 2.5.3). |
 | 0.2 | 2026-11-15 | Brand changed by the owner: the product is **wDit** (said "dit"), not "Where did I tap?". UX-D10 to UX-D13 revised; new UX-D15 (the wordmark's accessible name) and UX-D16 (the long form). §2 rewritten; §1, §3.1, §3.3, §13, §16, §17 and §18 follow. |
 | 0.1 | 2026-11-15 | First draft. The owner's decisions from the style-guide session (UX-D1 to UX-D14, below; the brand rows were revised in v0.2), plus proposed defaults for everything they didn't decide (marked *default*), for review in the PR. |
@@ -33,7 +34,7 @@ The owner made these decisions on 2026-11-15, after comparing mockups of the sig
 | UX-D4 | Dark mode | **A setting: System (default), Light, Dark.** The owner first said "no theme settings in the first version", then chose the setting. | Every screen is designed and checked in both modes. The setting needs an identity amendment (§3.5). |
 | UX-D5 | Where the setting lives | **On the account**, with language and currency (identity D-17), and cached on each device. | Every device follows it after sign-in, and signed-out screens use the device's last value. Needs an identity HLD/LLD amendment. |
 | UX-D6 | Corner shape | **Soft: 8 px** on controls. | Buttons, fields and chips: 8 px. Cards and dialogs: 12 px (§6). |
-| UX-D7 | Android colours | **The product's own theme**, not Material dynamic colour (wallpaper-based). | Web and Android match. Dynamic colour may return later as an extra theme option. |
+| UX-D7 | Android colours | **The product's own theme**, not Material dynamic colour (wallpaper-based). | Web and Android match. Dynamic colour returns later as an extra theme option (UX-D18). |
 | UX-D8 | Money amounts | **Income tinted green; spending in the normal text colour with a minus sign.** | Spending is never shown in red (P8: never guilt-inducing). Every amount carries a sign, so colour is never the only cue (§9.6). |
 | UX-D9 | Icons | **Lucide on both platforms.** | The web keeps its current icon drawings. Android imports the same SVGs instead of Material icons (§10). |
 | UX-D10 | Product name | **wDit**, pronounced "dit" (owner: "as a general style guide wDit is the better approach"). Revised in v0.2: it replaces "Where did I tap?", which replaced Budmon. | A rename pass is needed across code, designs and emails (§17). |
@@ -44,6 +45,9 @@ The owner made these decisions on 2026-11-15, after comparing mockups of the sig
 | UX-D15 | The wordmark's accessible name | **The visible text, "wDit".** No hidden label with the pronunciation. | Screen readers may say it oddly, but voice control works ("click wDit") and nothing can drift out of sync (WCAG 2.5.3, label in name). |
 | UX-D16 | The long form "Where did I tap" | **Only in a few places, such as the domain name and parts of the website.** The owner: "We can decide more later." | Not used in the apps. Which places use it is open (Q-1, §18). |
 | UX-D17 | The password toggle's accessible name | **The name follows the visible text:** "Show" / "Show password", then "Hide" / "Hide password". No `aria-pressed`. Chosen over keeping the visible text fixed at "Show". | The name always contains the visible word (WCAG 2.5.3), so voice control works ("click Hide"). Identity's A-515 is amended to match (§8.2). |
+| UX-D18 | Android's wallpaper-based colours | **They come back later, as an option** next to the app's own theme. | Not in the first version. The default stays the app's own teal theme (UX-D7); the option arrives with a theme picker, and its screens must still pass §12's contrast rules. |
+| UX-D19 | A real logo | **A real logo will be made and will replace the "D" tile.** | Until it exists, the "D" tile is the app icon and favicon (§2.2), and §2 is revised when it arrives. |
+| UX-D20 | Who checks the Arabic screens | **Claude, for now**: the build's agents (mainly qa) check fonts, line heights, digits, wording and mirroring on real Arabic screens. | No outside native-speaker review yet. The check runs with each slice's RTL journey (§13). |
 
 ## 2. Brand
 
@@ -55,7 +59,7 @@ The owner made these decisions on 2026-11-15, after comparing mockups of the sig
 - **Placement:** the header's inline start. On signed-in screens it's a link to home. On signed-out screens it's plain text.
 - **RTL:** the name is never translated (as `APP_NAME`). It's always isolated as LTR (`<bdi dir="ltr">` or `dir="ltr"`, `BidiFormatter` on Android) in Arabic layouts.
 - **Boot screen:** the wordmark alone in the header, with an empty `<main aria-busy="true">` (identity LLD §8.1).
-- **Not a logo:** if a real logo is made later, it replaces this section.
+- **Not a logo:** a real logo is planned and will replace the "D" tile (UX-D19); this section is revised when it exists.
 
 ### 2.2 App icon and favicon (UX-D12)
 
@@ -511,6 +515,7 @@ Platform D-38 is the rulebook (logical properties only, mirrored icons by tag, b
 - **Shadows:** they have no x-offset, so they need no RTL variant.
 - **Numbers:** digits follow the locale (D-37). Amounts, codes, emails and references are always LTR and isolated.
 - **Checks:** the pseudo-RTL run (D-38) covers these screens in light mode. Dark mode in RTL is part of the qa journey for each slice.
+- **Arabic review (UX-D20):** for now Claude, through the build's agents (mainly qa), reviews the real Arabic screens: Noto Sans Arabic rendering, line heights, digits, the wording's tone and mirroring. Problems go to the planner like any other finding.
 
 ## 14. Web mapping: Tailwind CSS 4 (`apps/web`)
 
@@ -558,7 +563,7 @@ Rules for the web:
 
 ## 15. Android mapping: Compose and Material 3 (`apps/android`)
 
-- **A `ui/theme` package** with one `AppTheme` composable that wraps `MaterialTheme(colorScheme, typography, shapes)`. Every screen, including the platform's `PlatformUi.kt` components and `MainActivity`'s content, sits inside it. **No dynamic colour** (UX-D7).
+- **A `ui/theme` package** with one `AppTheme` composable that wraps `MaterialTheme(colorScheme, typography, shapes)`. Every screen, including the platform's `PlatformUi.kt` components and `MainActivity`'s content, sits inside it. **No dynamic colour** in the first version (UX-D7); it returns later as an option (UX-D18).
 - **Colour scheme:** `lightColorScheme()` / `darkColorScheme()` filled from the generated tokens:
 
 | Material role | Token |
@@ -614,9 +619,9 @@ These are follow-ups for the planner. None of them is made by this guide.
 
 ## 18. Open questions
 
-| ID | Question | Proposal |
-| -- | -------- | -------- |
-| Q-1 | Where the long form "Where did I tap" appears (UX-D16): the domain, which parts of the website, and whether it ever appears in the apps (About, emails' footer). | The owner decides later; until then the apps use only "wDit". |
-| Q-2 | Dynamic colour on Android, as a theme option (UX-D7). | Later, with a theme picker. |
-| Q-3 | A real logo to replace the text wordmark and the "D" tile. | Later; §2 is replaced when one exists. |
-| Q-4 | Real Arabic review of the fonts, line heights and digits (D-38's after-MVP testing). | With the first Arabic catalogue. |
+| ID | Question | Status |
+| -- | -------- | ------ |
+| Q-1 | Where the long form "Where did I tap" appears (UX-D16): the domain, which parts of the website, and whether it ever appears in the apps (About, emails' footer). | **Open, settled as the work goes** (owner: "we'll figure this out along the way"). Until a place is decided, the apps use only "wDit". |
+| Q-2 | Dynamic colour on Android, as a theme option (UX-D7). | **Answered: yes**, later, as an option (UX-D18). |
+| Q-3 | A real logo to replace the "D" tile. | **Answered: yes** (UX-D19). §2 is revised when it exists. |
+| Q-4 | Who reviews the Arabic fonts, line heights, digits and wording. | **Answered: Claude, for now** (UX-D20). |
