@@ -20,6 +20,7 @@ import { createJobQueue } from "../platform/queue/jobQueue.js";
 import { listDeadLetters, redriveDeadLetter } from "../platform/queue/deadLetter.js";
 import { buildJobRegistry } from "../platform/queue/appRegistry.js";
 import { createPgBoss } from "../platform/queue/workers.js";
+import { runBootstrapOwnerCommand } from "../identity/bootstrapOwnerCli.js";
 import { installProxySupport } from "../platform/crypto/proxy.js";
 import type { WorkerRole } from "../platform/queue/jobs.js";
 import { fxBackfillJob } from "../platform/fx/fxJobs.js";
@@ -36,6 +37,7 @@ const USAGE = [
   "  erasure:replay --since <RFC 3339 instant>",
   "  fx:backfill --date <YYYY-MM-DD>",
   "  diagnostics:sentry-test --yes",
+  "  identity:bootstrap-owner --email <address> [--replace]",
 ].join("\n");
 /** F-93: restore:verify's report isn't ok. */
 const EXIT_RESTORE_NOT_OK = 6;
@@ -311,6 +313,9 @@ export async function runCli(
     return fxBackfill(argv.slice(1), env, io, deps.clock ?? systemClock);
   }
   if (command === "diagnostics:sentry-test") return sentryTest(argv.slice(1), env, io);
+  if (command === "identity:bootstrap-owner") {
+    return runBootstrapOwnerCommand(argv.slice(1), env, io);
+  }
   if (command !== "jobs:dead" || (sub !== "list" && sub !== "redrive")) {
     io.stderr(`Unknown command: ${[command, sub].filter((x) => x !== undefined).join(" ")}`);
     io.stderr(USAGE);
