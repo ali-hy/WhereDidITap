@@ -2975,7 +2975,7 @@ Order and dependencies:
 | S-11 Account deletion | US-10 | S-8, S-10 |
 | S-12 Owner services for `admin` | (US-7, US-10; ADM dependencies) | S-11, S-4 |
 
-The build goes on `feat/identity` (PR #2). Status: **S-0 QA passed** (2026-11-15; code review approved at `60570ab`); **S-0b QA passed** (2026-11-15; code review approved at `6c50f6c`); **S-1 QA passed** (2026-11-16; code review approved at `f09d71e`; CI green for android, e2e and contract); S-2 to S-12 not started. One pull request carries the `API_MINOR` bump (§1.1).
+The build goes on `feat/identity` (PR #2). Status: **S-0 QA passed** (2026-11-15; code review approved at `60570ab`); **S-0b QA passed** (2026-11-15; code review approved at `6c50f6c`); **S-1 QA passed** (2026-11-16; code review approved at `f09d71e`; CI green for android, e2e and contract); **S-2 QA passed** (2026-11-16; code review approved at `efa6bf5`, its docs-only items closed in `4fa2a90`, test hardening in `f3f3679`; CI green for check including server-int, android and e2e); S-3 to S-12 not started. One pull request carries the `API_MINOR` bump (§1.1).
 
 ### S-0: Foundations
 - **Depends on:** the platform as built (above).
