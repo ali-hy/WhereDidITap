@@ -2,7 +2,7 @@
 module: identity
 doc: lld
 status: approved # draft | in-review | approved
-version: 0.35
+version: 0.36
 hld_version: 0.12
 author: planner
 approved_by: main conversation on the owner's behalf (delegation 2026-10-07, "auto approve the hlds as well just keep going"); the owner reviewed and confirmed every flagged decision on 2026-11-14; plan re-review passed 2026-11-14
@@ -58,6 +58,7 @@ This document doesn't restate the HLD's rationale.
 | 0.33    | 2026-11-15 | A-58 pinned for F-40 step 4 (test-architect): an invitation the preview itself expires also returns `inviterName` and `origin`; TP-1.55 gains the just-due case. Approval stands. |
 | 0.34    | 2026-11-15 | **Implementation-time amendments A-60 to A-65** (S-1 code review round 3; planner decisions; approval stands): `origin` in Android's `InviteState.Problem` and `InviteProblemScreen` (A-60); `external` mirrored, in S-1 (A-61); `incomplete` drops the stored token (A-62); no leading space in `setup.privacyNewTab` (A-63); stale preview responses ignored (A-64); a fragment without `t` changes nothing (A-65). F-159's first-preview sentence corrected for A-58. TP-1.32, TP-1.47, TP-1.55 extended; new TP-1.56, TP-1.57. |
 | 0.35    | 2026-11-15 | S-1 code review round 4 (tests only; approval stands): TP-1.41 names the window-draw pixel capture (`pixelsOf`, `createAndroidComposeRule<ComponentActivity>()`) instead of `captureToImage()`, same coordinates and tolerance; A-64's two untested rules get TP-1.58 (a `hashchange` during an accept) and TP-1.59 (a stale `signUpOptions` response). Platform A-531 records the `testKitTest` split. |
+| 0.36    | 2026-11-16 | **Implementation-time amendment A-66** (S-2 code review; planner decision; approval stands): F-45 also returns `invitationId`, which F-46 logs; TP-2.1 checks it. |
 
 ## Amendments
 
@@ -130,6 +131,7 @@ The rows below are identity's own amendments. Text that cites one says "(A-n)" n
 | A-63 | Round 3 N-2: §8.1 gave `setup.privacyNewTab` a leading space; the catalog has none and the component adds it | **No space in the catalog**; the component renders the space, so translators don't keep one. | §8.1 | none | planner decision |
 | A-64 | Round 3 N-3: with a `hashchange` during a preview, the older response can land after the newer one | **A page-local sequence number:** each run of the mount steps takes the next one, and a preview or `signUpOptions` response for an older number is ignored. A `hashchange` during an accept strips the fragment and is otherwise ignored. | F-159; TP-1.57 | none | planner decision |
 | A-65 | Round 3 B-1: the `hashchange` handler reruns for any fragment, but A-52 limits it to a `t` | **Confirmed: a fragment without `t` changes nothing** (no strip, no request, state and typed values kept). Code fix. | F-159, A-52; TP-1.56 | none | planner decision |
+| A-66 | S-2 code review G-1: F-46 step 6 logs `entityId: invitationId`, but F-45's signature returns only `{ link, expiresAt }`; the code returns `invitationId` too | **F-45 returns `invitationId: string`**, the row it inserted. Looking it up again in the CLI (`findPendingBootstrap`) would add a query and could race a concurrent `--replace`, logging another invitation's ID. | F-45; TP-2.1 | none | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -1474,7 +1476,7 @@ export type ChallengeData =
 
 #### F-45: `bootstrapOwner`
 - **File:** `identity/bootstrapService.ts` · **Layer:** service
-- **Signature:** `export async function bootstrapOwner(deps: IdentityDeps, input: { email: string; replace: boolean }): Promise<{ link: string; expiresAt: Temporal.Instant }>`
+- **Signature:** `export async function bootstrapOwner(deps: IdentityDeps, input: { email: string; replace: boolean }): Promise<{ link: string; expiresAt: Temporal.Instant; invitationId: string }>` (A-66: `invitationId` is the inserted invitation's ID, for F-46's log)
 - **Behaviour** (one transaction):
   1. Normalise and validate the email; invalid → `BootstrapError("invalid_email")`.
   2. F-8 `findOwner` exists → `BootstrapError("owner_exists")`.
@@ -1484,7 +1486,7 @@ export type ChallengeData =
      - if it exists and has expired → `expireIfDue`, publishing `invitation-ended { reason: "expired" }`.
   5. A pending invitation for that email from someone else is revoked (`revokePendingForEmail`), publishing `invitation-ended { reason: "revoked" }` for each.
   6. Inserts an invitation: `origin "bootstrap"`, `inviterUserId null`, token from `generateToken("invitation")` stored as its hash with `tokenIssuedAt = now`, `expiresAt = now + INVITATION_TTL`.
-  7. Returns `link = <api.publicOrigin>/invite#t=<token>`.
+  7. Returns `link = <api.publicOrigin>/invite#t=<token>`, its `expiresAt` and the new row's `invitationId` (A-66).
   - **No email job** (D-21).
 - **Errors:** `BootstrapError` (a plain `Error` subclass with `code: "invalid_email" | "owner_exists" | "email_in_use" | "pending_exists"` and `expiresAt?`).
 
@@ -3487,7 +3489,7 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-1.57 | S-1 | E | F-159 stale responses (A-64) | invitations A and B (different emails); `page.route` delaying A's `invitations/preview` response by 2 s | Open `/invite#t=<A>`; at once `location.hash = "#t=<B>"`; wait 3 s | The join screen shows B's email after A's response arrives; exactly one join `<h1>` focus move (for B) |
 | TP-1.58 | S-1 | E | F-159 `hashchange` during an accept (A-64) | invitations A and B; `page.route` delaying `invitations/accept` by 2 s; request recording | Open `/invite#t=<A>`; Use a password; fill set-up; Create account; at once `location.hash = "#t=<B>"` | The fragment is stripped at once (`location.hash` empty); no `invitations/preview` or `auth/sign-up-options` request after the change; the page stays on set-up, busy, until the accept answers; then the accept decides: lands on `/`, with `sessionStorage["budmon.invite"]` absent |
 | TP-1.59 | S-1 | E | F-159 stale `signUpOptions` (A-64) | invitations A and B (different emails); `page.route` delaying `auth/sign-up-options` by 2 s | On A's join, Use a password; at once `location.hash = "#t=<B>"`; wait 3 s | B's join stays after the options response lands (no set-up shown); focus moved to the `<h1>` once, for B's join |
-| TP-2.1 | S-2 | I | F-45 | empty database | `bootstrapOwner("Owner@X.com")` | Invitation `bootstrap`, no inviter, token hash matches the link's token, no email job |
+| TP-2.1 | S-2 | I | F-45 | empty database | `bootstrapOwner("Owner@X.com")` | Invitation `bootstrap`, no inviter, token hash matches the link's token, no email job; the result's `invitationId` is that row's `id` and its `expiresAt` the row's `expires_at` (A-66) |
 | TP-2.2 | S-2 | I | F-45 | owner exists; pending bootstrap; expired pending; user with the email; `"x"`; a pending direct invitation for the email | Call; call with `replace` | `owner_exists`; `pending_exists` / old revoked with an `invitation-ended { revoked }` job and new created; old expired (with an `invitation-ended { expired }` job) and new created; `email_in_use`; `invalid_email`; the direct invitation revoked with its event |
 | TP-2.3 | S-2 | I | F-41 | bootstrap invitation | Accept | `is_product_owner = true`, `invite_allowance = null` |
 | TP-2.4 | S-2 | I | F-41 | owner exists; a second bootstrap invitation inserted by the repo directly | Accept it | `INVITATION_REVOKED`; no user created |
