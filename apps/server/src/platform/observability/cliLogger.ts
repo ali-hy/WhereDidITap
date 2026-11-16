@@ -1,6 +1,6 @@
 // The operator commands' logger: JSON lines on stderr, so stdout carries only the command's output.
-import type { Config } from "../platform/config/schema.js";
-import { createLogger } from "../platform/observability/logger.js";
+import type { Config } from "../config/schema.js";
+import { createLogger } from "./logger.js";
 
 export function cliLogger(config: Config) {
   return createLogger({

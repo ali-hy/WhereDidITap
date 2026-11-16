@@ -4,7 +4,7 @@ import { toInstantWire, type Temporal } from "@budmon/shared";
 import { EXIT_CONFIG, loadConfigOrReport } from "../platform/config/startup.js";
 import { createApiContainer } from "../platform/container.js";
 import { describeFailure } from "../platform/observability/describeFailure.js";
-import { cliLogger } from "../main/cliLogger.js";
+import { cliLogger } from "../platform/observability/cliLogger.js";
 import { BootstrapError, bootstrapOwner } from "./bootstrapService.js";
 
 const EXIT_USAGE = 64;

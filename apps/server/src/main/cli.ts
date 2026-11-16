@@ -18,7 +18,7 @@ import { createJobQueue } from "../platform/queue/jobQueue.js";
 import { listDeadLetters, redriveDeadLetter } from "../platform/queue/deadLetter.js";
 import { buildJobRegistry } from "../platform/queue/appRegistry.js";
 import { createPgBoss } from "../platform/queue/workers.js";
-import { cliLogger } from "./cliLogger.js";
+import { cliLogger } from "../platform/observability/cliLogger.js";
 import { runBootstrapOwnerCommand } from "../identity/bootstrapOwnerCli.js";
 import { installProxySupport } from "../platform/crypto/proxy.js";
 import type { WorkerRole } from "../platform/queue/jobs.js";
