@@ -2,7 +2,7 @@
 module: identity
 doc: lld
 status: approved # draft | in-review | approved
-version: 0.36
+version: 0.37
 hld_version: 0.12
 author: planner
 approved_by: main conversation on the owner's behalf (delegation 2026-10-07, "auto approve the hlds as well just keep going"); the owner reviewed and confirmed every flagged decision on 2026-11-14; plan re-review passed 2026-11-14
@@ -59,6 +59,7 @@ This document doesn't restate the HLD's rationale.
 | 0.34    | 2026-11-15 | **Implementation-time amendments A-60 to A-65** (S-1 code review round 3; planner decisions; approval stands): `origin` in Android's `InviteState.Problem` and `InviteProblemScreen` (A-60); `external` mirrored, in S-1 (A-61); `incomplete` drops the stored token (A-62); no leading space in `setup.privacyNewTab` (A-63); stale preview responses ignored (A-64); a fragment without `t` changes nothing (A-65). F-159's first-preview sentence corrected for A-58. TP-1.32, TP-1.47, TP-1.55 extended; new TP-1.56, TP-1.57. |
 | 0.35    | 2026-11-15 | S-1 code review round 4 (tests only; approval stands): TP-1.41 names the window-draw pixel capture (`pixelsOf`, `createAndroidComposeRule<ComponentActivity>()`) instead of `captureToImage()`, same coordinates and tolerance; A-64's two untested rules get TP-1.58 (a `hashchange` during an accept) and TP-1.59 (a stale `signUpOptions` response). Platform A-531 records the `testKitTest` split. |
 | 0.36    | 2026-11-16 | **Implementation-time amendment A-66** (S-2 code review; planner decision; approval stands): F-45 also returns `invitationId`, which F-46 logs; TP-2.1 checks it. |
+| 0.37    | 2026-11-16 | **Implementation-time amendment A-67** (S-2 code review round 2; planner decision; approval stands): F-45's missing-`api` guard; F-46 names P-A-532's `cliLogger`. |
 
 ## Amendments
 
@@ -132,6 +133,7 @@ The rows below are identity's own amendments. Text that cites one says "(A-n)" n
 | A-64 | Round 3 N-3: with a `hashchange` during a preview, the older response can land after the newer one | **A page-local sequence number:** each run of the mount steps takes the next one, and a preview or `signUpOptions` response for an older number is ignored. A `hashchange` during an accept strips the fragment and is otherwise ignored. | F-159; TP-1.57 | none | planner decision |
 | A-65 | Round 3 B-1: the `hashchange` handler reruns for any fragment, but A-52 limits it to a `t` | **Confirmed: a fragment without `t` changes nothing** (no strip, no request, state and typed values kept). Code fix. | F-159, A-52; TP-1.56 | none | planner decision |
 | A-66 | S-2 code review G-1: F-46 step 6 logs `entityId: invitationId`, but F-45's signature returns only `{ link, expiresAt }`; the code returns `invitationId` too | **F-45 returns `invitationId: string`**, the row it inserted. Looking it up again in the CLI (`findPendingBootstrap`) would add a query and could race a concurrent `--replace`, logging another invitation's ID. | F-45; TP-2.1 | none | planner decision |
+| A-67 | S-2 code review round 2 N-2: F-45 throws a plain `Error("api configuration required")` when the `api` configuration is missing, which the LLD doesn't say | **Recorded as a guard:** before any work (no token, no ID, no transaction); a programming error that F-46 reports as `cli_failed`, exit 1. No test row. F-46 now names its logger, P-A-532's `cliLogger`. | F-45, F-46 | none | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -1488,7 +1490,7 @@ export type ChallengeData =
   6. Inserts an invitation: `origin "bootstrap"`, `inviterUserId null`, token from `generateToken("invitation")` stored as its hash with `tokenIssuedAt = now`, `expiresAt = now + INVITATION_TTL`.
   7. Returns `link = <api.publicOrigin>/invite#t=<token>`, its `expiresAt` and the new row's `invitationId` (A-66).
   - **No email job** (D-21).
-- **Errors:** `BootstrapError` (a plain `Error` subclass with `code: "invalid_email" | "owner_exists" | "email_in_use" | "pending_exists"` and `expiresAt?`).
+- **Errors:** `BootstrapError` (a plain `Error` subclass with `code: "invalid_email" | "owner_exists" | "email_in_use" | "pending_exists"` and `expiresAt?`). **Guard (A-67):** when `deps.config.api` is missing, F-45 throws a plain `Error("api configuration required")` before any work (no token, no ID, no transaction); it's a programming error, which F-46 reports as `cli_failed` (exit 1).
 
 #### F-46: CLI command `identity:bootstrap-owner`
 - **Files:** handler `identity/bootstrapOwnerCli.ts`; dispatch in `main/cli.ts` (A-6): `runCli` routes `argv[0] === "identity:bootstrap-owner"` to it with `argv.slice(1)`, and `USAGE` gains the line `  identity:bootstrap-owner --email <address> [--replace]`.
@@ -1496,7 +1498,7 @@ export type ChallengeData =
 - **Behaviour** (P-F-93's command rules; `runCli` has already called P-F-122 `installProxySupport(env)`):
   1. **Arguments first, before any configuration is read:** exactly `--email <value>` once and optionally `--replace` once, in any order. Anything else (missing `--email`, a missing value, an unknown or repeated argument) prints `Usage: identity:bootstrap-owner --email <address> [--replace]` on stderr and exits **64**.
   2. Config kind **`api`**: `loadConfigOrReport("api", env, readFileSync, io.stderr)` (`platform/config/startup.ts`); `null` → exit **78** (`EXIT_CONFIG`; P-F-11's `Configuration invalid:` lines are already on stderr).
-  3. `createApiContainer(config, { logger })` with the CLI's stderr logger (as `runCli`'s other commands build theirs, P-A-109), then `await container.boss.start()`, because F-45 may publish `identity.invitation-ended` and the API's send-only pg-boss is otherwise started only by `main/api.ts` (P-A-209).
+  3. `createApiContainer(config, { logger })` with the CLI's stderr logger, P-A-532's `cliLogger(config)` (P-A-109), then `await container.boss.start()`, because F-45 may publish `identity.invitation-ended` and the API's send-only pg-boss is otherwise started only by `main/api.ts` (P-A-209).
   4. F-45 with `container.identity.deps`.
   5. **Success:** writes to **stdout only**, as three `io.stdout` lines:
      ```
