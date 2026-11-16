@@ -4,7 +4,7 @@ import { toInstantWire, type Temporal } from "@budmon/shared";
 import { EXIT_CONFIG, loadConfigOrReport } from "../platform/config/startup.js";
 import { createApiContainer } from "../platform/container.js";
 import { describeFailure } from "../platform/observability/describeFailure.js";
-import { createLogger } from "../platform/observability/logger.js";
+import { cliLogger } from "../main/cliLogger.js";
 import { BootstrapError, bootstrapOwner } from "./bootstrapService.js";
 
 const EXIT_USAGE = 64;
@@ -63,14 +63,7 @@ export async function runBootstrapOwnerCommand(
     io.stderr(line);
   });
   if (config === null) return EXIT_CONFIG;
-  // stdout carries only the command's output.
-  const logger = createLogger({
-    service: "cli",
-    release: config.release,
-    level: config.logLevel,
-    appEnv: config.appEnv,
-    destination: { write: (line: string) => process.stderr.write(line) },
-  });
+  const logger = cliLogger(config);
   const container = (deps.createContainer ?? createApiContainer)(config, { logger });
   try {
     // The event job needs the send-only pg-boss, which main/api.ts otherwise starts.

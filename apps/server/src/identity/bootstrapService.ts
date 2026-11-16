@@ -36,6 +36,9 @@ export async function bootstrapOwner(
   const now = deps.clock.now();
   const nowDate = new Date(now.epochMilliseconds);
   const expiresAt = now.add(INVITATION_TTL);
+  // Programming error: the CLI loads the API configuration.
+  const publicOrigin = deps.config.api?.publicOrigin.origin;
+  if (publicOrigin === undefined) throw new Error("api configuration required");
   const token = generateToken("invitation");
   const invitationId = deps.ids.next();
 
@@ -81,7 +84,5 @@ export async function bootstrapOwner(
     });
   });
 
-  // Checked at startup: the API configuration has a public origin.
-  const origin = deps.config.api?.publicOrigin.origin ?? "";
-  return { link: `${origin}/invite#t=${token}`, expiresAt, invitationId };
+  return { link: `${publicOrigin}/invite#t=${token}`, expiresAt, invitationId };
 }

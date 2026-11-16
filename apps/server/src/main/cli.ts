@@ -6,9 +6,7 @@ import path from "node:path";
 import { Temporal, isUuid, systemClock, utcDateOf, type Clock } from "@budmon/shared";
 import { EXIT_CONFIG, loadConfigOrReport } from "../platform/config/startup.js";
 import { describeFailure } from "../platform/observability/describeFailure.js";
-import { createLogger } from "../platform/observability/logger.js";
 import { initSentry } from "../platform/observability/sentry.js";
-import type { Config } from "../platform/config/schema.js";
 import { createApiContainer, createWorkerContainer } from "../platform/container.js";
 import { serverRoot } from "../platform/config/serverRoot.js";
 import { readJournal } from "../platform/db/migrations.js";
@@ -20,6 +18,7 @@ import { createJobQueue } from "../platform/queue/jobQueue.js";
 import { listDeadLetters, redriveDeadLetter } from "../platform/queue/deadLetter.js";
 import { buildJobRegistry } from "../platform/queue/appRegistry.js";
 import { createPgBoss } from "../platform/queue/workers.js";
+import { cliLogger } from "./cliLogger.js";
 import { runBootstrapOwnerCommand } from "../identity/bootstrapOwnerCli.js";
 import { installProxySupport } from "../platform/crypto/proxy.js";
 import type { WorkerRole } from "../platform/queue/jobs.js";
@@ -55,17 +54,6 @@ function option(args: readonly string[], name: string): string | undefined {
 function role(value: string | undefined): WorkerRole | undefined | null {
   if (value === undefined) return undefined;
   return value === "capture" || value === "general" ? value : null;
-}
-
-function cliLogger(config: Config) {
-  return createLogger({
-    service: "cli",
-    release: config.release,
-    level: config.logLevel,
-    appEnv: config.appEnv,
-    // stdout carries only the command's output.
-    destination: { write: (line: string) => process.stderr.write(line) },
-  });
 }
 
 /** F-93 secrets:rewrap-api (kind api): F-117 over the container's sealed columns. */
