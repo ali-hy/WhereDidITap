@@ -1,5 +1,6 @@
 // F-152 session store and SessionProvider, F-153 guards and safeNext, F-154 readFragmentToken
-// (identity LLD §4.14). TP-0.28 rows (a) to (m) (S-3 adds its rows), plus extra cases TP-0.28x.
+// (identity LLD §4.14). TP-0.28 rows (a) to (m) and its S-3 rows (signOut, sessionEnded), plus
+// extra cases TP-0.28x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { render } from "@solidjs/testing-library";
 import { isRedirect } from "@tanstack/solid-router";
@@ -122,13 +123,14 @@ const throwingStorage = {
 
 function store(storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null) {
   const navigate = vi.fn<(href: string) => void>();
+  const queryClient = createQueryClient();
   const s = createSessionStore({
     api: createApiClient({ buildNumber: 1, fetch: scriptedFetch }),
-    queryClient: createQueryClient(),
+    queryClient,
     navigate,
     storage,
   });
-  return { s, navigate };
+  return { s, navigate, queryClient };
 }
 
 /** No further /me request while 30 s of fake time pass (no automatic retry, review O-8). */
@@ -482,5 +484,160 @@ describe("TP-0.28: SessionProvider (F-152)", () => {
     ));
 
     expect(seen).toBe(s);
+  });
+});
+
+// ---- S-3: signOut and sessionEnded (F-152, F-153) ----
+
+/** A cached query that every cache clear removes. */
+const SENTINEL = ["tp-0.28", "sentinel"] as const;
+
+describe("TP-0.28 (S-3): signOut() and sessionEnded() (F-152)", () => {
+  /** Answers POST /api/v1/auth/sign-out with `respond`, counting requests. */
+  function signOutRoute(respond: () => Response): { readonly n: number } {
+    const seen = { n: 0 };
+    server.use(
+      http.post("*/api/v1/auth/sign-out", () => {
+        seen.n += 1;
+        return respond();
+      }),
+    );
+    return seen;
+  }
+
+  async function signedIn() {
+    const storage = mapStorage({ [MARKER]: "1" });
+    const made = store(storage);
+    await made.s.boot();
+    expect(made.s.status()).toBe("signed_in");
+    made.queryClient.setQueryData(SENTINEL, 1);
+    return { ...made, storage };
+  }
+
+  it("TP-0.28 (S-3): signOut() with auth.signOut 200 → signed_out, the marker removed, the query cache cleared, navigate('/sign-in')", async () => {
+    const { s, navigate, queryClient, storage } = await signedIn();
+    const calls = signOutRoute(() => HttpResponse.json({ ok: true }));
+
+    await s.signOut();
+
+    expect(calls.n).toBe(1);
+    expect(s.status()).toBe("signed_out");
+    expect(storage.map.has(MARKER)).toBe(false);
+    expect(queryClient.getQueryData(SENTINEL)).toBeUndefined();
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith("/sign-in");
+  });
+
+  it("TP-0.28x (S-3): signOut() with auth.signOut 401 UNAUTHENTICATED → the same as 200", async () => {
+    const { s, navigate, queryClient, storage } = await signedIn();
+    signOutRoute(() =>
+      HttpResponse.json(envelope("UNAUTHENTICATED", 401, "Authentication required"), {
+        status: 401,
+      }),
+    );
+
+    await s.signOut();
+
+    expect(s.status()).toBe("signed_out");
+    expect(storage.map.has(MARKER)).toBe(false);
+    expect(queryClient.getQueryData(SENTINEL)).toBeUndefined();
+    expect(navigate).toHaveBeenCalledWith("/sign-in");
+  });
+
+  it("TP-0.28 (S-3): signOut() with auth.signOut failing (network) → the error thrown, the status still signed_in, the marker kept", async () => {
+    const { s, navigate, storage } = await signedIn();
+    signOutRoute(() => HttpResponse.error());
+
+    const err = await thrown(s.signOut());
+
+    expect(err).toBeDefined();
+    expect(toAppError(err).kind).toBe("network");
+    expect(s.status()).toBe("signed_in");
+    expect(storage.map.get(MARKER)).toBe("1");
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("TP-0.28x (S-3): signOut() with auth.signOut failing (a defined 500 INTERNAL) → thrown, still signed_in, the marker kept", async () => {
+    const { s, navigate, storage } = await signedIn();
+    signOutRoute(() =>
+      HttpResponse.json(envelope("INTERNAL", 500, "Internal error"), { status: 500 }),
+    );
+
+    const err = await thrown(s.signOut());
+
+    expect(toAppError(err)).toMatchObject({ kind: "defined", key: "INTERNAL" });
+    expect(s.status()).toBe("signed_in");
+    expect(storage.map.get(MARKER)).toBe("1");
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("TP-0.28 (S-3): sessionEnded('/settings') while signed_in → signed_out, the marker removed, the cache cleared, navigate('/sign-in?reason=ended&next=/settings')", async () => {
+    const { s, navigate, queryClient, storage } = await signedIn();
+
+    s.sessionEnded("/settings");
+
+    expect(s.status()).toBe("signed_out");
+    expect(storage.map.has(MARKER)).toBe(false);
+    expect(queryClient.getQueryData(SENTINEL)).toBeUndefined();
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith("/sign-in?reason=ended&next=/settings");
+  });
+
+  it("TP-0.28x (S-3): sessionEnded('//evil.com') while signed_in → navigate('/sign-in?reason=ended&next=/') (safeNext)", async () => {
+    const { s, navigate } = await signedIn();
+
+    s.sessionEnded("//evil.com");
+
+    expect(navigate).toHaveBeenCalledWith("/sign-in?reason=ended&next=/");
+  });
+
+  it("TP-0.28 (S-3): sessionEnded('/settings') during a boot probe whose me.get then answers 401 → the marker removed, the cache cleared, endedDuringBoot() true, no navigate; signed_out once the probe settles; requireSignedIn at /settings redirects with { next: '/settings', reason: 'ended' }; markSignedIn() resets endedDuringBoot()", async () => {
+    const storage = mapStorage({ [MARKER]: "1" });
+    const { s, navigate, queryClient } = store(storage);
+    queryClient.setQueryData(SENTINEL, 1);
+    let duringProbe: Record<string, unknown> | undefined;
+    server.use(
+      http.get(
+        "*/api/v1/me",
+        () => {
+          meRequests += 1;
+          s.sessionEnded("/settings");
+          duringProbe = {
+            status: s.status(),
+            endedDuringBoot: s.endedDuringBoot(),
+            marker: storage.map.has(MARKER),
+            sentinel: queryClient.getQueryData(SENTINEL),
+          };
+          return HttpResponse.json(envelope("UNAUTHENTICATED", 401, "Authentication required"), {
+            status: 401,
+          });
+        },
+        { once: true },
+      ),
+    );
+
+    await s.boot();
+
+    expect(duringProbe).toEqual({
+      status: "loading",
+      endedDuringBoot: true,
+      marker: false,
+      sentinel: undefined,
+    });
+    expect(s.status()).toBe("signed_out");
+    expect(navigate).not.toHaveBeenCalled();
+
+    const err = await thrown(
+      requireSignedIn({ context: { session: s }, location: { pathname: "/settings" } }),
+    );
+    const options = redirectOptions(err);
+    expect(options.to).toBe("/sign-in");
+    expect(options.search).toEqual({ next: "/settings", reason: "ended" });
+
+    await s.markSignedIn();
+
+    expect(s.status()).toBe("signed_in");
+    expect(s.endedDuringBoot()).toBe(false);
+    expect(navigate).not.toHaveBeenCalled();
   });
 });
