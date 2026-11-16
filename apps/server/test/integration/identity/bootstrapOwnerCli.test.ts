@@ -1,5 +1,5 @@
 // F-46 identity:bootstrap-owner through runCli, in process (identity LLD §4.3, S-2). TP-2.5, plus
-// extra cases TP-2.5x.
+// extra cases TP-2.5x (steps 8 and 9 through runBootstrapOwnerCommand with an injected container).
 // - The API configuration is the helpers' devApi() with its files written to a temporary
 //   directory and DB_* pointing at this file's test database as budmon_app.
 // - The CLI's logger writes to process.stderr (cliLogger), so that is the log capture; io.stderr
@@ -11,7 +11,9 @@ import path from "node:path";
 import { toInstantWire, Temporal } from "@budmon/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DbHandle } from "../../../src/platform/db/types.js";
+import { runBootstrapOwnerCommand } from "../../../src/identity/bootstrapOwnerCli.js";
 import { runCli } from "../../../src/main/cli.js";
+import { createApiContainer } from "../../../src/platform/container.js";
 import { invitationFactory, userFactory } from "../../factories/identity.js";
 import { devApi } from "../../support/configEnv.js";
 import { buildIdentityApi, type IdentityApi } from "../../support/identity.js";
@@ -152,6 +154,7 @@ describe("TP-2.5: identity:bootstrap-owner through runCli", () => {
     expect(r.code).toBe(1);
     expect(r.stderr).toEqual(["An owner already exists."]);
     expect(r.stdout).toEqual([]);
+    expect(r.logs).not.toContain("bmi_");
   }, 60_000);
 
   it("TP-2.5: a pending bootstrap → one stderr line with its expiry and the --replace hint, exit 1", async () => {
@@ -169,6 +172,7 @@ describe("TP-2.5: identity:bootstrap-owner through runCli", () => {
       `An owner invitation is already waiting (expires ${expires}). Run again with --replace to cancel it and create a new link.`,
     ]);
     expect(r.stdout).toEqual([]);
+    expect(r.logs).not.toContain("bmi_");
   }, 60_000);
 
   it("TP-2.5: a user with the email → one stderr line 'That email already belongs to a user.', exit 1", async () => {
@@ -179,6 +183,7 @@ describe("TP-2.5: identity:bootstrap-owner through runCli", () => {
     expect(r.code).toBe(1);
     expect(r.stderr).toEqual(["That email already belongs to a user."]);
     expect(r.stdout).toEqual([]);
+    expect(r.logs).not.toContain("bmi_");
   }, 60_000);
 
   it("TP-2.5: --email x → one stderr line 'Enter a valid email address.', exit 1", async () => {
@@ -187,6 +192,7 @@ describe("TP-2.5: identity:bootstrap-owner through runCli", () => {
     expect(r.code).toBe(1);
     expect(r.stderr).toEqual(["Enter a valid email address."]);
     expect(r.stdout).toEqual([]);
+    expect(r.logs).not.toContain("bmi_");
   }, 60_000);
 
   it("TP-2.5: --replace with a pending bootstrap → exit 0, the old invitation revoked and a new link printed", async () => {
@@ -260,4 +266,107 @@ describe("TP-2.5: identity:bootstrap-owner through runCli", () => {
       "  identity:bootstrap-owner --email <address> [--replace]",
     );
   });
+});
+
+describe("TP-2.5x: F-46 step 8 (any other error) and step 9 (the container always closed)", () => {
+  type Container = ReturnType<typeof createApiContainer>;
+
+  /**
+   * runBootstrapOwnerCommand with createContainer wrapping the real one: `close` spied (calling
+   * through) and `prepare` applied to the container first.
+   */
+  async function direct(
+    args: string[],
+    prepare: (c: Container) => void = () => undefined,
+  ): Promise<Run & { closes: number }> {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const written: string[] = [];
+    let closes = 0;
+    const createContainer: typeof createApiContainer = (config, overrides) => {
+      const c = createApiContainer(config, overrides);
+      const close = c.close.bind(c);
+      c.close = async () => {
+        closes += 1;
+        await close();
+      };
+      prepare(c);
+      return c;
+    };
+    const spy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        written.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+        return true;
+      });
+    let code: number;
+    try {
+      code = await runBootstrapOwnerCommand(
+        args,
+        env,
+        { stdout: (l) => stdout.push(l), stderr: (l) => stderr.push(l) },
+        { createContainer },
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    return { code, stdout, stderr, logs: written.join(""), closes };
+  }
+
+  const noToken = (r: Run) => {
+    expect(r.stdout.join("\n")).not.toContain("bmi_");
+    expect(r.stderr.join("\n")).not.toContain("bmi_");
+    expect(r.logs).not.toContain("bmi_");
+  };
+
+  it("TP-2.5x: boss.start rejects → exit 1, exactly one cli_failed log line with errorClass, nothing on stdout, close called once", async () => {
+    const r = await direct(["--email", "Owner@X.com"], (c) => {
+      vi.spyOn(c.boss, "start").mockRejectedValue(new Error("queue unavailable"));
+    });
+
+    expect(r.code).toBe(1);
+    expect(r.stdout).toEqual([]);
+    const failed = logged(r, "cli_failed");
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toHaveProperty("errorClass");
+    expect(r.closes).toBe(1);
+    noToken(r);
+    expect(await bootstrapRows()).toEqual([]);
+  }, 60_000);
+
+  it("TP-2.5x: the database failing inside F-45 (after the token exists) → exit 1, one cli_failed with errorClass, no bmi_ anywhere, close called once", async () => {
+    const r = await direct(["--email", "Owner@X.com"], (c) => {
+      // pg's connect() is overloaded (callback or promise); F-45 uses the promise form.
+      const refuse = () => Promise.reject(new Error("connection refused"));
+      vi.spyOn(c.identity.deps.database.pool, "connect").mockImplementation(refuse as never);
+    });
+
+    expect(r.code).toBe(1);
+    expect(r.stdout).toEqual([]);
+    const failed = logged(r, "cli_failed");
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toHaveProperty("errorClass");
+    expect(r.closes).toBe(1);
+    noToken(r);
+    expect(await bootstrapRows()).toEqual([]);
+  }, 60_000);
+
+  it("TP-2.5x: success → exit 0 and close called once", async () => {
+    const r = await direct(["--email", "Owner@X.com"]);
+
+    expect(r.code, r.stderr.join("\n")).toBe(0);
+    expect(r.closes).toBe(1);
+    expect(r.logs).not.toContain("bmi_");
+  }, 60_000);
+
+  it("TP-2.5x: a refusal (an owner exists) → exit 1 and close called once", async () => {
+    await userFactory(h, { isProductOwner: true, inviteAllowance: null });
+
+    const r = await direct(["--email", "Owner@X.com"]);
+
+    expect(r.code).toBe(1);
+    expect(r.stderr).toEqual(["An owner already exists."]);
+    expect(r.closes).toBe(1);
+    noToken(r);
+  }, 60_000);
 });

@@ -1,4 +1,4 @@
-// F-45 bootstrapOwner (identity LLD §4.3, S-2) against a real database. TP-2.1, TP-2.2, plus extra
+// F-45 bootstrapOwner (identity LLD §4.3, S-2, A-66) against a real database. TP-2.1, TP-2.2, plus extra
 // cases TP-2.2x. The CLI (F-46) is bootstrapOwnerCli.test.ts; the accept side (TP-2.3, TP-2.4) is
 // bootstrapAccept.test.ts.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
@@ -109,6 +109,9 @@ describe("TP-2.1: bootstrapOwner on an empty database", () => {
     expect((rows[0]?.["expires_at"] as Date).getTime()).toBe(
       NOW.add(INVITATION_TTL).epochMilliseconds,
     );
+    // A-66: the result names the inserted row and carries its expiry.
+    expect(r.invitationId).toBe(rows[0]?.["id"]);
+    expect(r.expiresAt.epochMilliseconds).toBe((rows[0]?.["expires_at"] as Date).getTime());
     expect(await emailJobs()).toEqual([]);
     expect(await ended()).toEqual([]);
   });
