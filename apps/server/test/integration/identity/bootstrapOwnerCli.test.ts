@@ -313,6 +313,9 @@ describe("TP-2.5x: F-46 step 8 (any other error) and step 9 (the container alway
     return { code, stdout, stderr, logs: written.join(""), closes };
   }
 
+  /** An error whose message holds a token-shaped canary, so logging the message would show. */
+  const canaryError = () => new Error(`canary-bmi_${"X".repeat(43)}`);
+
   const noToken = (r: Run) => {
     expect(r.stdout.join("\n")).not.toContain("bmi_");
     expect(r.stderr.join("\n")).not.toContain("bmi_");
@@ -321,7 +324,7 @@ describe("TP-2.5x: F-46 step 8 (any other error) and step 9 (the container alway
 
   it("TP-2.5x: boss.start rejects → exit 1, exactly one cli_failed log line with errorClass, nothing on stdout, close called once", async () => {
     const r = await direct(["--email", "Owner@X.com"], (c) => {
-      vi.spyOn(c.boss, "start").mockRejectedValue(new Error("queue unavailable"));
+      vi.spyOn(c.boss, "start").mockRejectedValue(canaryError());
     });
 
     expect(r.code).toBe(1);
@@ -337,7 +340,7 @@ describe("TP-2.5x: F-46 step 8 (any other error) and step 9 (the container alway
   it("TP-2.5x: the database failing inside F-45 (after the token exists) → exit 1, one cli_failed with errorClass, no bmi_ anywhere, close called once", async () => {
     const r = await direct(["--email", "Owner@X.com"], (c) => {
       // pg's connect() is overloaded (callback or promise); F-45 uses the promise form.
-      const refuse = () => Promise.reject(new Error("connection refused"));
+      const refuse = () => Promise.reject(canaryError());
       vi.spyOn(c.identity.deps.database.pool, "connect").mockImplementation(refuse as never);
     });
 
