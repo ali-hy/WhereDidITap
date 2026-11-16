@@ -55,6 +55,8 @@ export function describeFailure(err: unknown): {
     if (
       name === "ResetRefusedError" ||
       name === "PostgresNotReadyError" ||
+      // A-517
+      name === "NodeBinMissingError" ||
       name === "FxProviderError" ||
       // A-357
       name === "ObjectStoreError"
