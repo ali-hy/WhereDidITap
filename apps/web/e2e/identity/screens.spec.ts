@@ -455,7 +455,7 @@ test.describe("TP-3.59: axe with the account menu open (F-162, A-88)", () => {
     await expect(page.locator("main h1")).toHaveText(looseText(`Welcome, ${name}.`));
   }
 
-  /** Opens the menu; axe finds nothing; `main` isn't hidden; Escape closes it, focus on the trigger. */
+  /** Opens the menu; axe finds nothing; `main` isn't hidden; Escape, outside clicks and Settings (A-93). */
   async function expectAccessibleMenu(page: Page): Promise<void> {
     const trigger = accountMenuButton(page);
     await trigger.click();
@@ -479,13 +479,53 @@ test.describe("TP-3.59: axe with the account menu open (F-162, A-88)", () => {
 
     await expect(menu).toBeHidden();
     await expect(trigger).toBeFocused();
+
+    // A-93 (2): an outside click on a non-focusable spot of main returns focus to the trigger.
+    await trigger.click();
+    await expect(menu).toBeVisible();
+    const spot = await emptySpotOfMain(page);
+    await page.mouse.click(spot.x, spot.y);
+    await expect(menu).toBeHidden();
+    await expect(trigger).toBeFocused();
+
+    // A-93 (2): an outside click on a focusable element (the wordmark link) keeps focus there.
+    await trigger.click();
+    await expect(menu).toBeVisible();
+    const wordmark = page.getByRole("banner").getByRole("link", { name: "wDit" });
+    await wordmark.click();
+    await expect(menu).toBeHidden();
+    await expect(wordmark).toBeFocused();
+
+    // A-93 (1): Settings navigates; focus goes to the new page's h1 (P-F-216).
+    await trigger.click();
+    await expect(menu).toBeVisible();
+    await menu.getByRole("menuitem", { name: catalogText("Settings") }).click();
+    await expect(page).toHaveURL((u) => u.pathname === "/settings");
+    await expect(page.locator("main h1")).toHaveText(catalogText("Settings"));
+    await expect(page.locator("main h1")).toBeFocused();
+  }
+
+  /** A point inside `main` whose topmost element is `main` itself (nothing focusable under it). */
+  async function emptySpotOfMain(page: Page): Promise<{ x: number; y: number }> {
+    const spot = await page.locator("main").evaluate((main) => {
+      const box = main.getBoundingClientRect();
+      const bottom = Math.min(box.bottom, window.innerHeight) - 4;
+      for (let y = bottom; y > box.top; y -= 8) {
+        for (let x = box.left + 4; x < box.right; x += 8) {
+          if (document.elementFromPoint(x, y) === main) return { x, y };
+        }
+      }
+      return null;
+    });
+    if (spot === null) throw new Error("main has no empty spot in view");
+    return spot;
   }
 
   for (const mode of ["light", "dark"] as const) {
     test.describe(`${mode} mode`, () => {
       test.use({ colorScheme: mode });
 
-      test(`TP-3.59: ${mode} mode: with the account menu open, no axe violation and main not aria-hidden; Escape closes it with focus on the trigger`, async ({
+      test(`TP-3.59: ${mode} mode: with the account menu open, no axe violation and main not aria-hidden; Escape closes it with focus on the trigger; outside clicks and Settings move focus as A-93 says`, async ({
         page,
         request,
       }, testInfo) => {
@@ -498,7 +538,7 @@ test.describe("TP-3.59: axe with the account menu open (F-162, A-88)", () => {
     });
   }
 
-  test("TP-3.59: pseudo-RTL (an ar-XB user): with the account menu open, no axe violation and main not aria-hidden; Escape closes it with focus on the trigger", async ({
+  test("TP-3.59: pseudo-RTL (an ar-XB user): with the account menu open, no axe violation and main not aria-hidden; Escape closes it with focus on the trigger; outside clicks and Settings move focus as A-93 says", async ({
     page,
     request,
   }, testInfo) => {
