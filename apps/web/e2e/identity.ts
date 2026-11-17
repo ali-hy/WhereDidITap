@@ -5,16 +5,22 @@
 // - uniqueEmail(): a fresh address for a test's own user.
 // - createInvitation(request, body): POST /api/v1/__test/invitations → { token, invitationId }.
 // - signUpThroughUi(page, token, name): /invite#t=… → Use a password → Create account.
-import { randomUUID } from "node:crypto";
+// - createUser(request, opts): a user made through the API only (no session in the browser).
+// - submitSignIn(page, email, password, path): the S-3 sign-in form, submitted.
+// - signInByApi(request, email): auth.signIn with body delivery → the session's tokens.
+// - accountMenuButton(page), signOutFromMenu(page): F-162's account menu.
+import { randomInt, randomUUID } from "node:crypto";
 import type { APIRequestContext } from "@playwright/test";
 import { catalogText, expect, test as base, type Page } from "./fixtures.js";
 
 let perWorker = 0;
+/** A random start per worker process, so reruns against a reused stack don't reuse IPs. */
+const RUN_BASE = randomInt(0, 1 << 16);
 
 export const test = base.extend({
   extraHTTPHeaders: async ({ extraHTTPHeaders }, use, testInfo) => {
     perWorker += 1;
-    const n = perWorker + 1000 * testInfo.retry;
+    const n = (RUN_BASE + perWorker + 1000 * testInfo.retry) & 0xffff;
     const ip = `10.${String(testInfo.parallelIndex % 256)}.${String((n >> 8) & 255)}.${String(n & 255)}`;
     await use({ ...extraHTTPHeaders, "X-Forwarded-For": ip });
   },
@@ -99,4 +105,89 @@ export async function primaryCount(page: Page): Promise<number> {
       (els, fill) => els.filter((el) => getComputedStyle(el).backgroundColor === fill).length,
       accent,
     );
+}
+
+/** The X-Budmon-Client header of the e2e web build (build number 0). */
+export const WEB_CLIENT = { "X-Budmon-Client": "web/0" } as const;
+
+export interface TestUser {
+  email: string;
+  name: string;
+}
+
+/**
+ * A user created through the API only (invitation + invitations.accept with body delivery), so
+ * the browser has no session and no device cookie for it.
+ */
+export async function createUser(
+  request: APIRequestContext,
+  opts: { name?: string; locale?: "en" | "ar-XB" } = {},
+): Promise<TestUser> {
+  const email = uniqueEmail();
+  const name = opts.name ?? "Test Person";
+  const { token } = await createInvitation(request, { email });
+  const res = await request.post("/api/v1/invitations/accept", {
+    headers: WEB_CLIENT,
+    data: {
+      token,
+      displayName: name,
+      locale: opts.locale ?? "en",
+      timeZone: "UTC",
+      baseCurrency: "USD",
+      method: { kind: "password", password: E2E_PASSWORD },
+      tokenDelivery: "body",
+    },
+  });
+  expect(res.status(), await res.text()).toBe(200);
+  return { email, name };
+}
+
+/** Opens `path` (the sign-in page), fills Email and Password and presses Sign in. */
+export async function submitSignIn(
+  page: Page,
+  email: string,
+  password: string = E2E_PASSWORD,
+  path = "/sign-in",
+): Promise<void> {
+  await page.goto(path);
+  await expect(page.locator("main h1")).toHaveText(catalogText("Sign in"));
+  await expect(page.getByLabel(catalogText("Email"))).toBeVisible();
+  await page.getByLabel(catalogText("Email")).fill(email);
+  await page.getByLabel(catalogText("Password")).fill(password);
+  await page
+    .locator("main")
+    .getByRole("button", { name: catalogText("Sign in") })
+    .click();
+}
+
+export interface ApiSession {
+  accessToken: string;
+  refreshToken: string;
+}
+
+/** auth.signIn with body delivery through `request` (a session the browser doesn't hold). */
+export async function signInByApi(
+  request: APIRequestContext,
+  email: string,
+  password: string = E2E_PASSWORD,
+): Promise<ApiSession> {
+  const res = await request.post("/api/v1/auth/sign-in", {
+    headers: WEB_CLIENT,
+    data: { email, password, tokenDelivery: "body" },
+  });
+  expect(res.status(), await res.text()).toBe(200);
+  const body = (await res.json()) as { status: string; tokens: ApiSession | null };
+  expect(body.status).toBe("signed_in");
+  expect(body.tokens).not.toBeNull();
+  return body.tokens as ApiSession;
+}
+
+/** F-162's account menu trigger: the one button in the header. */
+export const accountMenuButton = (page: Page) => page.getByRole("banner").getByRole("button");
+
+/** Opens the account menu and chooses Sign out. */
+export async function signOutFromMenu(page: Page): Promise<void> {
+  await expect(accountMenuButton(page)).toBeVisible();
+  await accountMenuButton(page).click();
+  await page.getByRole("menuitem", { name: catalogText("Sign out") }).click();
 }
