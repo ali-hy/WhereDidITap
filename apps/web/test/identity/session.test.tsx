@@ -1,6 +1,6 @@
 // F-152 session store and SessionProvider, F-153 guards and safeNext, F-154 readFragmentToken
-// (identity LLD §4.14). TP-0.28 rows (a) to (m) and its S-3 rows (signOut, sessionEnded), plus
-// extra cases TP-0.28x.
+// (identity LLD §4.14). TP-0.28 rows (a) to (m) and its S-3 rows (signOut, sessionEnded; A-81 and
+// A-82 through main.tsx's wiring with F-150 and F-151), plus extra cases TP-0.28x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { render } from "@solidjs/testing-library";
 import { isRedirect } from "@tanstack/solid-router";
@@ -12,6 +12,8 @@ import { createApiClient } from "../../src/api/client.js";
 import { toAppError } from "../../src/api/errors.js";
 import { createQueryClient } from "../../src/api/queryClient.js";
 import { I18nContext, type I18n } from "../../src/i18n/useI18n.js";
+import { createAuthedFetch } from "../../src/identity/session/authedFetch.js";
+import { refreshWebSession } from "../../src/identity/session/refresh.js";
 import { readFragmentToken } from "../../src/identity/session/fragment.js";
 import { SessionProvider, useSession } from "../../src/identity/session/SessionProvider.js";
 import {
@@ -541,22 +543,6 @@ describe("TP-0.28 (S-3): signOut() and sessionEnded() (F-152)", () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it("TP-0.28x (S-3): signOut() with auth.signOut 401 UNAUTHENTICATED → the same as 200", async () => {
-    const { s, navigate, queryClient, storage } = await signedIn();
-    signOutRoute(() =>
-      HttpResponse.json(envelope("UNAUTHENTICATED", 401, "Authentication required"), {
-        status: 401,
-      }),
-    );
-
-    await s.signOut();
-
-    expect(s.status()).toBe("signed_out");
-    expect(storage.map.has(MARKER)).toBe(false);
-    expect(queryClient.getQueryData(SENTINEL)).toBeUndefined();
-    expect(navigate).toHaveBeenCalledWith("/sign-in");
-  });
-
   it("TP-0.28 (S-3): signOut() with auth.signOut failing (network) → the error thrown, the status still signed_in, the marker kept", async () => {
     const { s, navigate, storage } = await signedIn();
     signOutRoute(() => HttpResponse.error());
@@ -651,6 +637,148 @@ describe("TP-0.28 (S-3): signOut() and sessionEnded() (F-152)", () => {
 
     expect(s.status()).toBe("signed_in");
     expect(s.endedDuringBoot()).toBe(false);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+});
+
+// ---- S-3, A-81 and A-82: the store wired as main.tsx wires it (F-150, F-151, F-152) ----
+
+/** A LockManager that runs each callback at once (jsdom has none). */
+const passThroughLocks = {
+  request: (name: string, callback: (lock: unknown) => Promise<unknown>) =>
+    callback({ name, mode: "exclusive" }),
+} as unknown as LockManager;
+
+/**
+ * main.tsx's binding: the store's API client fetches through F-150, whose refresh is F-151 over a
+ * second client without F-150 and whose `onSessionEnded` calls `sessionEnded(location.pathname)`.
+ * `afterSessionEnded` runs right after each such call.
+ */
+function wiredStore(
+  storage: Pick<Storage, "getItem" | "setItem" | "removeItem">,
+  afterSessionEnded: () => void = () => undefined,
+) {
+  const navigate = vi.fn<(href: string) => void>();
+  const queryClient = createQueryClient();
+  const refreshClient = createApiClient({ buildNumber: 1 });
+  const onSessionEnded = vi.fn(() => {
+    s.sessionEnded(location.pathname);
+    afterSessionEnded();
+  });
+  const api = createApiClient({
+    buildNumber: 1,
+    fetch: createAuthedFetch(globalThis.fetch.bind(globalThis), {
+      refresh: () => refreshWebSession(refreshClient),
+      onSessionEnded,
+      locks: passThroughLocks,
+    }),
+  });
+  const s = createSessionStore({ api, queryClient, navigate, storage });
+  return { s, navigate, queryClient, onSessionEnded };
+}
+
+const unauthenticated = () =>
+  HttpResponse.json(envelope("UNAUTHENTICATED", 401, "Authentication required"), { status: 401 });
+const refreshInvalid = () =>
+  HttpResponse.json(envelope("REFRESH_INVALID", 401, "Refresh token invalid"), { status: 401 });
+const refreshed = () =>
+  HttpResponse.json({ tokens: null, accessExpiresAt: "2026-11-16T10:15:00.000Z" });
+
+/** Answers POST `path` with the scripted responses in turn (the last one repeats), counting requests. */
+function scriptedRoute(path: string, answers: (() => Response)[]): { readonly n: number } {
+  const seen = { n: 0 };
+  server.use(
+    http.post(`*${path}`, () => {
+      seen.n += 1;
+      const answer = answers[Math.min(seen.n, answers.length) - 1];
+      if (answer === undefined) throw new Error(`no answer scripted for ${path}`);
+      return answer();
+    }),
+  );
+  return seen;
+}
+
+describe("TP-0.28 (S-3, A-81, A-82): signOut() and sessionEnded() through F-150", () => {
+  async function wiredSignedIn() {
+    const storage = mapStorage({ [MARKER]: "1" });
+    const made = wiredStore(storage);
+    await made.s.boot();
+    expect(made.s.status()).toBe("signed_in");
+    made.queryClient.setQueryData(SENTINEL, 1);
+    return { ...made, storage };
+  }
+
+  it("TP-0.28 (S-3, A-81): signOut() whose auth/sign-out answers 401 UNAUTHENTICATED, the refresh 200 and the retried sign-out 200 → signed_out, the marker removed, the cache cleared, navigate('/sign-in') only (no reason)", async () => {
+    const { s, navigate, queryClient, storage, onSessionEnded } = await wiredSignedIn();
+    const signOuts = scriptedRoute("/api/v1/auth/sign-out", [
+      unauthenticated,
+      () => HttpResponse.json({ ok: true }),
+    ]);
+    const refreshes = scriptedRoute("/api/v1/auth/refresh", [refreshed]);
+
+    await s.signOut();
+
+    expect(signOuts.n).toBe(2);
+    expect(refreshes.n).toBe(1);
+    expect(onSessionEnded).not.toHaveBeenCalled();
+    expect(s.status()).toBe("signed_out");
+    expect(storage.map.has(MARKER)).toBe(false);
+    expect(queryClient.getQueryData(SENTINEL)).toBeUndefined();
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith("/sign-in");
+  });
+
+  it("TP-0.28 (S-3, A-81): signOut() whose auth/sign-out answers 401 UNAUTHENTICATED and the refresh REFRESH_INVALID → the same local sign-out; sessionEnded runs during signOut but doesn't navigate (no reason=ended)", async () => {
+    const { s, navigate, queryClient, storage, onSessionEnded } = await wiredSignedIn();
+    const signOuts = scriptedRoute("/api/v1/auth/sign-out", [unauthenticated]);
+    const refreshes = scriptedRoute("/api/v1/auth/refresh", [refreshInvalid]);
+
+    await expect(s.signOut()).resolves.toBeUndefined();
+
+    expect(signOuts.n).toBe(1);
+    expect(refreshes.n).toBe(1);
+    expect(onSessionEnded).toHaveBeenCalledTimes(1);
+    expect(s.status()).toBe("signed_out");
+    expect(storage.map.has(MARKER)).toBe(false);
+    expect(queryClient.getQueryData(SENTINEL)).toBeUndefined();
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith("/sign-in");
+  });
+
+  it("TP-0.28 (S-3, A-82): sessionEnded during the boot probe (me.get 401, the refresh REFRESH_INVALID) removes the other queries but keeps the in-flight ['me'] probe, which still settles signed_out; no navigate", async () => {
+    const storage = mapStorage({ [MARKER]: "1" });
+    let atSessionEnded: Record<string, unknown> | undefined;
+    const { s, navigate, queryClient, onSessionEnded } = wiredStore(storage, () => {
+      atSessionEnded = {
+        status: s.status(),
+        probeKept:
+          queryClient.getQueryCache().find({ queryKey: ["me"], exact: true }) !== undefined,
+        sentinel: queryClient.getQueryData(SENTINEL),
+        marker: storage.map.has(MARKER),
+        endedDuringBoot: s.endedDuringBoot(),
+      };
+    });
+    queryClient.setQueryData(SENTINEL, 1);
+    script = ["unauthenticated"];
+    const refreshes = scriptedRoute("/api/v1/auth/refresh", [refreshInvalid]);
+
+    const booted = s.boot();
+
+    // A cleared cache cancels the probe (it settles `unavailable` or never): wait on the status.
+    await vi.waitFor(() => {
+      expect(s.status()).toBe("signed_out");
+    });
+    await booted;
+    expect(onSessionEnded).toHaveBeenCalledTimes(1);
+    expect(atSessionEnded).toEqual({
+      status: "loading",
+      probeKept: true,
+      sentinel: undefined,
+      marker: false,
+      endedDuringBoot: true,
+    });
+    expect(meRequests).toBe(1);
+    expect(refreshes.n).toBe(1);
     expect(navigate).not.toHaveBeenCalled();
   });
 });

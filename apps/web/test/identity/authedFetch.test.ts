@@ -46,8 +46,11 @@ interface SeenCall {
   init: RequestInit | undefined;
 }
 
-/** The inner fetch: records each call (its body read in full) and answers with `answer(n)`. */
-function innerFetch(answer: (call: SeenCall, n: number) => Response) {
+/**
+ * The inner fetch: records each call (its body read in full) and answers with `answer(n)`. A
+ * promise holds the response back until it resolves.
+ */
+function innerFetch(answer: (call: SeenCall, n: number) => Response | Promise<Response>) {
   const calls: SeenCall[] = [];
   const fn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const req = input instanceof Request ? input : new Request(input, init);
@@ -175,6 +178,102 @@ describe("TP-0.27: createAuthedFetch (F-150)", () => {
     expect(a.status).toBe(200);
     expect(b.status).toBe(200);
     expect(calls).toHaveLength(4);
+    expect(onSessionEnded).not.toHaveBeenCalled();
+  });
+
+  it("TP-0.27 (A-81): 401 UNAUTHENTICATED on /api/v1/auth/sign-out with refresh → true: refreshed under the 'budmon-refresh' lock, then retried once with the same body bytes and init; the retry's response is returned", async () => {
+    const { locks, names } = fakeLocks();
+    const { inner, calls } = innerFetch((_c, n) =>
+      n === 1 ? unauthenticated() : ok({ ok: true }),
+    );
+    const refresh = vi.fn(() => Promise.resolve(true));
+    const onSessionEnded = vi.fn();
+    const authed = createAuthedFetch(inner, { refresh, onSessionEnded, locks });
+
+    const res = await authed(post("/api/v1/auth/sign-out", {}), INIT);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      expect(call).toMatchObject({
+        url: "http://localhost/api/v1/auth/sign-out",
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+    }
+    expect(calls[1]?.init).toEqual(INIT);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(names).toEqual(["budmon-refresh"]);
+    expect(onSessionEnded).not.toHaveBeenCalled();
+  });
+
+  it("TP-0.27x (A-81): 401 UNAUTHENTICATED on /api/v1/auth/sign-out with refresh → false: onSessionEnded is called and the original 401 is returned (no retry)", async () => {
+    const { locks } = fakeLocks();
+    const { inner, calls } = innerFetch(() => unauthenticated());
+    const refresh = vi.fn(() => Promise.resolve(false));
+    const onSessionEnded = vi.fn();
+    const authed = createAuthedFetch(inner, { refresh, onSessionEnded, locks });
+
+    const res = await authed(post("/api/v1/auth/sign-out", {}), INIT);
+
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { code: string }).code).toBe("UNAUTHENTICATED");
+    expect(calls).toHaveLength(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(onSessionEnded).toHaveBeenCalledTimes(1);
+  });
+
+  it("TP-0.27 (A-81): 401 UNAUTHENTICATED on /api/v1/auth/refresh is returned untouched: no refresh, no retry, no session end", async () => {
+    const { locks } = fakeLocks();
+    const { inner, calls } = innerFetch(() => unauthenticated());
+    const refresh = vi.fn(() => Promise.resolve(true));
+    const onSessionEnded = vi.fn();
+    const authed = createAuthedFetch(inner, { refresh, onSessionEnded, locks });
+
+    const res = await authed(post("/api/v1/auth/refresh", { tokenDelivery: "cookie" }), INIT);
+
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { code: string }).code).toBe("UNAUTHENTICATED");
+    expect(calls).toHaveLength(1);
+    expect(refresh).not.toHaveBeenCalled();
+    expect(onSessionEnded).not.toHaveBeenCalled();
+  });
+
+  it("TP-0.27 (A-79, B-1): X is sent; Y's 401 starts a refresh that resolves true; only then X's 401 arrives → X is retried once with the same body, refresh is called once in total, no session end, and X resolves with its retry's response", async () => {
+    const X = "http://localhost/api/v1/me";
+    const Y = "http://localhost/api/v1/me/sessions";
+    const { locks } = fakeLocks();
+    const xFirst = deferred<Response>();
+    const { inner, calls } = innerFetch((call) => {
+      const nth = calls.filter((c) => c.url === call.url).length;
+      if (call.url === X) return nth === 1 ? xFirst.promise : ok({ request: "X retry" });
+      return nth === 1 ? unauthenticated() : ok({ request: "Y retry" });
+    });
+    const refreshed = deferred<boolean>();
+    const refresh = vi.fn(() => refreshed.promise);
+    const onSessionEnded = vi.fn();
+    const authed = createAuthedFetch(inner, { refresh, onSessionEnded, locks });
+
+    const x = authed(post("/api/v1/me", { name: "X" }), INIT);
+    await vi.waitFor(() => {
+      expect(calls.map((c) => c.url)).toEqual([X]);
+    });
+    const y = authed(post("/api/v1/me/sessions", { name: "Y" }), INIT);
+    await vi.waitFor(() => {
+      expect(refresh).toHaveBeenCalledTimes(1);
+    });
+    refreshed.resolve(true);
+    expect(await (await y).json()).toEqual({ request: "Y retry" });
+    xFirst.resolve(unauthenticated());
+    const res = await x;
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ request: "X retry" });
+    expect(calls.map((c) => c.url)).toEqual([X, Y, Y, X]);
+    expect(calls[3]?.body).toBe(JSON.stringify({ name: "X" }));
+    expect(calls[3]?.init).toEqual(INIT);
+    expect(refresh).toHaveBeenCalledTimes(1);
     expect(onSessionEnded).not.toHaveBeenCalled();
   });
 
