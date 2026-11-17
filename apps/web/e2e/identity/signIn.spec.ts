@@ -1,6 +1,6 @@
 // S-3 sign-in, sign-out and session end in the browser (identity LLD §8.1, F-150, F-152, F-153,
 // F-155, F-159's signedInAsOther state, F-162's account menu; A-74, A-76). TP-1.31, TP-3.28 (E),
-// TP-3.40, TP-3.42, TP-3.43, TP-3.47, plus extra cases ending in "x".
+// TP-3.40, TP-3.42, TP-3.43, TP-3.47, TP-3.58 (A-81), plus extra cases ending in "x".
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { randomInt } from "node:crypto";
 import {
@@ -370,6 +370,47 @@ test.describe("TP-3.47: sign in, sign out, next (F-155, F-162)", () => {
 
     await expect(page.locator("main h1")).toHaveText(catalogText("Sign in"));
     await expect(accountMenuButton(page)).toHaveCount(0);
+  });
+});
+
+test.describe("TP-3.58: sign-out after the access token expired (F-150, F-152, F-53; A-81)", () => {
+  test("TP-3.58: without budmon_at, Sign out answers 401, refreshes, then signs out (200); lands on /sign-in without reason; no session cookies remain; the old refresh cookie replayed answers REFRESH_INVALID", async ({
+    page,
+    request,
+  }) => {
+    const { email, name } = await createUser(request, { name: "Idle Sign Out" });
+    await submitSignIn(page, email);
+    await expect(page.locator("main h1")).toHaveText(looseText(`Welcome, ${name}.`));
+    expect(await jarCookie(page, "budmon_at"), "the access cookie after sign-in").toBeDefined();
+    const oldRefresh = (await jarCookie(page, "budmon_rt"))?.value;
+    expect(oldRefresh, "the refresh cookie after sign-in").toBeDefined();
+    // As the access cookie's 15-minute max-age would.
+    await page.context().clearCookies({ name: "budmon_at" });
+    expect(await jarCookie(page, "budmon_at")).toBeUndefined();
+    const seen: string[] = [];
+    page.on("response", (r) => {
+      const path = new URL(r.url()).pathname;
+      if (path === "/api/v1/auth/sign-out" || path === "/api/v1/auth/refresh") {
+        seen.push(`${path.slice("/api/v1/".length)} ${String(r.status())}`);
+      }
+    });
+
+    await signOutFromMenu(page);
+
+    await expect(page).toHaveURL(/\/sign-in$/);
+    await expect(page.locator("main h1")).toHaveText(catalogText("Sign in"));
+    expect(here(page).search.has("reason")).toBe(false);
+    await expect
+      .poll(() => seen)
+      .toEqual(["auth/sign-out 401", "auth/refresh 200", "auth/sign-out 200"]);
+    expect(await jarCookie(page, "budmon_at")).toBeUndefined();
+    expect(await jarCookie(page, "budmon_rt")).toBeUndefined();
+    const replay = await request.post("/api/v1/auth/refresh", {
+      headers: { ...WEB_CLIENT, cookie: `budmon_rt=${String(oldRefresh)}` },
+      data: { tokenDelivery: "cookie" },
+    });
+    expect(replay.status()).toBe(401);
+    expect(((await replay.json()) as { code: string }).code).toBe("REFRESH_INVALID");
   });
 });
 
