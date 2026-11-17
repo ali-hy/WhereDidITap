@@ -3,6 +3,7 @@ import "@budmon/contract/web";
 import { resolveLocale } from "@budmon/shared";
 import { QueryClientProvider } from "@tanstack/solid-query";
 import { RouterProvider } from "@tanstack/solid-router";
+import { Show } from "solid-js";
 import { render } from "solid-js/web";
 import { markClientUpdateRequired } from "./api/clientUpdate.js";
 import { createApiClient } from "./api/client.js";
@@ -11,9 +12,12 @@ import { ApiProvider } from "./api/ApiProvider.js";
 import { I18nProvider, supportedLocales } from "./i18n/I18nProvider.js";
 import "./styles/app.css";
 import { initWebSentry } from "./observability/sentry.js";
+import { ConfirmItsYouDialog } from "./identity/components/ConfirmItsYou.js";
 import { SessionProvider } from "./identity/session/SessionProvider.js";
+import { createAuthedFetch } from "./identity/session/authedFetch.js";
+import { refreshWebSession } from "./identity/session/refresh.js";
 import { createSessionStore, type SessionStore } from "./identity/session/sessionStore.js";
-import { createAppRouter } from "./router.js";
+import { BootScreen, createAppRouter, routerBooted } from "./router.js";
 import { AppBanners } from "./ui/AppBanners.js";
 import { Toaster } from "./ui/Toaster.js";
 import { initTheme } from "./ui/theme.js";
@@ -32,20 +36,32 @@ initWebSentry({
 // 1b. The mode was set before first paint; this follows the system while the setting is system.
 initTheme();
 
-// 2.
+// 2. The store, the router and the authed fetch refer to each other, so they are bound late.
 const queryClient = createQueryClient();
+// Assigned after the client that calls it; see 4.
+// eslint-disable-next-line prefer-const -- the client's closure needs the name before the store exists
+let session!: SessionStore;
+const refreshClient = createApiClient({
+  buildNumber,
+  onClientUpdateRequired: markClientUpdateRequired,
+});
 export const api = createApiClient({
   buildNumber,
   onClientUpdateRequired: markClientUpdateRequired,
+  fetch: createAuthedFetch(window.fetch.bind(window), {
+    refresh: () => refreshWebSession(refreshClient),
+    onSessionEnded: () => {
+      session.sessionEnded(location.pathname);
+    },
+  }),
 });
 
 // 3. The user's preference comes later from identity; for now the browser's language.
 const initialLocale = resolveLocale(navigator.language, supportedLocales(), "en");
 
 // 4.
-// The store and the router refer to each other, so the router is bound late.
 const navigation: { go: (href: string) => void } = { go: () => {} };
-const session: SessionStore = createSessionStore({
+session = createSessionStore({
   api,
   queryClient,
   navigate: (href) => {
@@ -65,8 +81,12 @@ if (root !== null) {
           <ApiProvider api={api}>
             <AppBanners buildNumber={buildNumber} />
             <SessionProvider store={session}>
+              <Show when={!routerBooted()}>
+                <BootScreen />
+              </Show>
               <RouterProvider router={router} />
             </SessionProvider>
+            <ConfirmItsYouDialog />
             <Toaster />
             <div id="live-polite" class="sr-only" aria-live="polite" aria-atomic="true" />
             <div id="live-assertive" class="sr-only" aria-live="assertive" aria-atomic="true" />

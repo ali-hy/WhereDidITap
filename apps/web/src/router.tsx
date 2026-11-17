@@ -4,6 +4,7 @@ import {
   createRoute,
   createRouter,
   Outlet,
+  useRouterState,
   type AnyRoute,
   type ErrorComponentProps,
 } from "@tanstack/solid-router";
@@ -13,6 +14,9 @@ import { HomeFirstRun } from "./identity/components/HomeFirstRun.js";
 import { InvitePage } from "./identity/pages/InvitePage.js";
 import { PrivacyNoticePage } from "./identity/pages/PrivacyNoticePage.js";
 import { SignInPage } from "./identity/pages/SignInPage.js";
+import { SecurityPage } from "./identity/settings/SecurityPage.js";
+import { SettingsHome } from "./identity/settings/SettingsHome.js";
+import { SettingsLayout } from "./identity/settings/SettingsLayout.js";
 import { requireSignedIn, requireSignedOut, safeNext } from "./identity/routes/guards.js";
 import { useSession } from "./identity/session/SessionProvider.js";
 import type { SessionStore } from "./identity/session/sessionStore.js";
@@ -24,16 +28,37 @@ import { ErrorFallback } from "./ui/ErrorFallback.js";
 /** The layout's frame; the error fallback renders inside it too (§4.18, Q-D2). */
 function Shell(props: { children: JSX.Element }): JSX.Element {
   const session = useSession();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  // Settings has room for two columns from 960 px.
+  const width = () => (pathname().startsWith("/settings") ? "max-w-[72rem]" : "max-w-[40rem]");
   return (
     <>
       <AppHeader />
       <main
         id="main"
         aria-busy={session.status() === "loading" ? "true" : undefined}
-        class="mx-auto max-w-[40rem] px-4 pt-8 pb-8 min-[600px]:px-6"
+        class={`mx-auto ${width()} px-4 pt-8 pb-8 min-[600px]:px-6`}
       >
         {props.children}
       </main>
+    </>
+  );
+}
+
+/** True once the router has resolved its first location. */
+const [routerBooted, setRouterBooted] = createSignal(false);
+export { routerBooted };
+
+/** The first load's frame: the header and an empty busy `main` until the guards settle. */
+export function BootScreen(): JSX.Element {
+  return (
+    <>
+      <AppHeader />
+      <main
+        id="main"
+        aria-busy="true"
+        class="mx-auto max-w-[40rem] px-4 pt-8 pb-8 min-[600px]:px-6"
+      />
     </>
   );
 }
@@ -86,6 +111,21 @@ export async function createAppRouter(opts: { session: SessionStore }) {
     path: "/",
     component: HomeFirstRun,
   });
+  const settingsRoute = createRoute({
+    getParentRoute: () => signedIn,
+    path: "/settings",
+    component: SettingsLayout,
+  });
+  const settingsHomeRoute = createRoute({
+    getParentRoute: () => settingsRoute,
+    path: "/",
+    component: SettingsHome,
+  });
+  const securityRoute = createRoute({
+    getParentRoute: () => settingsRoute,
+    path: "/security",
+    component: SecurityPage,
+  });
   const signInRoute = createRoute({
     getParentRoute: () => signedOut,
     path: "/sign-in",
@@ -109,7 +149,10 @@ export async function createAppRouter(opts: { session: SessionStore }) {
   });
 
   const children: AnyRoute[] = [
-    signedIn.addChildren([indexRoute]),
+    signedIn.addChildren([
+      indexRoute,
+      settingsRoute.addChildren([settingsHomeRoute, securityRoute]),
+    ]),
     signedOut.addChildren([signInRoute]),
     inviteRoute,
     privacyRoute,
@@ -150,6 +193,7 @@ export async function createAppRouter(opts: { session: SessionStore }) {
   // never for search, hash or invalidate()), focus the new page's h1 and announce its text.
   let pathname: string | undefined;
   router.subscribe("onResolved", (event) => {
+    setRouterBooted(true);
     const next = event.toLocation.pathname;
     const previous = pathname;
     pathname = next;

@@ -4,6 +4,7 @@ import type { QueryClient } from "@tanstack/solid-query";
 import { createSignal, type Accessor } from "solid-js";
 import type { ApiClient } from "../../api/client.js";
 import { toAppError } from "../../api/errors.js";
+import { safeNext } from "../routes/guards.js";
 
 export type Me = Awaited<ReturnType<ApiClient["me"]["get"]>>;
 export type SessionStatus = "loading" | "signed_in" | "signed_out" | "unavailable";
@@ -21,6 +22,10 @@ export interface SessionStore {
   retry(): Promise<void>;
   /** Writes the marker, then re-reads `me`. */
   markSignedIn(): Promise<void>;
+  /** Ends the session on the server first; throws, staying signed in, when that fails. */
+  signOut(options?: { navigate?: boolean }): Promise<void>;
+  /** F-150's `onSessionEnded`: the session is gone without the user asking. */
+  sessionEnded(next: string): void;
 }
 
 type Storage_ = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -127,6 +132,33 @@ export function createSessionStore(deps: {
       writeMarker();
       setEndedDuringBoot(false);
       await probe();
+    },
+    async signOut(options) {
+      try {
+        await deps.api.auth.signOut({});
+      } catch (e) {
+        const app = toAppError(e);
+        if (!(app.kind === "defined" && app.key === "UNAUTHENTICATED")) throw e;
+      }
+      removeMarker();
+      deps.queryClient.clear();
+      setMe(null);
+      settle("signed_out");
+      if (options?.navigate !== false) deps.navigate("/sign-in");
+    },
+    sessionEnded(next) {
+      removeMarker();
+      setMe(null);
+      // During the boot probe the guard that awaits `ready()` does the one redirect. The probe's
+      // own query stays, so its 401 still reaches `probe`.
+      if (status() === "loading") {
+        deps.queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== "me" });
+        setEndedDuringBoot(true);
+        return;
+      }
+      deps.queryClient.clear();
+      settle("signed_out");
+      deps.navigate(`/sign-in?reason=ended&next=${safeNext(next)}`);
     },
   };
 }

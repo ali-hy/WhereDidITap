@@ -349,4 +349,105 @@ export const identityMessages = defineMessages({
     id: "setup.privacyNewTab",
     defaultMessage: "(opens in a new tab)",
   },
+  signinEmail: {
+    id: "signin.email",
+    defaultMessage: "Email",
+  },
+  signinPassword: {
+    id: "signin.password",
+    defaultMessage: "Password",
+  },
+  signinReuse: {
+    id: "signin.reuse",
+    defaultMessage: "For your security, you've been signed out. Sign in again.",
+  },
+  formEmailRequired: {
+    id: "form.email.required",
+    defaultMessage: "Enter your email.",
+  },
+  formEmailInvalid: {
+    id: "form.email.invalid",
+    defaultMessage: "Enter an email address like name@example.com.",
+  },
+  formPasswordRequired: {
+    id: "form.password.required",
+    defaultMessage: "Enter your password.",
+  },
+  inviteSignedInAsOther: {
+    id: "invite.signedInAsOther",
+    defaultMessage: "You're signed in as {email}. Sign out to accept this invitation.",
+  },
+  inviteSignOutContinue: {
+    id: "invite.signOutContinue",
+    defaultMessage: "Sign out and continue",
+  },
+  settingsTitle: {
+    id: "settings.title",
+    defaultMessage: "Settings",
+  },
+  settingsSecurity: {
+    id: "settings.security",
+    defaultMessage: "Sign-in & security",
+  },
+  menuAccount: {
+    id: "menu.account",
+    defaultMessage: "Account",
+  },
+  menuSettings: {
+    id: "menu.settings",
+    defaultMessage: "Settings",
+  },
+  menuSignOut: {
+    id: "menu.signOut",
+    defaultMessage: "Sign out",
+  },
+  sessionsTitle: {
+    id: "sessions.title",
+    defaultMessage: "Where you're signed in",
+  },
+  sessionsThisDevice: {
+    id: "sessions.thisDevice",
+    defaultMessage: "This device",
+  },
+  sessionsSignedIn: {
+    id: "sessions.signedIn",
+    defaultMessage: "Signed in {date}",
+  },
+  sessionsLastActive: {
+    id: "sessions.lastActive",
+    defaultMessage: "Last active {relative}",
+  },
+  sessionsActiveNow: {
+    id: "sessions.activeNow",
+    defaultMessage: "Active now",
+  },
+  sessionsSignOut: {
+    id: "sessions.signOut",
+    defaultMessage: "Sign out",
+  },
+  sessionsSignOutOthers: {
+    id: "sessions.signOutOthers",
+    defaultMessage: "Sign out of all other devices",
+  },
+  sessionsSignedOutOthers: {
+    id: "sessions.signedOutOthers",
+    defaultMessage:
+      "{n, plural, one {Signed out of # other device.} other {Signed out of # other devices.}}",
+  },
+  confirmTitle: {
+    id: "confirm.title",
+    defaultMessage: "Confirm it's you",
+  },
+  confirmSubmit: {
+    id: "confirm.submit",
+    defaultMessage: "Confirm",
+  },
+  confirmCancel: {
+    id: "confirm.cancel",
+    defaultMessage: "Cancel",
+  },
+  confirmPassword: {
+    id: "confirm.password",
+    defaultMessage: "Password",
+  },
 });

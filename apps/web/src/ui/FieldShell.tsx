@@ -7,6 +7,8 @@ export interface FieldProps {
   label: string;
   hint?: string | undefined;
   error?: string | undefined;
+  /** Not editable, still focusable and read by screen readers (a pending submit). */
+  readonly?: boolean | undefined;
 }
 
 /** `<id>-hint` then `<id>-error`, each only when shown. */

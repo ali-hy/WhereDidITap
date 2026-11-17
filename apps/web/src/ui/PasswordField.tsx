@@ -24,6 +24,7 @@ export function PasswordField(props: PasswordFieldProps): JSX.Element {
           class={`${inputClasses(props.error !== undefined)} w-full pe-24`}
           value={props.value}
           autocomplete={props.autocomplete}
+          readOnly={props.readonly}
           aria-describedby={describedBy(props)}
           aria-invalid={props.error === undefined ? undefined : "true"}
           onInput={(e) => {

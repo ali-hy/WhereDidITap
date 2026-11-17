@@ -25,6 +25,7 @@ import { SignedOutColumn } from "../../ui/SignedOutColumn.js";
 import { TextField } from "../../ui/TextField.js";
 import { setDocumentTitle } from "../../ui/a11y.js";
 import { FormErrorSummary } from "../../ui/forms.js";
+import { showToast } from "../../ui/Toaster.js";
 import {
   defaultCurrencyFor,
   defaultTimeZone,
@@ -71,6 +72,7 @@ type Problem =
 
 type View =
   | { name: "checking" }
+  | { name: "signedInAsOther" }
   | { name: "join" }
   | { name: "setup" }
   | { name: "problem"; problem: Problem };
@@ -173,8 +175,15 @@ export function InvitePage(): JSX.Element {
   let sequence = 0;
   let accepting = false;
 
+  /** A signed-in visitor has nothing to do here unless the link previews. */
+  const goHome = async (): Promise<void> => {
+    clearStoredToken();
+    await navigate({ to: "/", replace: true });
+  };
+
   const check = async (): Promise<void> => {
     const mine = sequence;
+    const signedIn = session.status() === "signed_in";
     setView({ name: "checking" });
     if (token === null) {
       showProblem({ kind: "incomplete" });
@@ -184,25 +193,25 @@ export function InvitePage(): JSX.Element {
       const result = await api.invitations.preview({ token });
       if (mine !== sequence) return;
       setPreview(result);
-      setView({ name: "join" });
+      setView({ name: signedIn ? "signedInAsOther" : "join" });
     } catch (e) {
       if (mine !== sequence) return;
-      showProblem(problemOf(e));
+      const problem = problemOf(e);
+      if (signedIn && problem.kind !== "failed") {
+        await goHome();
+        return;
+      }
+      showProblem(problem);
     }
   };
 
-  /** Reads the link, then previews it; a signed-in visitor just goes home. */
+  /** Reads the link, then previews it. A signed-in visitor sees a preview only for a usable link. */
   const begin = async (): Promise<void> => {
     sequence += 1;
     const mine = sequence;
     const fromFragment = readFragmentToken("t");
     const state = await session.ready();
     if (mine !== sequence) return;
-    if (state === "signed_in") {
-      clearStoredToken();
-      await navigate({ to: "/", replace: true });
-      return;
-    }
     token = null;
     if (fromFragment === null) {
       token = loadStoredToken();
@@ -210,7 +219,24 @@ export function InvitePage(): JSX.Element {
       storeToken(fromFragment);
       token = fromFragment;
     }
+    if (state === "signed_in" && (token === null || !TOKEN_PATTERN.test(token))) {
+      await goHome();
+      return;
+    }
     // A malformed or empty fragment token is "incomplete": nothing is sent or stored.
+    await check();
+  };
+
+  /** Ends the visitor's session without leaving the page, then previews the link again. */
+  const signOutAndContinue = async (): Promise<void> => {
+    try {
+      await session.signOut({ navigate: false });
+    } catch (e) {
+      const { descriptor, values } = identityErrorMessage(toAppError(e), "read");
+      showToast({ tone: "error", message: t(descriptor, values) });
+      return;
+    }
+    sequence += 1;
     await check();
   };
 
@@ -285,6 +311,19 @@ export function InvitePage(): JSX.Element {
             <div class="mt-4">
               <Skeleton rows={3} />
             </div>
+          </div>
+        </Match>
+        <Match when={view().name === "signedInAsOther"}>
+          <h1 tabindex="-1" class="text-2xl font-semibold text-fg">
+            {t(m.inviteTitle)}
+          </h1>
+          <p class="mt-3 text-fg [overflow-wrap:anywhere]">
+            {t(m.inviteSignedInAsOther, { email: session.me()?.email ?? "" })}
+          </p>
+          <div class="mt-6" data-button-row>
+            <Button variant="primary" fullWidth onClick={() => void signOutAndContinue()}>
+              {t(m.inviteSignOutContinue)}
+            </Button>
           </div>
         </Match>
         <Match when={view().name === "join"}>
@@ -677,9 +716,11 @@ function SetupForm(props: {
           <span class="sr-only"> {t(m.setupPrivacyNewTab)}</span>
         </a>
       </p>
-      <Button variant="primary" type="submit" fullWidth busy={busy()}>
-        {t(m.setupSubmit)}
-      </Button>
+      <div data-button-row>
+        <Button variant="primary" type="submit" fullWidth busy={busy()}>
+          {t(m.setupSubmit)}
+        </Button>
+      </div>
     </form>
   );
 }
