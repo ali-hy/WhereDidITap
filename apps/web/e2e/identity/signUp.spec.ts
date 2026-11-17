@@ -651,7 +651,7 @@ test.describe("TP-1.46: the sign-in shell's privacy link (A-47)", () => {
       await link.elementHandle(),
     );
     expect(after).toBe(true);
-    expect(await primaryCount(page)).toBe(0);
+    // The link isn't a primary button (S-3's Sign in is the page's one primary, A-42).
     await expect(link).not.toHaveCSS("background-color", await accentRgb(page));
 
     await link.click();

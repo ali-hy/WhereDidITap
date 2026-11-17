@@ -88,12 +88,17 @@ for (const mode of ["light", "dark"] as const) {
   test.describe(`TP-1.40: S-1's screens in ${mode} mode`, () => {
     test.use({ colorScheme: mode });
 
-    test(`TP-1.40: the sign-in shell (${mode}): no primary button (A-42)`, async ({ page }) => {
+    test(`TP-1.40: the sign-in page (${mode}): one primary, Sign in (A-42: S-3's form brings it)`, async ({
+      page,
+    }) => {
       await page.goto("/sign-in");
       await expect(page.locator("main h1")).toHaveText(catalogText("Sign in"));
+      const signIn = page.locator("main").getByRole("button", { name: catalogText("Sign in") });
+      await expect(signIn).toBeVisible();
 
       await expectCommonRules(page);
-      expect(await primaryCount(page)).toBe(0);
+      expect(await primaryCount(page)).toBe(1);
+      await expect(signIn).toHaveCSS("background-color", await accentRgb(page));
       await expectNoOverflowAt360(page);
     });
 

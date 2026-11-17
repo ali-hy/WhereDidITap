@@ -10,7 +10,9 @@ import {
   looseText,
   signInByApi,
   signUpThroughUi,
+  jarCookie,
   test,
+  toastWith,
   uniqueEmail,
   WEB_CLIENT,
   type Page,
@@ -65,9 +67,7 @@ function refreshCookieOf(res: APIResponse): string | undefined {
 
 /** The refresh cookie the browser holds now (unprefixed on localhost, A-76). */
 async function jarRefreshToken(page: Page): Promise<string | undefined> {
-  const origin = new URL(page.url()).origin;
-  const cookies = await page.context().cookies(`${origin}/api/v1/auth/refresh`);
-  return cookies.find((c) => c.name === "budmon_rt")?.value;
+  return (await jarCookie(page, "budmon_rt"))?.value;
 }
 
 /**
@@ -323,7 +323,7 @@ test.describe("TP-3.53x: the sessions section (F-164, J-10)", () => {
       .getByRole("button", { name: catalogText("Sign out of all other devices") })
       .click();
 
-    await expect(page.getByText(looseText("Signed out of 2 other devices."))).toBeVisible();
+    await expect(toastWith(page, looseText("Signed out of 2 other devices."))).toBeVisible();
     await expect(signOutButtons(page)).toHaveCount(0);
     await expect(page.locator("main").getByText(catalogText("This device"))).toHaveCount(1);
     await expect(

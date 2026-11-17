@@ -10,7 +10,7 @@
 // - signInByApi(request, email): auth.signIn with body delivery → the session's tokens.
 // - accountMenuButton(page), signOutFromMenu(page): F-162's account menu (A-76).
 import { randomInt, randomUUID } from "node:crypto";
-import type { APIRequestContext } from "@playwright/test";
+import type { APIRequestContext, Locator } from "@playwright/test";
 import { catalogText, expect, test as base, type Page } from "./fixtures.js";
 
 let perWorker = 0;
@@ -105,6 +105,24 @@ export async function primaryCount(page: Page): Promise<number> {
       (els, fill) => els.filter((el) => getComputedStyle(el).backgroundColor === fill).length,
       accent,
     );
+}
+
+/**
+ * The on-screen toast showing `text`. The toaster also copies each message into the sr-only
+ * `#live-polite` / `#live-assertive` regions (A-400), which are left out here.
+ */
+export function toastWith(page: Page, text: RegExp): Locator {
+  return page.getByText(text).and(page.locator(":not(#live-polite):not(#live-assertive)"));
+}
+
+/**
+ * The browser's cookie `name` for `page`'s host. Reads the whole jar: `context.cookies(url)` drops
+ * Secure cookies for an http URL whose host isn't `localhost` (such as 127.0.0.1), though Chrome
+ * stores and sends them.
+ */
+export async function jarCookie(page: Page, name: string) {
+  const host = new URL(page.url()).hostname;
+  return (await page.context().cookies()).find((c) => c.name === name && c.domain === host);
 }
 
 /** The X-Budmon-Client header of the e2e web build (build number 0; A-76). */

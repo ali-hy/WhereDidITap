@@ -240,7 +240,8 @@ test.describe("TP-1.54: a signed-in visitor on /invite without a usable invitati
     const retry = page.locator("main").getByRole("button", { name: catalogText("Try again") });
     await expect(retry).toBeVisible();
     expect(new URL(page.url()).pathname).toBe("/invite");
-    expect(await page.evaluate((k) => sessionStorage.getItem(k), STORED)).toBe(other.token);
+    // The stored format isn't fixed by the LLD; only that the token is kept.
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), STORED)).toContain(other.token);
 
     failing = false;
     await retry.click();

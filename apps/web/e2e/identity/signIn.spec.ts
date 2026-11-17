@@ -10,11 +10,13 @@ import {
   createUser,
   E2E_PASSWORD,
   expect,
+  jarCookie,
   looseText,
   signOutFromMenu,
   signUpThroughUi,
   submitSignIn,
   test,
+  toastWith,
   uniqueEmail,
   WEB_CLIENT,
   type Page,
@@ -203,7 +205,8 @@ test.describe("TP-3.47: sign in, sign out, next (F-155, F-162)", () => {
 
     await submitSignIn(page, email, E2E_PASSWORD, "/sign-in?next=/settings");
 
-    await expect(page).toHaveURL(/\/settings$/);
+    // On the path, not the whole URL: /sign-in?next=/settings also ends in "/settings".
+    await expect(page).toHaveURL((u) => u.pathname === "/settings");
     expect(here(page).path).toBe("/settings");
     await expect(page.locator("main h1")).toHaveText(catalogText("Settings"));
     const origin = new URL(page.url()).origin;
@@ -338,7 +341,7 @@ test.describe("TP-3.47: sign in, sign out, next (F-155, F-162)", () => {
     await signOutFromMenu(page);
 
     await expect(
-      page.getByText(looseText("wDit is temporarily unavailable. Try again in a few minutes.")),
+      toastWith(page, looseText("wDit is temporarily unavailable. Try again in a few minutes.")),
     ).toBeVisible();
     expect(here(page).path).toBe("/");
     await expect(page.locator("main h1")).toHaveText(looseText(`Welcome, ${name}.`));
@@ -371,20 +374,15 @@ test.describe("TP-3.47: sign in, sign out, next (F-155, F-162)", () => {
 });
 
 test.describe("TP-3.28 (E): the web device cookie survives sign-out (P-9)", () => {
-  test("TP-3.28 (E): signed in once in the browser, signed out (the device cookie kept), 30 wrong attempts from other IPs exhaust the unknown-device bucket, and the browser's next sign-in still succeeds", async ({
+  test("TP-3.28 (E): signed in once in the browser, signed out (the device cookie kept), 29 wrong attempts from other IPs (with the first sign-in, 30) exhaust the unknown-device bucket, and the browser's next sign-in still succeeds", async ({
     page,
     request,
   }) => {
     const { email, name } = await createUser(request, { name: "Device Cookie" });
     await submitSignIn(page, email);
     await expect(page.locator("main h1")).toHaveText(looseText(`Welcome, ${name}.`));
-    const origin = new URL(page.url()).origin;
-    const deviceCookie = async () =>
-      (await page.context().cookies(`${origin}/api/v1/auth/sign-in`)).find(
-        (c) =>
-          // On localhost only the unprefixed name is set (A-76).
-          c.name === "budmon_dv",
-      );
+    // On localhost only the unprefixed name is set (A-76).
+    const deviceCookie = () => jarCookie(page, "budmon_dv");
     const before = await deviceCookie();
     expect(before, "the device cookie after the first sign-in").toBeDefined();
     expect(before?.path).toBe("/api/v1");
@@ -394,13 +392,15 @@ test.describe("TP-3.28 (E): the web device cookie survives sign-out (P-9)", () =
 
     expect((await deviceCookie())?.value).toBe(before?.value);
 
-    // Other IPs without the cookie: one per attempt, so only the per-email bucket fills up.
+    // Other IPs without the cookie: one per attempt, so only the per-email bucket fills up. The
+    // browser's first sign-in (no device cookie yet) was hit 1 of signin.email-unknown-device's 30
+    // (counted before the password check, F-50), so 29 wrong attempts exhaust it.
     const base = randomInt(0, 1 << 20);
     const ip = (n: number) => {
       const k = base + n;
       return `172.${String(16 + ((k >> 16) & 15))}.${String((k >> 8) & 255)}.${String(k & 255)}`;
     };
-    for (let i = 0; i < 30; i += 1) {
+    for (let i = 0; i < 29; i += 1) {
       const res = await request.post("/api/v1/auth/sign-in", {
         headers: { ...WEB_CLIENT, "X-Forwarded-For": ip(i) },
         data: { email, password: "wrong password", tokenDelivery: "body" },
@@ -408,7 +408,7 @@ test.describe("TP-3.28 (E): the web device cookie survives sign-out (P-9)", () =
       expect(res.status(), `wrong attempt ${String(i + 1)}`).toBe(401);
     }
     const blocked = await request.post("/api/v1/auth/sign-in", {
-      headers: { ...WEB_CLIENT, "X-Forwarded-For": ip(30) },
+      headers: { ...WEB_CLIENT, "X-Forwarded-For": ip(29) },
       data: { email, password: E2E_PASSWORD, tokenDelivery: "body" },
     });
     expect(blocked.status()).toBe(429);

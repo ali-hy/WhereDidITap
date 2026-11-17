@@ -12,7 +12,6 @@ import {
   expect,
   looseText,
   openInvitation,
-  signInByApi,
   signUpThroughUi,
   submitSignIn,
   test,
@@ -276,11 +275,10 @@ test.describe("TP-3.46: pseudo-RTL (ar-XB; A-75)", () => {
     request,
   }, testInfo) => {
     test.skip(testInfo.project.name !== "pseudo-rtl", PSEUDO_ONLY);
+    // createUser's accept already makes one session; the browser's sign-in is the second.
     const { email } = await createUser(request, { locale: "ar-XB", name: "RTL Person" });
     await submitSignIn(page, email);
     await expect(page).toHaveURL(/\/$/);
-    // A second session, so the sessions section shows its actions too.
-    await signInByApi(request, email);
 
     await open(page, { path: "/settings/security", h1: "Sign-in & security" });
     const signOutOthers = page
