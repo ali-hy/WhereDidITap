@@ -145,6 +145,8 @@ class SignInViewModel
             viewModelScope.launch {
                 try {
                     guard.discardAndProceed(held)
+                    // Stored now: nothing is left to release.
+                    pending = null
                     finish(held, savePassword, onSignedIn)
                 } catch (e: CancellationException) {
                     throw e

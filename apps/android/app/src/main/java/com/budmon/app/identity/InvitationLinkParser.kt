@@ -16,15 +16,20 @@ object InvitationLinkParser {
     private val token = Regex("^bmi_[A-Za-z0-9_-]{43}$")
     private val link = Regex("https?://\\S+")
 
-    /** A bare token, or the first link in [text] that points at this server's `invite` page. */
+    /**
+     * A bare token, or the first link in [text] that points at this server's `invite` page. A host in
+     * [hostAliases] counts as the server's when the scheme and port match.
+     */
     fun parse(
         text: String,
         apiBaseUrl: HttpUrl,
+        hostAliases: Set<String> = emptySet(),
     ): ParseResult {
         val trimmed = text.trim()
         if (token.matches(trimmed)) return ParseResult.Token(trimmed)
         val url = link.find(trimmed)?.value?.toHttpUrlOrNull() ?: return ParseResult.NotAnInvitation
-        if (url.scheme != apiBaseUrl.scheme || url.host != apiBaseUrl.host || url.port != apiBaseUrl.port) {
+        val sameHost = url.host == apiBaseUrl.host || url.host in hostAliases
+        if (url.scheme != apiBaseUrl.scheme || !sameHost || url.port != apiBaseUrl.port) {
             return ParseResult.OtherServer
         }
         if (url.encodedPath != apiBaseUrl.encodedPath + "invite") return ParseResult.NotAnInvitation

@@ -56,6 +56,8 @@ class TokenRefreshAuthenticator
         ): Request? {
             if (response.priorResponse != null || response.code != HTTP_UNAUTHORIZED) return null
             if (!refreshable(response.request.url)) return null
+            // A request with its own token isn't ours to refresh.
+            if (response.request.tag(ExplicitAuth::class.java) != null) return null
             val error = ApiErrorParser.parse(response.code, response.peekBody(PEEK_MAX).bytes())
             if (error !is ApiError.Defined || error.key != "UNAUTHENTICATED") return null
             val used = response.request.header("Authorization")

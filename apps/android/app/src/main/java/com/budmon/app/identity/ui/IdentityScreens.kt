@@ -61,6 +61,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.core.text.BidiFormatter
+import com.budmon.app.BuildConfig
 import com.budmon.app.R
 import com.budmon.app.core.error.ErrorMessages
 import com.budmon.app.core.error.Operation
@@ -218,6 +219,8 @@ fun InvitationLinkRoute(
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
+    // The emulator reaches the host's server at 10.0.2.2, while invitation links name localhost.
+    val aliases = if (BuildConfig.DEBUG && apiBaseUrl.host == "10.0.2.2") setOf("localhost", "127.0.0.1") else emptySet()
     val clipboard = LocalClipboardManager.current
     var text by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<Int?>(null) }
@@ -234,7 +237,7 @@ fun InvitationLinkRoute(
                 if (!isOnline) {
                     R.string.invite_link_offline
                 } else {
-                    when (val parsed = InvitationLinkParser.parse(text, apiBaseUrl)) {
+                    when (val parsed = InvitationLinkParser.parse(text, apiBaseUrl, aliases)) {
                         is ParseResult.Token -> {
                             onToken(parsed.value)
                             null

@@ -25,7 +25,8 @@ const FOCUSABLE = "a[href],button,input,select,textarea,summary,[tabindex]";
 const ITEM =
   "flex min-h-11 cursor-pointer items-center rounded-control px-3 text-fg outline-none data-[highlighted]:bg-accent-tint data-[highlighted]:text-on-accent-tint";
 
-export function AccountMenu(): JSX.Element {
+/** [mount] gives the element the menu is mounted in (the header landmark). */
+export function AccountMenu(props: { mount?: () => HTMLElement | undefined }): JSX.Element {
   const { t } = useI18n();
   const session = useSession();
   const navigate = useNavigate();
@@ -35,12 +36,19 @@ export function AccountMenu(): JSX.Element {
   let outsideTarget: EventTarget | null = null;
   // Set when an item navigates: the new page's h1 takes focus.
   let leaving = false;
+  // Set when an item's page is the current one: the h1 takes focus instead.
+  let focusHeading = false;
 
   /** Focus returns to the trigger, unless the person clicked something focusable or navigated. */
   const restoreFocus = (event: Event): void => {
     event.preventDefault();
     const target = outsideTarget;
     outsideTarget = null;
+    if (focusHeading) {
+      focusHeading = false;
+      document.querySelector<HTMLElement>("main h1")?.focus();
+      return;
+    }
     if (leaving) {
       leaving = false;
       return;
@@ -72,7 +80,7 @@ export function AccountMenu(): JSX.Element {
         </span>
       </DropdownMenu.Trigger>
       {/* Inside the header landmark; the body is the fallback when there is none. */}
-      <DropdownMenu.Portal mount={document.querySelector("header") as Node}>
+      <DropdownMenu.Portal mount={props.mount?.() as Node}>
         <DropdownMenu.Content
           onInteractOutside={(e) => {
             outsideTarget = e.target;
@@ -83,6 +91,15 @@ export function AccountMenu(): JSX.Element {
           <DropdownMenu.Item
             class={ITEM}
             onSelect={() => {
+              if (location.pathname === "/settings") {
+                // The menu may close before or after this runs: either way the h1 gets focus last.
+                focusHeading = true;
+                setTimeout(() => {
+                  focusHeading = false;
+                  document.querySelector<HTMLElement>("main h1")?.focus();
+                }, 0);
+                return;
+              }
               leaving = true;
               void navigate({ to: "/settings" });
             }}

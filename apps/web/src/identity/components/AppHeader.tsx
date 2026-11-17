@@ -22,8 +22,14 @@ function homeClick(event: MouseEvent, navigate: ((to: string) => void) | undefin
 /** [width] is the Tailwind max-width class of the page's `main`, so the two line up. */
 export function AppHeader(props: { width?: string; navigate?: (to: string) => void }): JSX.Element {
   const session = useSession();
+  let header: HTMLElement | undefined;
   return (
-    <header class="border-b border-line bg-surface">
+    <header
+      ref={(el) => {
+        header = el;
+      }}
+      class="border-b border-line bg-surface"
+    >
       <div
         class={`mx-auto flex min-h-14 ${props.width ?? "max-w-[40rem]"} items-center justify-between px-4 min-[600px]:px-6`}
       >
@@ -38,7 +44,7 @@ export function AppHeader(props: { width?: string; navigate?: (to: string) => vo
             : {})}
         />
         <Show when={session.status() === "signed_in"}>
-          <AccountMenu />
+          <AccountMenu mount={() => header} />
         </Show>
       </div>
     </header>

@@ -7,6 +7,7 @@ import com.budmon.app.core.network.ApiError
 import com.budmon.app.core.network.ApiErrorParser
 import com.budmon.app.core.network.apiRoot
 import com.budmon.app.core.update.UpdateRepository
+import com.budmon.app.identity.net.ExplicitAuth
 import com.budmon.app.identity.net.RefreshFailedException
 import com.budmon.app.identity.store.StoredSession
 import com.budmon.app.identity.store.TokenStore
@@ -145,7 +146,7 @@ constructor(
     /** [accessToken], when given, authorises this call instead of the stored session. */
     suspend fun getMe(accessToken: String? = null): Me {
         val request = Request.Builder().url(url("me")).get()
-        if (accessToken != null) request.header("Authorization", "Bearer $accessToken")
+        if (accessToken != null) request.header("Authorization", "Bearer $accessToken").tag(ExplicitAuth::class.java, ExplicitAuth)
         val o = call(request.build())
         return Me(
             id = o.str("id"),
@@ -286,7 +287,7 @@ constructor(
 
     private fun signOutRequest(accessToken: String?): Request {
         val request = Request.Builder().url(url("auth/sign-out")).post("{}".toRequestBody(jsonType))
-        if (accessToken != null) request.header("Authorization", "Bearer $accessToken")
+        if (accessToken != null) request.header("Authorization", "Bearer $accessToken").tag(ExplicitAuth::class.java, ExplicitAuth)
         return request.build()
     }
 
