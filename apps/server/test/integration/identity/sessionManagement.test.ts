@@ -115,8 +115,10 @@ describe("TP-3.19: signing out", () => {
     const s = await sessionFactory(h, { userId: user.id, now: NOW });
     const other = await sessionFactory(h, { userId: user.id, now: NOW });
 
-    await call(api.app, "POST", "/auth/sign-out", {}, as(s));
+    const res = await call(api.app, "POST", "/auth/sign-out", {}, as(s));
 
+    expect(res.status).toBe(200);
+    expect((await sessionRow(s.sessionId))["revoke_reason"]).toBe("sign_out");
     expect((await sessionRow(other.sessionId))["revoked_at"]).toBeNull();
   });
 });

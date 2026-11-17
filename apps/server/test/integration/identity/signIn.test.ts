@@ -466,8 +466,13 @@ describe("TP-3.5: rehash on a parameter change", () => {
     const user = await passwordUser();
     const before = (await credentialsRepo.getPasswordHash(h, user.id))?.hash;
 
-    await signIn({ email: user.email, password: FACTORY_PASSWORD, tokenDelivery: "body" });
+    const res = await signIn({
+      email: user.email,
+      password: FACTORY_PASSWORD,
+      tokenDelivery: "body",
+    });
 
+    expect(res.status).toBe(200);
     expect((await credentialsRepo.getPasswordHash(h, user.id))?.hash).toBe(before);
   });
 });
