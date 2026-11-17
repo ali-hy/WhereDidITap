@@ -1,16 +1,20 @@
-// F-207 SessionViewModel (identity LLD §4.15, A-37). TP-3.49 rows (a) to (i) (S-3 adds (k), (l));
-// row (j) is SessionNotLoadedTest. Plus extra cases TP-3.49x.
+// F-207 SessionViewModel (identity LLD §4.15, A-37, A-68). TP-3.49 rows (a) to (i), and S-3's
+// rows (k) to (m); row (j) is SessionNotLoadedTest. Plus extra cases TP-3.49x.
 //
 // Setup per TP-3.49: the real TokenStore over an in-memory key (resetAll() first; "clear()" is
-// checked as read() == null); Clock.fixed; a MockK ConnectivityMonitor over a MutableStateFlow; the
-// ViewModel built with runTest's backgroundScope, then onForeground(). Rows (a) to (c) and (i) use
-// MockWebServer and the real AuthRepository; rows (d) to (h) a MockK AuthRepository whose getMe()
-// follows a script, each answer after PROBE_MS of virtual time.
+// checked as read() == null); Clock.fixed; a MockK ConnectivityMonitor over a MutableStateFlow; a real
+// SessionEvents; the ViewModel built as SessionViewModel(repository, tokenStore, connectivity, clock,
+// sessionEvents, backgroundScope) (S-3, A-68), then onForeground(). Rows (a) to (c), (i), (k) and (l)
+// use MockWebServer and the real AuthRepository ((k) and (l) over F-202 and F-203, as AppModule's
+// client); rows (d) to (h) a MockK AuthRepository whose getMe() follows a script, each answer after
+// PROBE_MS of virtual time.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.identity
 
 import com.budmon.app.core.network.ApiError
 import com.budmon.app.core.network.ConnectivityMonitor
+import com.budmon.app.identity.net.AuthInterceptor
+import com.budmon.app.identity.net.TokenRefreshAuthenticator
 import com.budmon.app.identity.store.TokenStore
 import io.mockk.coEvery
 import io.mockk.every
@@ -19,8 +23,11 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -49,6 +56,7 @@ class SessionViewModelTest {
     private val online = MutableStateFlow(true)
     private val connectivity = mockk<ConnectivityMonitor> { every { isOnline } returns online }
     private val server = MockWebServer()
+    private val sessionEvents = SessionEvents()
 
     /** The scripted getMe(): each call takes the next answer (the last one repeats). */
     private val script = ArrayDeque<suspend () -> Me>()
@@ -82,9 +90,24 @@ class SessionViewModelTest {
     }
 
     private fun TestScope.viewModel(repository: AuthRepository): SessionViewModel =
-        SessionViewModel(repository, store, connectivity, clock, backgroundScope).also { it.onForeground() }
+        SessionViewModel(repository, store, connectivity, clock, sessionEvents, backgroundScope).also { it.onForeground() }
 
     private fun realRepository() = AuthRepository(OkHttpClient(), server.url("/"), store, mockk(relaxed = true))
+
+    /** The real repository over F-202 and F-203 (S-3), as AppModule's client. */
+    private fun refreshingRepository(): AuthRepository {
+        val base = server.url("/")
+        val authenticator = TokenRefreshAuthenticator(store, OkHttpClient(), base, sessionEvents)
+        val client = OkHttpClient.Builder().addInterceptor(AuthInterceptor(store, base)).authenticator(authenticator).build()
+        return AuthRepository(client, base, store, mockk(relaxed = true))
+    }
+
+    /** Every state [vm] takes from now on. */
+    private fun TestScope.statesOf(vm: SessionViewModel): List<SessionUiState> {
+        val states = mutableListOf<SessionUiState>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.state.toList(states) }
+        return states
+    }
 
     private suspend fun SessionViewModel.settled(): SessionUiState =
         state.first { it !is SessionUiState.Loading }
@@ -303,5 +326,97 @@ class SessionViewModelTest {
         idleFor(PROBE_MS)
         assertEquals(1, probes)
         assertEquals(SessionUiState.SignedIn(ME), next(vm, after = SessionUiState.Loading))
+    }
+
+    // ---- S-3 rows (A-68) ----
+
+    @Test
+    fun `TP-3_49 (k) me 401, then refresh 200 and me 200 - SignedIn(me), never SignedOut`() = runTest {
+        val path = PathDispatcher()
+        val fresh = wireTokens('N')
+        path.answers[PATH_ME] = { request ->
+            if (request.authorization == "Bearer ${fresh.accessToken}") jsonResponse(meJson()) else unauthenticated()
+        }
+        path.answers[PATH_REFRESH] = { jsonResponse(refreshJson(fresh)) }
+        server.dispatcher = path
+        server.start()
+        store.save(storedSession(now.plusSeconds(3600)))
+
+        val vm = viewModel(refreshingRepository())
+        val states = statesOf(vm)
+
+        assertEquals(SessionUiState.SignedIn(ME), vm.settled())
+        runCurrent()
+        assertEquals(1, path.of(PATH_REFRESH).size)
+        assertEquals(fresh.accessToken, store.read()?.accessToken)
+        assertEquals("never SignedOut: $states", true, states.none { it is SessionUiState.SignedOut })
+    }
+
+    @Test
+    fun `TP-3_49 (l) me 401, then refresh REFRESH_INVALID - SignedOut(Ended) once, tokens cleared`() = runTest {
+        val path = PathDispatcher()
+        path.answers[PATH_ME] = { unauthenticated() }
+        path.answers[PATH_REFRESH] = { definedError("REFRESH_INVALID", 401) }
+        server.dispatcher = path
+        server.start()
+        store.save(storedSession(now.plusSeconds(3600)))
+
+        val vm = viewModel(refreshingRepository())
+        val states = statesOf(vm)
+
+        assertEquals(SessionUiState.SignedOut(SignedOutReason.Ended), vm.settled())
+        runCurrent()
+        assertNull(store.read())
+        assertEquals(SessionUiState.SignedOut(SignedOutReason.Ended), vm.state.value)
+        assertEquals(
+            "SignedOut(Ended) once: $states",
+            1,
+            states.count { it == SessionUiState.SignedOut(SignedOutReason.Ended) },
+        )
+    }
+
+    @Test
+    fun `TP-3_49 (l) SessionEvent Ended emitted while SignedIn - SignedOut(Ended)`() = runTest {
+        server.enqueue(MockResponse().setHeader("Content-Type", "application/json").setBody(meJson()))
+        server.start()
+        store.save(storedSession(now.plusSeconds(3600)))
+        val vm = viewModel(realRepository())
+        assertEquals(SessionUiState.SignedIn(ME), vm.settled())
+        runCurrent()
+
+        sessionEvents.emit(SessionEvent.Ended)
+        runCurrent()
+
+        assertEquals(SessionUiState.SignedOut(SignedOutReason.Ended), vm.state.value)
+    }
+
+    @Test
+    fun `TP-3_49x SessionEvent Ended while SignedIn(null) - SignedOut(Ended), and the backoff timer stops`() = runTest {
+        store.save(storedSession(now.plusSeconds(3600)))
+        script.add(fails(ApiError.Network))
+        val vm = viewModel(scripted)
+        assertEquals(SessionUiState.SignedIn(null, ApiError.Network), vm.settled())
+        runCurrent()
+
+        sessionEvents.emit(SessionEvent.Ended)
+        runCurrent()
+        idleFor(10 * 60 * 1_000)
+
+        assertEquals(SessionUiState.SignedOut(SignedOutReason.Ended), vm.state.value)
+        assertEquals("no probe after the session ended", 1, probes)
+    }
+
+    @Test
+    fun `TP-3_49 (m) onSignedOut while SignedIn(me) - SignedOut(None)`() = runTest {
+        server.enqueue(MockResponse().setHeader("Content-Type", "application/json").setBody(meJson()))
+        server.start()
+        store.save(storedSession(now.plusSeconds(3600)))
+        val vm = viewModel(realRepository())
+        assertEquals(SessionUiState.SignedIn(ME), vm.settled())
+
+        vm.onSignedOut()
+        runCurrent()
+
+        assertEquals(SessionUiState.SignedOut(SignedOutReason.None), vm.state.value)
     }
 }

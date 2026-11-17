@@ -1,12 +1,20 @@
 // F-212 InviteViewModel over F-204 AuthRepository and MockWebServer (identity LLD §4.15, A-37,
 // A-41, A-58). TP-1.34's ViewModel rows, TP-1.47's formError, TP-1.55's Android part, plus TP-1.34x.
+// S-3 setup (A-69, §8.2): InviteViewModel(repository, guard) with TP-3.48's guard (a MockK OutboxDao
+// over `entries`, empty unless a test fills it, and a relaxed MockK OutboxRepository); the store is
+// written only after guard.complete.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.identity
 
 import com.budmon.app.R
 import com.budmon.app.core.error.UiText
+import com.budmon.app.core.outbox.OutboxDao
+import com.budmon.app.core.outbox.OutboxRepository
 import com.budmon.app.identity.store.TokenStore
+import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.runBlocking
@@ -41,6 +49,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 class InviteViewModelTest {
     private val server = MockWebServer()
     private val requests = CopyOnWriteArrayList<Pair<String, String>>()
+    private val authorizations = CopyOnWriteArrayList<Pair<String, String?>>()
     private val store: TokenStore = testTokenStore()
     private val token = "bmi_" + "Ab-_cdEFghIJklMNopQRstUVwxYZ0123456789-_abc"
     private val invitedEmail = "mona@example.com"
@@ -84,10 +93,12 @@ class InviteViewModelTest {
         }
         answers["/api/v1/invitations/accept"] = { acceptOk() }
         answers["/api/v1/me"] = { json(meJson()) }
+        answers["/api/v1/auth/sign-out"] = { json("""{"ok":true}""") }
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.path ?: ""
                 requests.add(path to request.body.readUtf8())
+                authorizations.add(path to request.getHeader("Authorization"))
                 return answers[path]?.invoke() ?: MockResponse().setResponseCode(404)
             }
         }
@@ -100,11 +111,26 @@ class InviteViewModelTest {
         Dispatchers.resetMain()
     }
 
+    /** The outbox's entry count, as countAll() reports it; deleteAll() empties it. */
+    private var entries = 0
+    private val dao = mockk<OutboxDao> {
+        coEvery { countAll() } answers { entries }
+        coEvery { deleteAll() } answers {
+            val n = entries
+            entries = 0
+            n
+        }
+    }
+    private val outbox = mockk<OutboxRepository>(relaxed = true)
+
     private fun TestScope.viewModel(): InviteViewModel {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         val repository = AuthRepository(OkHttpClient(), server.url("/"), store, mockk(relaxed = true))
-        return InviteViewModel(repository)
+        val guard = OutboxOwnerGuard(dao, store, outbox, repository)
+        return InviteViewModel(repository, guard)
     }
+
+    private val acceptedAccess = "bma_${"A".repeat(43)}"
 
     private fun TestScope.await(what: String, condition: () -> Boolean) =
         eventually(what, step = { testScheduler.advanceUntilIdle() }, condition = condition)
@@ -148,6 +174,8 @@ class InviteViewModelTest {
         assertEquals(invitedEmail, store.lastEmail())
         assertEquals(deviceToken, store.deviceTokenFor(invitedEmail))
         assertEquals("the password is cleared after success", "", vm.password)
+        assertEquals(ME.id, store.outboxOwnerUserId())
+        verify(exactly = 1) { outbox.kick() }
     }
 
     @Test
@@ -184,10 +212,10 @@ class InviteViewModelTest {
         assertEquals("violet staircase umbrella", vm.password)
     }
 
-    // ---- Review B-7 (A-37, A-41, A-45) ----
+    // ---- Review B-7 (A-37, A-41, A-45), changed in S-3 (A-69) ----
 
     @Test
-    fun `TP-1_34x accept 200 then me 503 - onDone(null), and the device token, last email and session with userId empty are stored`() =
+    fun `TP-1_34x accept 200 then me 503 - Problem(Used(recent = true)), no onDone, a sign-out with the pending token, nothing stored`() =
         runTest {
             answers["/api/v1/me"] = { unavailable() }
             val vm = viewModel()
@@ -195,18 +223,80 @@ class InviteViewModelTest {
             vm.name = "Mona Hassan"
             vm.password = "violet staircase umbrella"
             var called = false
-            var done: Me? = ME
 
-            vm.submit { me ->
-                called = true
-                done = me
-            }
-            await("onDone") { called }
+            vm.submit { called = true }
+            await("Problem") { vm.state is InviteState.Problem }
 
-            assertNull(done)
-            assertEquals(deviceToken, store.deviceTokenFor(invitedEmail))
-            assertEquals(invitedEmail, store.lastEmail())
-            assertEquals("", store.read()?.userId)
+            assertEquals(InviteProblem.Used(recent = true), (vm.state as InviteState.Problem).problem)
+            assertEquals(false, called)
+            await("the best-effort sign-out") { authorizations.any { it.first == "/api/v1/auth/sign-out" } }
+            assertEquals(
+                "Bearer $acceptedAccess",
+                authorizations.single { it.first == "/api/v1/auth/sign-out" }.second,
+            )
+            assertNull(store.read())
+            verify(exactly = 0) { outbox.kick() }
+        }
+
+    // ---- S-3: the outbox owner check after an accept (A-69, §8.2) ----
+
+    /** Set-up filled in, with 3 entries owned by another user; submit asks about them. */
+    private fun TestScope.askingAboutOtherEntries(onDone: (Me) -> Unit): InviteViewModel {
+        entries = 3
+        runBlocking { store.setOutboxOwnerUserId("0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a99") }
+        val vm = viewModel()
+        toSetUp(vm)
+        vm.name = "Mona Hassan"
+        vm.password = "violet staircase umbrella"
+        vm.submit(onDone)
+        await("ownerDialog") { vm.ownerDialog != null }
+        return vm
+    }
+
+    @Test
+    fun `TP-1_34x another user's 3 entries - ownerDialog 3, no onDone, nothing stored`() = runTest {
+        var called = false
+
+        val vm = askingAboutOtherEntries { called = true }
+
+        assertEquals(3, vm.ownerDialog)
+        assertEquals(false, called)
+        assertNull(store.read())
+        verify(exactly = 0) { outbox.kick() }
+    }
+
+    @Test
+    fun `TP-1_34x discardOtherUsersEntries - entries deleted, owner and session stored, onDone(me)`() = runTest {
+        val vm = askingAboutOtherEntries { }
+        var done: Me? = null
+
+        vm.discardOtherUsersEntries { me -> done = me }
+        await("onDone") { done != null }
+
+        assertEquals(ME, done)
+        coVerify(exactly = 1) { dao.deleteAll() }
+        assertEquals(ME.id, store.outboxOwnerUserId())
+        assertEquals(ME.id, store.read()?.userId)
+        verify(exactly = 1) { outbox.kick() }
+    }
+
+    @Test
+    fun `TP-1_34x keepOtherUsersEntries - Problem(Used(recent = true)), a sign-out with the pending token, entries and owner kept`() =
+        runTest {
+            val vm = askingAboutOtherEntries { }
+
+            vm.keepOtherUsersEntries()
+            await("Problem") { vm.state is InviteState.Problem }
+            await("the sign-out") { authorizations.any { it.first == "/api/v1/auth/sign-out" } }
+
+            assertEquals(InviteProblem.Used(recent = true), (vm.state as InviteState.Problem).problem)
+            assertEquals(
+                "Bearer $acceptedAccess",
+                authorizations.single { it.first == "/api/v1/auth/sign-out" }.second,
+            )
+            coVerify(exactly = 0) { dao.deleteAll() }
+            assertEquals("0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a99", store.outboxOwnerUserId())
+            assertNull(store.read())
         }
 
     private fun problemCases(): List<Pair<() -> MockResponse, (InviteProblem) -> Boolean>> = listOf(

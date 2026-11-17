@@ -1,6 +1,7 @@
 // S-1's Android screens and the link route (identity LLD §8.2, A-49's signatures; F-208, F-211, F-212;
 // A-45 texts, A-47 privacy links, A-48 link-screen strings, A-60 ask lines). TP-1.47, plus TP-1.47x.
 // Screens get fake lambdas that count their calls; InvitationLinkRoute runs with https://budmon.com/.
+// SignInScreen has S-3's signature (§8.2, A-70): the form's state and callbacks before `modifier`.
 // TP-1.47's ViewModel part (formError with no inviter) is in InviteViewModelTest.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.identity.ui
@@ -35,6 +36,7 @@ import com.budmon.app.R
 import com.budmon.app.core.error.UiText
 import com.budmon.app.identity.InvitationPreview
 import com.budmon.app.identity.InviteProblem
+import com.budmon.app.identity.SignInFormState
 import com.budmon.app.identity.SignUpOptions
 import com.budmon.app.identity.SignedOutReason
 import com.budmon.app.ui.components.pixelsOf
@@ -189,7 +191,16 @@ class InviteScreensTest {
         val privacy = Counter()
         val haveLink = Counter()
         show {
-            SignInScreen(reason = SignedOutReason.None, isOnline = true, onHaveLink = haveLink.call, onPrivacy = privacy.call)
+            SignInScreen(
+                reason = SignedOutReason.None,
+                isOnline = true,
+                form = SignInFormState("", "", null, null, null, busy = false, ownerDialog = null),
+                onEmailChange = {},
+                onPasswordChange = {},
+                onSubmit = {},
+                onHaveLink = haveLink.call,
+                onPrivacy = privacy.call,
+            )
         }
 
         button(R.string.signin_privacy).performClick()
