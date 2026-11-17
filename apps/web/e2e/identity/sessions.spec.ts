@@ -1,8 +1,9 @@
 // S-3 sessions in the browser (identity LLD §8.1, F-25, F-150, F-152, F-164's sessions section,
 // J-10). TP-3.41 (a session revoked elsewhere), TP-3.50 and TP-3.51 (concurrent refreshes, option
-// (a)), plus extra cases ending in "x" for the sessions section.
+// (a)), TP-3.60 (focus after a revocation, A-89), plus extra cases ending in "x" for the sessions
+// section.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
-import type { APIRequestContext, APIResponse, Request, Route } from "@playwright/test";
+import type { APIRequestContext, APIResponse, Locator, Request, Route } from "@playwright/test";
 import {
   catalogText,
   createInvitation,
@@ -332,5 +333,74 @@ test.describe("TP-3.53x: the sessions section (F-164, J-10)", () => {
         .getByRole("button", { name: catalogText("Sign out of all other devices") }),
     ).toHaveCount(0);
     expect(new URL(page.url()).pathname).toBe("/settings/security");
+  });
+});
+
+test.describe("TP-3.60: focus after a revocation (F-164, A-89)", () => {
+  const main = (page: Page) => page.locator("main");
+  /** The rows' Sign out buttons in DOM order (this device's row has none). */
+  const rowSignOuts = (page: Page) =>
+    main(page).getByRole("button", { name: catalogText("Sign out") });
+  const sessionsHeading = (page: Page) =>
+    main(page).getByRole("heading", { level: 2, name: catalogText("Where you're signed in") });
+  const activeTag = (page: Page) => page.evaluate(() => document.activeElement?.tagName ?? null);
+
+  /** Clicks `button` and waits for me.sessions.revoke's 200. */
+  async function revokeWith(page: Page, button: Locator): Promise<void> {
+    const revoked = page.waitForResponse(
+      (r) => new URL(r.url()).pathname === "/api/v1/me/sessions/revoke",
+    );
+    await button.click();
+    expect((await revoked).status()).toBe(200);
+  }
+
+  test("TP-3.60: three other sessions: a middle row's Sign out → focus on the next row's Sign out; the last row's → the previous row's; Sign out of all other devices → the h2 'Where you're signed in'; never BODY", async ({
+    page,
+    request,
+  }) => {
+    // The browser's sign-up is the only session so far; three more through auth.signIn.
+    const { email } = await signedInUser(page, request, "Focus Keeper");
+    for (let i = 0; i < 3; i += 1) await signInByApi(request, email);
+    await page.goto("/settings/security");
+    await expect(main(page).locator("h1")).toHaveText(catalogText("Sign-in & security"));
+    await expect(rowSignOuts(page)).toHaveCount(3);
+
+    // A middle row: the rows are re-queried, so the next row's button is now the second of two.
+    await revokeWith(page, rowSignOuts(page).nth(1));
+    await expect(rowSignOuts(page)).toHaveCount(2);
+    await expect(rowSignOuts(page).nth(1)).toBeFocused();
+    expect(await activeTag(page)).not.toBe("BODY");
+
+    // The last row: no next row, so the previous one's.
+    await revokeWith(page, rowSignOuts(page).nth(1));
+    await expect(rowSignOuts(page)).toHaveCount(1);
+    await expect(rowSignOuts(page).first()).toBeFocused();
+    expect(await activeTag(page)).not.toBe("BODY");
+
+    // The bulk action: the sessions section's h2.
+    await main(page)
+      .getByRole("button", { name: catalogText("Sign out of all other devices") })
+      .click();
+    await expect(toastWith(page, looseText("Signed out of 1 other device."))).toBeVisible();
+    await expect(rowSignOuts(page)).toHaveCount(0);
+    await expect(sessionsHeading(page)).toBeFocused();
+    await expect(sessionsHeading(page)).toHaveAttribute("tabindex", "-1");
+    expect(await activeTag(page)).toBe("H2");
+  });
+
+  test("TP-3.60x: the only other session's Sign out → no next or previous row, so focus on the h2 'Where you're signed in', not BODY", async ({
+    page,
+    request,
+  }) => {
+    const { email } = await signedInUser(page, request, "Last Other");
+    await signInByApi(request, email);
+    await page.goto("/settings/security");
+    await expect(rowSignOuts(page)).toHaveCount(1);
+
+    await revokeWith(page, rowSignOuts(page).first());
+
+    await expect(rowSignOuts(page)).toHaveCount(0);
+    await expect(sessionsHeading(page)).toBeFocused();
+    expect(await activeTag(page)).toBe("H2");
   });
 });

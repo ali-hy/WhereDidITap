@@ -1,11 +1,14 @@
 // S-3's cross-screen checks on identity's routes (identity LLD §8.1; HLD §4.4): TP-3.44
 // (responsive), TP-3.45 (axe), TP-3.46 (pseudo-RTL, A-75), TP-3.53 (loading, error and list-size
-// states, A-75), TP-3.54 (page titles). Later slices add their routes and screens. Extra cases end
-// in "x".
+// states, A-75), TP-3.54 (page titles), TP-3.59 (axe with the account menu open, A-88). Later
+// slices add their routes and screens. Extra cases end in "x".
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { randomUUID } from "node:crypto";
+import AxeBuilder from "@axe-core/playwright";
+import type { APIRequestContext } from "@playwright/test";
 import { attachAxeReport } from "../fixtures.js";
 import {
+  accountMenuButton,
   catalogText,
   createInvitation,
   createUser,
@@ -426,5 +429,83 @@ test.describe("TP-3.53: loading, error and list-size states (HLD §4.4; A-75)", 
     );
     expect(thisDeviceFirst).toBe(true);
     expect(await overflow(page)).toBeLessThanOrEqual(0);
+  });
+});
+
+test.describe("TP-3.59: axe with the account menu open (F-162, A-88)", () => {
+  /** The rules A-88 found with the modal menu open. */
+  const A88_RULES = [
+    "aria-hidden-focus",
+    "aria-required-children",
+    "landmark-one-main",
+    "page-has-heading-one",
+    "region",
+  ];
+
+  /** A fresh user with `locale`, signed in through the form, on the home page. */
+  async function signIn(
+    page: Page,
+    request: APIRequestContext,
+    locale: "en" | "ar-XB",
+  ): Promise<void> {
+    const name = "Menu Axe";
+    const { email } = await createUser(request, { name, locale });
+    await submitSignIn(page, email);
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.locator("main h1")).toHaveText(looseText(`Welcome, ${name}.`));
+  }
+
+  /** Opens the menu; axe finds nothing; `main` isn't hidden; Escape closes it, focus on the trigger. */
+  async function expectAccessibleMenu(page: Page): Promise<void> {
+    const trigger = accountMenuButton(page);
+    await trigger.click();
+    const menu = page.getByRole("menu");
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: catalogText("Sign out") })).toBeVisible();
+
+    const results = await new AxeBuilder({ page }).analyze();
+    const ids = results.violations.map((v) => v.id);
+
+    // The scan ran with the menu open.
+    await expect(menu).toBeVisible();
+    expect(ids.filter((id) => A88_RULES.includes(id))).toEqual([]);
+    expect(results.violations.map((v) => `${v.id}: ${String(v.nodes.length)}`)).toEqual([]);
+    expect(
+      await page.locator("main").evaluate((el) => el.closest('[aria-hidden="true"]') === null),
+    ).toBe(true);
+    await expect(page.getByRole("main")).toBeVisible();
+
+    await page.keyboard.press("Escape");
+
+    await expect(menu).toBeHidden();
+    await expect(trigger).toBeFocused();
+  }
+
+  for (const mode of ["light", "dark"] as const) {
+    test.describe(`${mode} mode`, () => {
+      test.use({ colorScheme: mode });
+
+      test(`TP-3.59: ${mode} mode: with the account menu open, no axe violation and main not aria-hidden; Escape closes it with focus on the trigger`, async ({
+        page,
+        request,
+      }, testInfo) => {
+        test.skip(testInfo.project.name !== "chromium", "chromium project only");
+        await signIn(page, request, "en");
+        await expect(page.locator("html")).toHaveAttribute("data-mode", mode);
+
+        await expectAccessibleMenu(page);
+      });
+    });
+  }
+
+  test("TP-3.59: pseudo-RTL (an ar-XB user): with the account menu open, no axe violation and main not aria-hidden; Escape closes it with focus on the trigger", async ({
+    page,
+    request,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== "pseudo-rtl", "pseudo-rtl project only");
+    await signIn(page, request, "ar-XB");
+    await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+
+    await expectAccessibleMenu(page);
   });
 });
