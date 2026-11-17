@@ -4,7 +4,8 @@
 //   and a 5-entry common-password set, plus its server.
 // - buildIdentityWorker(opts): a general worker container (same sender) on a test database, and
 //   runJob(name, payload, attempt), which calls identityHandlers(c)'s handler directly.
-// - setCookies(res): every set-cookie value of an inject response.
+// - setCookies(res): every set-cookie value of an inject response; cookieJar(res) and
+//   cookieHeader(jar) turn them into a request's cookie header.
 // - tokenFromEmail(sender, kind): the `#t=` token of the last email whose subject matches.
 import { fixedClock, Temporal, type MutableClock } from "@budmon/shared";
 import type { FastifyInstance } from "fastify";
@@ -164,6 +165,25 @@ export function setCookies(res: InjectedResponse): string[] {
   const value = res.headers["set-cookie"];
   if (value === undefined) return [];
   return Array.isArray(value) ? value : [String(value)];
+}
+
+/** The cookies a response sets, by name; cleared ones (`Max-Age=0`) are left out. */
+export function cookieJar(res: InjectedResponse): Record<string, string> {
+  const jar: Record<string, string> = {};
+  for (const value of setCookies(res)) {
+    if (/;\s*Max-Age=0(;|$)/i.test(value)) continue;
+    const pair = value.split(";")[0] ?? "";
+    const eq = pair.indexOf("=");
+    if (eq > 0) jar[pair.slice(0, eq)] = pair.slice(eq + 1);
+  }
+  return jar;
+}
+
+/** A `cookie` request header from name → value pairs. */
+export function cookieHeader(jar: Readonly<Record<string, string>>): string {
+  return Object.entries(jar)
+    .map(([name, value]) => `${name}=${value}`)
+    .join("; ");
 }
 
 /** The `#t=` token in the last sent email whose subject matches `subject`. */

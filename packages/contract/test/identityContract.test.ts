@@ -1,4 +1,4 @@
-// Identity's contract (identity LLD F-35, §5.1, §6). TP-0.25 with S-1's expectations, plus
+// Identity's contract (identity LLD F-35, §5.1, §6). TP-0.25 with S-3's expectations, plus
 // extra cases TP-0.25x (the shared schemas) and TP-0.42x (the error map).
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { readFileSync } from "node:fs";
@@ -43,7 +43,7 @@ describe("TP-0.25: the contract with identity's S-0 part", () => {
     expect(await emitOpenapi()).toBe(readFileSync(path.join(PACKAGE_DIR, "openapi.json"), "utf8"));
   });
 
-  it("TP-0.25 (S-1): the document has S-1's procedures (auth, me, invitations) and API_MINOR went from 0 to 1", async () => {
+  it("TP-0.25 (S-3): the document has S-1's and S-3's procedures, and API_MINOR stays 1 (one bump for the module's pull request)", async () => {
     const document = JSON.parse(await emitOpenapi()) as {
       paths: Record<string, Record<string, { operationId?: string }>>;
       info: { version: string };
@@ -64,6 +64,15 @@ describe("TP-0.25: the contract with identity's S-0 part", () => {
         "GET /me me.get",
         "POST /invitations/preview invitations.preview",
         "POST /invitations/accept invitations.accept",
+        // S-3
+        "POST /auth/methods auth.methods",
+        "POST /auth/sign-in auth.signIn",
+        "POST /auth/refresh auth.refresh",
+        "POST /auth/sign-out auth.signOut",
+        "POST /me/confirm me.confirm",
+        "GET /me/sessions me.listSessions",
+        "POST /me/sessions/revoke me.revokeSession",
+        "POST /me/sessions/revoke-others me.revokeOtherSessions",
       ].sort(),
     );
     expect(API_MINOR).toBe(1);
@@ -108,6 +117,38 @@ describe("TP-1.44: invitations.accept's documented errors (A-46)", () => {
     for (const platform of ["VALIDATION_FAILED", "FORBIDDEN", "RATE_LIMITED"]) {
       expect(codes.has(platform), platform).toBe(true);
     }
+  });
+});
+
+describe("TP-0.25x (S-3): S-3's procedures document the identity errors they throw (F-35; platform errors are on every route)", () => {
+  /** Every error code a route's responses mention. */
+  function documentedCodes(route: string, method: string): Set<string> {
+    const document = JSON.parse(readFileSync(path.join(PACKAGE_DIR, "openapi.json"), "utf8")) as {
+      paths: Record<string, Record<string, { responses: Record<string, unknown> }>>;
+    };
+    const codes = new Set<string>();
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        for (const n of node) walk(n);
+      } else if (typeof node === "object" && node !== null) {
+        const record = node as Record<string, unknown>;
+        const code = (record["code"] as { const?: unknown } | undefined)?.const;
+        if (typeof code === "string") codes.add(code);
+        for (const value of Object.values(record)) walk(value);
+      }
+    };
+    walk(document.paths[route]?.[method]?.responses ?? {});
+    return codes;
+  }
+
+  it.each([
+    ["/auth/sign-in", "post", ["INVALID_CREDENTIALS", "ACCOUNT_CLOSED"]],
+    ["/auth/refresh", "post", ["REFRESH_INVALID"]],
+    ["/me/confirm", "post", ["INVALID_CREDENTIALS"]],
+  ])("TP-0.25x: %s (%s) documents %j", (route, method, expected) => {
+    const codes = documentedCodes(route, method);
+
+    for (const code of expected) expect(codes.has(code), code).toBe(true);
   });
 });
 

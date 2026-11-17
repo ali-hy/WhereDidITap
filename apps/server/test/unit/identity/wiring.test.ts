@@ -1,5 +1,5 @@
 // Identity's wiring into the platform's composition points (identity LLD §1.1, A-26, A-202). TP-0.32's
-// static (U) half with S-1's expectations; the container half is in
+// static (U) half with S-3's expectations; the container half is in
 // test/integration/identity/wiring.test.ts.
 import { contract } from "@budmon/contract";
 import { describe, expect, it } from "vitest";
@@ -22,43 +22,65 @@ const PLATFORM_TABLES = [
   "rate_limit_counters",
 ];
 
-describe("TP-0.32 (U): the wiring points, as of S-1", () => {
+describe("TP-0.32 (U): the wiring points, as of S-3", () => {
   it("TP-0.32 (S-1): appRouter and the contract have meta plus identity's auth, me and invitations", () => {
     expect(Object.keys(appRouter).sort()).toEqual(["auth", "invitations", "me", "meta"]);
     expect(Object.keys(contract).sort()).toEqual(["auth", "invitations", "me", "meta"]);
   });
 
-  it("TP-0.32 (S-1): identityRouter has S-1's procedures: auth.signUpOptions, me.get, invitations.preview and invitations.accept", () => {
+  it("TP-0.32 (S-3): identityRouter has S-1's and S-3's procedures", () => {
     const procedures = Object.entries(identityRouter as Record<string, object>)
       .flatMap(([group, router]) => Object.keys(router).map((name) => `${group}.${name}`))
       .sort();
 
-    expect(procedures).toEqual([
-      "auth.signUpOptions",
-      "invitations.accept",
-      "invitations.preview",
-      "me.get",
-    ]);
+    expect(procedures).toEqual(
+      [
+        "auth.signUpOptions",
+        "invitations.accept",
+        "invitations.preview",
+        "me.get",
+        // S-3
+        "auth.methods",
+        "auth.refresh",
+        "auth.signIn",
+        "auth.signOut",
+        "me.confirm",
+        "me.listSessions",
+        "me.revokeOtherSessions",
+        "me.revokeSession",
+      ].sort(),
+    );
   });
 
-  it("TP-0.32 (S-1): PUBLIC_PROCEDURES is meta.clientConfig plus §5.1's S-1 entries", () => {
-    expect([...PUBLIC_PROCEDURES].sort()).toEqual([
-      "auth.signUpOptions",
-      "invitations.accept",
-      "invitations.preview",
-      "meta.clientConfig",
-    ]);
+  it("TP-0.32 (S-3): PUBLIC_PROCEDURES is meta.clientConfig plus §5.1's S-1 and S-3 entries", () => {
+    expect([...PUBLIC_PROCEDURES].sort()).toEqual(
+      [
+        "auth.signUpOptions",
+        "invitations.accept",
+        "invitations.preview",
+        "meta.clientConfig",
+        // S-3
+        "auth.methods",
+        "auth.refresh",
+        "auth.signIn",
+      ].sort(),
+    );
   });
 
-  it("TP-0.32: buildJobRegistry() has the platform's jobs plus identity.email-send", () => {
+  it("TP-0.32 (S-3): buildJobRegistry() has the platform's jobs plus identity.email-send and identity.purge", () => {
     const names = buildJobRegistry()
       .all()
       .map((d) => d.name);
 
     expect(names.sort()).toEqual(
-      [...platformJobDefinitions.map((d) => d.name), "identity.email-send"].sort(),
+      [
+        ...platformJobDefinitions.map((d) => d.name),
+        "identity.email-send",
+        "identity.purge",
+      ].sort(),
     );
     expect(buildJobRegistry().get("identity.email-send")).toBe(identityJobs.emailSend);
+    expect(buildJobRegistry().get("identity.purge")).toBe(identityJobs.purge);
   });
 
   it("TP-0.32: tableGrants has the platform's 4 tables and identity's 15", () => {

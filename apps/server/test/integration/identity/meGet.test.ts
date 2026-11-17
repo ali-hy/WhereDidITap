@@ -1,4 +1,4 @@
-// me.get (F-56; identity LLD §5.3) and default deny over the whole contract (TP-0.26).
+// me.get (F-56; identity LLD §5.3) and default deny over the whole contract (TP-0.26, as of S-3).
 // TP-3.23, TP-0.26, plus extra cases ending in "x".
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { contract, listProcedures } from "@budmon/contract";
@@ -146,11 +146,29 @@ describe("TP-0.26: default deny over every procedure in the contract", () => {
   const procedures = listProcedures(contract);
   const UUID = "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a99";
 
+  /** Bodies valid for procedures whose input has required fields, so only auth decides. */
+  const BODIES: Record<string, unknown> = { "me.revokeSession": { sessionId: UUID } };
+
   it("TP-0.26: S-1's public identity procedures are in PUBLIC_PROCEDURES", () => {
     for (const path of ["auth.signUpOptions", "invitations.preview", "invitations.accept"]) {
       expect(PUBLIC_PROCEDURES.has(path), path).toBe(true);
     }
     expect(procedures.map((p) => p.path)).toEqual(expect.arrayContaining(["me.get"]));
+  });
+
+  it("TP-0.26 (S-3): auth.methods, auth.signIn and auth.refresh are public; S-3's other procedures are in the contract and not public", () => {
+    for (const path of ["auth.methods", "auth.signIn", "auth.refresh"]) {
+      expect(PUBLIC_PROCEDURES.has(path), path).toBe(true);
+    }
+    const authed = [
+      "auth.signOut",
+      "me.confirm",
+      "me.listSessions",
+      "me.revokeSession",
+      "me.revokeOtherSessions",
+    ];
+    expect(procedures.map((p) => p.path)).toEqual(expect.arrayContaining(authed));
+    for (const path of authed) expect(PUBLIC_PROCEDURES.has(path), path).toBe(false);
   });
 
   it("TP-0.26: without credentials every non-public procedure answers 401 UNAUTHENTICATED, and no public one does", async () => {
@@ -161,7 +179,7 @@ describe("TP-0.26: default deny over every procedure in the contract", () => {
         api.app,
         p.method === "GET" ? "GET" : "POST",
         route,
-        p.method === "GET" ? undefined : {},
+        p.method === "GET" ? undefined : (BODIES[p.path] ?? {}),
       );
       const body = res.json() as { code?: string };
       outcomes.push({
