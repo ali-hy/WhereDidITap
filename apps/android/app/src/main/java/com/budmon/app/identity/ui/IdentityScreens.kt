@@ -1,4 +1,4 @@
-// S-1 screens (§8.2): the signed-out start, the invitation link, join and set-up, and the first-run home.
+// Identity screens (§8.2): the sign-in, the invitation link, join and set-up, the first-run home and its dialogs.
 package com.budmon.app.identity.ui
 
 import androidx.activity.compose.BackHandler
@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -19,12 +20,17 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,17 +40,21 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
@@ -64,6 +74,10 @@ import com.budmon.app.identity.InviteState
 import com.budmon.app.identity.InviteViewModel
 import com.budmon.app.identity.Me
 import com.budmon.app.identity.ParseResult
+import com.budmon.app.identity.SignInFormState
+import com.budmon.app.identity.SignInViewModel
+import com.budmon.app.identity.SignOutState
+import com.budmon.app.identity.SignOutViewModel
 import com.budmon.app.identity.SignUpOptions
 import com.budmon.app.identity.SignedOutReason
 import com.budmon.app.ui.components.AppButton
@@ -118,11 +132,15 @@ private fun formatDate(at: Instant?): String =
         DateFormat.getDateInstance(DateFormat.LONG).apply { timeZone = TimeZone.getTimeZone(ZoneId.systemDefault()) }.format(Date.from(at))
     }
 
-/** The signed-out start; until S-3 only the invitation link. */
+/** The signed-out start: the password form, then the way in with an invitation link. */
 @Composable
 fun SignInScreen(
     reason: SignedOutReason,
     isOnline: Boolean,
+    form: SignInFormState,
+    onEmailChange: (String) -> Unit,
+    onPasswordChange: (String) -> Unit,
+    onSubmit: () -> Unit,
     onHaveLink: () -> Unit,
     onPrivacy: () -> Unit,
     modifier: Modifier = Modifier,
@@ -130,8 +148,35 @@ fun SignInScreen(
     Page(modifier) {
         Heading(stringResource(R.string.signin_title))
         if (reason == SignedOutReason.Ended) Text(stringResource(R.string.signin_session_ended))
-        Text(stringResource(R.string.signin_invite_only), color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (!isOnline) Text(stringResource(R.string.signin_offline), color = MaterialTheme.colorScheme.error)
+        form.formError?.let {
+            Text(
+                uiString(it),
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
+        AppTextField(
+            value = form.email,
+            onValueChange = onEmailChange,
+            label = stringResource(R.string.signin_email),
+            error = form.emailError?.let { stringResource(it) },
+            keyboardType = KeyboardType.Email,
+            readOnly = form.busy,
+            contentType = ContentType.EmailAddress,
+        )
+        AppPasswordField(
+            value = form.password,
+            onValueChange = onPasswordChange,
+            label = stringResource(R.string.signin_password),
+            error = form.passwordError?.let { stringResource(it) },
+            keyboardActions = KeyboardActions(onDone = { onSubmit() }),
+            imeAction = ImeAction.Done,
+            readOnly = form.busy,
+            contentType = ContentType.Password,
+        )
+        AppButton(stringResource(R.string.signin_submit), onSubmit, Modifier.fillMaxWidth(), busy = form.busy)
+        Text(stringResource(R.string.signin_invite_only), color = MaterialTheme.colorScheme.onSurfaceVariant)
         AppButton(stringResource(R.string.signin_have_link), onHaveLink, Modifier.fillMaxWidth(), AppButtonVariant.Secondary)
         AppButton(stringResource(R.string.signin_privacy), onPrivacy, variant = AppButtonVariant.Tertiary)
     }
@@ -388,7 +433,7 @@ fun InviteFlowRoute(
     viewModel: InviteViewModel,
     onBack: () -> Unit,
     onSignIn: () -> Unit,
-    onSignedUp: (Me?) -> Unit,
+    onSignedUp: (Me) -> Unit,
     onPrivacy: () -> Unit,
 ) {
     // Back on set-up returns to join; elsewhere it leaves the screen.
@@ -397,6 +442,13 @@ fun InviteFlowRoute(
     }
     // After the process was recreated the token is gone: back to the link screen.
     LaunchedEffect(Unit) { if (!viewModel.hasToken) onBack() }
+    viewModel.ownerDialog?.let { count ->
+        OutboxOwnerDialog(
+            count,
+            onDelete = { viewModel.discardOtherUsersEntries(onSignedUp) },
+            onCancel = viewModel::keepOtherUsersEntries,
+        )
+    }
     when (val state = viewModel.state) {
         InviteState.Checking -> {
             InviteCheckingScreen()
@@ -504,38 +556,171 @@ private fun PickerField(
     }
 }
 
-/** The first-run home: an empty state with the user's name. */
+/** The initials of the first and last word of [name]. */
+private fun initialsOf(name: String): String {
+    val words = name.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+    val letters = listOfNotNull(words.firstOrNull(), words.takeIf { it.size > 1 }?.last()).map { it.codePointAt(0) }
+    return letters.joinToString("") { String(Character.toChars(it)) }.uppercase()
+}
+
+/** The first-run home: an empty state with the user's name, and the account menu. */
 @Composable
 fun HomeFirstRunScreen(
     me: Me,
+    onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            Modifier.size(48.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-            contentAlignment = Alignment.Center,
+    Box(modifier.fillMaxSize()) {
+        var menuOpen by remember { mutableStateOf(false) }
+        val account = stringResource(R.string.menu_account)
+        Box(Modifier.align(Alignment.TopEnd).padding(8.dp)) {
+            IconButton(onClick = { menuOpen = true }, modifier = Modifier.semantics { contentDescription = account }) {
+                Text(initialsOf(me.displayName), style = MaterialTheme.typography.labelLarge)
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.menu_sign_out)) },
+                    onClick = {
+                        menuOpen = false
+                        onSignOut()
+                    },
+                )
+            }
+        }
+        Column(
+            Modifier.fillMaxSize().padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Icon(
-                painterResource(R.drawable.lucide_wallet),
-                contentDescription = null,
-                modifier = Modifier.size(24.dp),
-                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+            Box(
+                Modifier.size(48.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    painterResource(R.drawable.lucide_wallet),
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+            Text(
+                stringResource(R.string.home_welcome, isolated(me.displayName)),
+                style = MaterialTheme.typography.titleLarge,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 12.dp).semantics { heading() },
+            )
+            Text(
+                stringResource(R.string.home_first_run),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
             )
         }
-        Text(
-            stringResource(R.string.home_welcome, isolated(me.displayName)),
-            style = MaterialTheme.typography.titleLarge,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 12.dp).semantics { heading() },
-        )
-        Text(
-            stringResource(R.string.home_first_run),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
+    }
+}
+
+/** The home with its sign-out flow: the unsynced-entries question and a failure message. */
+@Composable
+fun HomeRoute(
+    me: Me,
+    isOnline: Boolean,
+    viewModel: SignOutViewModel,
+    onSignedOut: () -> Unit,
+) {
+    HomeFirstRunScreen(me, onSignOut = { viewModel.requestSignOut(onSignedOut) })
+    when (val state = viewModel.state) {
+        SignOutState.Idle -> {}
+
+        SignOutState.Busy -> {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        }
+
+        is SignOutState.Confirming -> {
+            SignOutDialog(
+                unsynced = state.unsynced,
+                isOnline = isOnline,
+                onSyncNow = viewModel::syncNow,
+                onSignOutAnyway = { viewModel.signOutAnyway(onSignedOut) },
+                onCancel = viewModel::dismiss,
+            )
+        }
+
+        is SignOutState.Failed -> {
+            AlertDialog(
+                onDismissRequest = viewModel::dismiss,
+                text = { Text(uiString(state.message)) },
+                confirmButton = {
+                    TextButton(onClick = { viewModel.requestSignOut(onSignedOut) }) { Text(stringResource(R.string.menu_sign_out)) }
+                },
+                dismissButton = { TextButton(onClick = viewModel::dismiss) { Text(stringResource(R.string.signout_cancel)) } },
+            )
+        }
+    }
+}
+
+/** Another user's unsynced entries are on this phone: delete them to continue, or cancel. */
+@Composable
+fun OutboxOwnerDialog(
+    count: Int,
+    onDelete: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        text = { Text(pluralStringResource(R.plurals.outbox_other_user, count, count)) },
+        confirmButton = { TextButton(onClick = onDelete) { Text(stringResource(R.string.outbox_delete_continue)) } },
+        dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.outbox_cancel)) } },
+    )
+}
+
+/** Signing out with [unsynced] entries still on this phone. Sync now needs a connection. */
+@Composable
+fun SignOutDialog(
+    unsynced: Int,
+    isOnline: Boolean,
+    onSyncNow: () -> Unit,
+    onSignOutAnyway: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        text = { Text(pluralStringResource(R.plurals.signout_unsynced, unsynced, unsynced)) },
+        confirmButton = {
+            Column(horizontalAlignment = Alignment.End) {
+                if (isOnline) TextButton(onClick = onSyncNow) { Text(stringResource(R.string.signout_sync_now)) }
+                TextButton(onClick = onSignOutAnyway) { Text(stringResource(R.string.signout_anyway)) }
+            }
+        },
+        dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.signout_cancel)) } },
+    )
+}
+
+/** The sign-in route: the form from [viewModel], and the other-user dialog. */
+@Composable
+fun SignInRoute(
+    viewModel: SignInViewModel,
+    reason: SignedOutReason,
+    isOnline: Boolean,
+    savePassword: suspend (String, String) -> Unit,
+    onSignedIn: (Me) -> Unit,
+    onHaveLink: () -> Unit,
+    onPrivacy: () -> Unit,
+) {
+    val form = viewModel.form
+    SignInScreen(
+        reason = reason,
+        isOnline = isOnline,
+        form = form,
+        onEmailChange = viewModel::onEmailChange,
+        onPasswordChange = viewModel::onPasswordChange,
+        onSubmit = { viewModel.submit(isOnline, savePassword, onSignedIn) },
+        onHaveLink = onHaveLink,
+        onPrivacy = onPrivacy,
+    )
+    form.ownerDialog?.let { count ->
+        OutboxOwnerDialog(
+            count,
+            onDelete = { viewModel.discardOtherUsersEntries(savePassword, onSignedIn) },
+            onCancel = viewModel::keepOtherUsersEntries,
         )
     }
 }

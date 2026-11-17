@@ -21,6 +21,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+import androidx.credentials.CreatePasswordRequest
+import androidx.credentials.CredentialManager
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -33,13 +35,15 @@ import com.budmon.app.core.update.UpdateState
 import com.budmon.app.identity.InviteViewModel
 import com.budmon.app.identity.SessionUiState
 import com.budmon.app.identity.SessionViewModel
+import com.budmon.app.identity.SignInViewModel
+import com.budmon.app.identity.SignOutViewModel
 import com.budmon.app.identity.SignedOutReason
-import com.budmon.app.identity.ui.HomeFirstRunScreen
+import com.budmon.app.identity.ui.HomeRoute
 import com.budmon.app.identity.ui.InvitationLinkRoute
 import com.budmon.app.identity.ui.InviteFlowRoute
 import com.budmon.app.identity.ui.SessionLoadingScreen
 import com.budmon.app.identity.ui.SessionNotLoaded
-import com.budmon.app.identity.ui.SignInScreen
+import com.budmon.app.identity.ui.SignInRoute
 import com.budmon.app.ui.platform.OfflineBanner
 import com.budmon.app.ui.platform.PlatformStatusViewModel
 import com.budmon.app.ui.platform.SyncIndicator
@@ -125,7 +129,12 @@ class MainActivity : ComponentActivity() {
                                                         }
                                                         val me = current.me
                                                         if (me != null) {
-                                                            HomeFirstRunScreen(me)
+                                                            HomeRoute(
+                                                                me = me,
+                                                                isOnline = status.isOnline,
+                                                                viewModel = hiltViewModel<SignOutViewModel>(),
+                                                                onSignedOut = sessionModel::onSignedOut,
+                                                            )
                                                         } else {
                                                             val retrying by sessionModel.probing.collectAsStateWithLifecycle()
                                                             SessionNotLoaded(
@@ -159,9 +168,12 @@ class MainActivity : ComponentActivity() {
         NavHost(nav, startDestination = ROUTE_SIGNED_OUT) {
             navigation(startDestination = ROUTE_SIGN_IN, route = ROUTE_SIGNED_OUT) {
                 composable(ROUTE_SIGN_IN) {
-                    SignInScreen(
-                        reason,
-                        isOnline,
+                    SignInRoute(
+                        viewModel = hiltViewModel<SignInViewModel>(),
+                        reason = reason,
+                        isOnline = isOnline,
+                        savePassword = ::savePassword,
+                        onSignedIn = sessionModel::onSignedIn,
                         onHaveLink = { nav.navigate(ROUTE_INVITATION_LINK) },
                         onPrivacy = { openPrivacy() },
                     )
@@ -191,6 +203,14 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /** Offers to save the password with Credential Manager; the caller ignores a failure. */
+    private suspend fun savePassword(
+        email: String,
+        password: String,
+    ) {
+        CredentialManager.create(this).createCredential(this, CreatePasswordRequest(id = email, password = password))
     }
 
     /** The canvas as the window and system bar colour, and bar icons that suit the mode. */

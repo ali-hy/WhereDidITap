@@ -1,4 +1,4 @@
-// F-212 (S-1): the invitation flow's state, from the preview to the new account (password path).
+// F-212: the invitation flow's state, from the preview to the new account (password path).
 package com.budmon.app.identity
 
 import androidx.compose.runtime.getValue
@@ -61,6 +61,7 @@ class InviteViewModel
 @Inject
 constructor(
     private val repository: AuthRepository,
+    private val guard: OutboxOwnerGuard,
 ) : ViewModel() {
     var state by mutableStateOf<InviteState>(InviteState.Checking)
         private set
@@ -80,6 +81,12 @@ constructor(
         private set
     var busy by mutableStateOf(false)
         private set
+
+    /** The number of another user's entries to ask about after the account was created, or null. */
+    var ownerDialog by mutableStateOf<Int?>(null)
+        private set
+
+    private var pendingSignIn: PendingSignIn? = null
 
     private var token: String? = null
     private var preview: InvitationPreview? = null
@@ -211,15 +218,15 @@ constructor(
         return nameError == null && passwordError == null && currencyError == null && timeZoneError == null
     }
 
-    /** Creates the account; [onDone] gets the new user (null when it couldn't be read yet). */
-    fun submit(onDone: (Me?) -> Unit) {
+    /** Creates the account; [onDone] gets the new user once the session is stored. */
+    fun submit(onDone: (Me) -> Unit) {
         val current = token ?: return
         formError = null
         if (busy || !validate()) return
         busy = true
         viewModelScope.launch {
             try {
-                val me =
+                val created =
                     repository.acceptInvitation(
                         token = current,
                         email = preview?.email.orEmpty(),
@@ -230,13 +237,49 @@ constructor(
                         password = password,
                     )
                 password = ""
-                onDone(me)
+                if (created == null) {
+                    accountReady()
+                } else {
+                    when (val decision = guard.complete(created)) {
+                        OwnerDecision.Proceed -> onDone(created.me)
+
+                        is OwnerDecision.AskDiscard -> {
+                            pendingSignIn = created
+                            ownerDialog = decision.count
+                        }
+                    }
+                }
             } catch (e: ApiException) {
                 fail(e.error)
             } finally {
                 busy = false
             }
         }
+    }
+
+    /** The dialog's Delete and continue. */
+    fun discardOtherUsersEntries(onDone: (Me) -> Unit) {
+        val held = pendingSignIn ?: return
+        pendingSignIn = null
+        ownerDialog = null
+        viewModelScope.launch {
+            guard.discardAndProceed(held)
+            onDone(held.me)
+        }
+    }
+
+    /** The dialog's Cancel: the new session ends and the user signs in later. */
+    fun keepOtherUsersEntries() {
+        val held = pendingSignIn ?: return
+        pendingSignIn = null
+        ownerDialog = null
+        accountReady()
+        viewModelScope.launch { guard.cancel(held) }
+    }
+
+    /** The account exists but this phone doesn't hold its session. */
+    private fun accountReady() {
+        state = InviteState.Problem(InviteProblem.Used(recent = true), preview?.inviterName, preview?.origin)
     }
 
     private fun fail(error: ApiError) {

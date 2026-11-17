@@ -26,7 +26,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -60,6 +62,7 @@ fun AppTextField(
     keyboardActions: KeyboardActions = KeyboardActions.Default,
     imeAction: androidx.compose.ui.text.input.ImeAction = androidx.compose.ui.text.input.ImeAction.Next,
     readOnly: Boolean = false,
+    contentType: ContentType? = null,
     trailing: (@Composable () -> Unit)? = null,
     visualTransformation: VisualTransformation = VisualTransformation.None,
 ) {
@@ -67,13 +70,15 @@ fun AppTextField(
         Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface)
         OutlinedTextField(
             value = value,
-            onValueChange = onValueChange,
+            // A controlled field that was reset to its value reports no change.
+            onValueChange = { if (it != value) onValueChange(it) },
             modifier =
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = FieldMinHeight)
                 .semantics {
                     contentDescription = label
+                    if (contentType != null) this.contentType = contentType
                     if (error != null) error(error)
                 },
             singleLine = true,
@@ -114,6 +119,8 @@ fun AppPasswordField(
     error: String? = null,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
     imeAction: androidx.compose.ui.text.input.ImeAction = androidx.compose.ui.text.input.ImeAction.Done,
+    readOnly: Boolean = false,
+    contentType: ContentType? = null,
 ) {
     var shown by rememberSaveable { mutableStateOf(false) }
     val toggleName = stringResource(if (shown) R.string.ui_password_hide_label else R.string.ui_password_show_label)
@@ -127,6 +134,8 @@ fun AppPasswordField(
         keyboardType = KeyboardType.Password,
         keyboardActions = keyboardActions,
         imeAction = imeAction,
+        readOnly = readOnly,
+        contentType = contentType,
         visualTransformation = if (shown) VisualTransformation.None else PasswordVisualTransformation(),
         trailing = {
             TextButton(

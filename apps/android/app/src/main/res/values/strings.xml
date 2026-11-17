@@ -126,6 +126,28 @@
     <string name="invite_for_email">This invitation is for %1$s.</string>
     <string name="invite_full_no_inviter">There\'s no room for new people right now. The administrator has been told.</string>
     <string name="invite_problem_ask_anyone">Ask someone who already has an account to invite you again.</string>
+    <!-- Identity S-3 (§8.2) -->
+    <string name="signin_email">Email</string>
+    <string name="signin_password">Password</string>
+    <string name="signin_submit">Sign in</string>
+    <string name="form_email_required">Enter your email.</string>
+    <string name="form_email_invalid">Enter an email address like name@example.com.</string>
+    <string name="form_password_required">Enter your password.</string>
+    <string name="menu_account">Account</string>
+    <string name="menu_sign_out">Sign out</string>
+    <string name="outbox_cancel">Cancel</string>
+    <string name="signout_cancel">Cancel</string>
+    <string name="outbox_delete_continue">Delete and continue</string>
+    <string name="signout_sync_now">Sync now</string>
+    <string name="signout_anyway">Sign out anyway</string>
+    <plurals name="signout_unsynced">
+        <item quantity="one">%d entry hasn\'t synced yet. If you sign out now, it stays on this phone and syncs the next time you sign in.</item>
+        <item quantity="other">%d entries haven\'t synced yet. If you sign out now, they stay on this phone and sync the next time you sign in.</item>
+    </plurals>
+    <plurals name="outbox_other_user">
+        <item quantity="one">This phone has %d unsynced entry from another user. Delete it to continue?</item>
+        <item quantity="other">This phone has %d unsynced entries from another user. Delete them to continue?</item>
+    </plurals>
     <string name="signin_privacy">Privacy notice</string>
     <string name="invite_full">There\'s no room for new people right now. %1$s and the administrator have been told.</string>
     <string name="setup_title">Set up your account</string>

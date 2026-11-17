@@ -1,4 +1,4 @@
-// F-207 (S-1): the app-wide session state. Refresh arrives with S-3.
+// F-207: the app-wide session state (S-1), with sign-out and session events (S-3).
 package com.budmon.app.identity
 
 import androidx.lifecycle.ViewModel
@@ -35,6 +35,7 @@ internal constructor(
     private val tokenStore: TokenStore,
     private val connectivity: ConnectivityMonitor,
     private val clock: Clock,
+    private val sessionEvents: SessionEvents,
     scopeOverride: CoroutineScope?,
 ) : ViewModel() {
     @Inject
@@ -43,7 +44,8 @@ internal constructor(
         tokenStore: TokenStore,
         connectivity: ConnectivityMonitor,
         clock: Clock,
-    ) : this(repository, tokenStore, connectivity, clock, null)
+        sessionEvents: SessionEvents,
+    ) : this(repository, tokenStore, connectivity, clock, sessionEvents, null)
 
     private val scope: CoroutineScope = scopeOverride ?: viewModelScope
     private val mutableState = MutableStateFlow<SessionUiState>(SessionUiState.Loading)
@@ -61,6 +63,11 @@ internal constructor(
 
     init {
         scope.launch { start() }
+        scope.launch {
+            sessionEvents.events.collect { event ->
+                if (event == SessionEvent.Ended) end(SignedOutReason.Ended)
+            }
+        }
         scope.launch {
             connectivity.isOnline.collect { online ->
                 if (online) trigger() else timer?.cancel()
@@ -154,6 +161,16 @@ internal constructor(
     fun onBackground() {
         foreground = false
         timer?.cancel()
+    }
+
+    private fun end(reason: SignedOutReason) {
+        timer?.cancel()
+        mutableState.value = SessionUiState.SignedOut(reason)
+    }
+
+    /** After a sign-out the user asked for. */
+    fun onSignedOut() {
+        end(SignedOutReason.None)
     }
 
     /** After a sign-up or sign-in stored a session. */
