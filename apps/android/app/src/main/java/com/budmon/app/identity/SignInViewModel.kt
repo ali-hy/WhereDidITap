@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.budmon.app.R
 import com.budmon.app.core.error.Operation
 import com.budmon.app.core.error.UiText
+import com.budmon.app.core.network.ApiError
 import com.budmon.app.identity.store.TokenStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -25,6 +26,7 @@ data class SignInFormState(
     val formError: UiText? = null,
     val busy: Boolean = false,
     val ownerDialog: Int? = null,
+    val ownerBusy: OwnerChoice? = null,
 )
 
 @HiltViewModel
@@ -84,8 +86,10 @@ class SignInViewModel
                         is SignInOutcome.Ready -> decide(outcome.pending, guard.complete(outcome.pending), savePassword, onSignedIn)
                         is SignInOutcome.TwoStepRequired -> form = form.copy(formError = UiText(R.string.error_generic_read))
                     }
-                } catch (e: ApiException) {
-                    form = form.copy(formError = IdentityErrorMessages.forError(e.error, Operation.Read))
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    form = form.copy(formError = readError(e))
                 } finally {
                     form = form.copy(busy = false)
                 }
@@ -127,23 +131,55 @@ class SignInViewModel
             onSignedIn(signedIn.me)
         }
 
-        /** The dialog's Delete and continue. */
+        private fun readError(e: Exception): UiText =
+            IdentityErrorMessages.forError((e as? ApiException)?.error ?: ApiError.Unknown, Operation.Read)
+
+        /** The dialog's Delete and continue; ignored while a dialog action runs. */
         fun discardOtherUsersEntries(
             savePassword: suspend (String, String) -> Unit,
             onSignedIn: (Me) -> Unit,
         ) {
             val held = pending ?: return
+            if (form.ownerBusy != null) return
+            form = form.copy(ownerBusy = OwnerChoice.Delete)
             viewModelScope.launch {
-                guard.discardAndProceed(held)
-                finish(held, savePassword, onSignedIn)
+                try {
+                    guard.discardAndProceed(held)
+                    finish(held, savePassword, onSignedIn)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    form = form.copy(formError = readError(e))
+                } finally {
+                    form = form.copy(ownerBusy = null)
+                }
             }
         }
 
-        /** The dialog's Cancel: the held sign-in ends, the form stays. */
+        /** The dialog's Cancel, and its dismissal: the held sign-in ends, the form stays. */
         fun keepOtherUsersEntries() {
             val held = pending ?: return
+            if (form.ownerBusy != null) return
+            form = form.copy(ownerBusy = OwnerChoice.Cancel)
+            viewModelScope.launch {
+                try {
+                    guard.cancel(held)
+                    pending = null
+                    form = form.copy(ownerDialog = null, password = "")
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    pending = null
+                    form = form.copy(ownerDialog = null, password = "", formError = readError(e))
+                } finally {
+                    form = form.copy(ownerBusy = null)
+                }
+            }
+        }
+
+        /** A sign-in still waiting on the dialog is ended. */
+        override fun onCleared() {
+            pending?.let { guard.release(it) }
             pending = null
-            form = form.copy(ownerDialog = null, password = "")
-            viewModelScope.launch { guard.cancel(held) }
         }
     }

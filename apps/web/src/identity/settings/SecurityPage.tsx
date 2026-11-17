@@ -41,11 +41,23 @@ export function SecurityPage(): JSX.Element {
     showToast({ tone: "error", message: t(descriptor, values) });
   };
 
+  let heading: HTMLHeadingElement | undefined;
+
+  /** Focus after a removal: the next row's Sign out, else the previous row's, else the heading. */
+  const refocus = (nextId: string | undefined, previousId: string | undefined): void => {
+    const button = (id: string | undefined): HTMLElement | null =>
+      id === undefined ? null : document.querySelector(`[data-session-row="${id}"] button`);
+    (button(nextId) ?? button(previousId) ?? heading)?.focus();
+  };
+
   const revoke = async (sessionId: string): Promise<void> => {
+    const others = (sessions.data?.items ?? []).filter((s) => !s.current).map((s) => s.id);
+    const at = others.indexOf(sessionId);
     setBusyId(sessionId);
     try {
       await api.me.revokeSession({ sessionId });
       await queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      refocus(others[at + 1], at > 0 ? others[at - 1] : undefined);
     } catch (e) {
       fail(e);
     } finally {
@@ -58,6 +70,7 @@ export function SecurityPage(): JSX.Element {
     try {
       const { revoked } = await api.me.revokeOtherSessions({});
       await queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      heading?.focus();
       showToast({ tone: "success", message: t(m.sessionsSignedOutOthers, { n: revoked }) });
     } catch (e) {
       fail(e);
@@ -90,7 +103,15 @@ export function SecurityPage(): JSX.Element {
         {t(m.settingsSecurity)}
       </h1>
       <section class="mt-6" aria-busy={sessions.isPending ? "true" : undefined}>
-        <h2 class="text-lg font-semibold text-fg">{t(m.sessionsTitle)}</h2>
+        <h2
+          ref={(el) => {
+            heading = el;
+          }}
+          tabindex="-1"
+          class="text-lg font-semibold text-fg"
+        >
+          {t(m.sessionsTitle)}
+        </h2>
         <Switch>
           <Match when={sessions.isPending}>
             <div class="mt-4">
@@ -123,7 +144,7 @@ export function SecurityPage(): JSX.Element {
                           <p class="text-sm text-fg-muted">{lastActive(item.lastUsedAt)}</p>
                         </div>
                         <Show when={!item.current}>
-                          <div>
+                          <div data-session-row={item.id}>
                             <Button
                               variant="secondary"
                               size="compact"

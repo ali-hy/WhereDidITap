@@ -38,7 +38,7 @@ export function AccountMenu(): JSX.Element {
   };
 
   return (
-    <DropdownMenu placement="bottom-end">
+    <DropdownMenu placement="bottom-end" modal={false}>
       <DropdownMenu.Trigger
         aria-label={t(m.menuAccount)}
         class="inline-flex size-11 items-center justify-center rounded-full border border-line-strong bg-surface text-sm font-semibold text-fg"

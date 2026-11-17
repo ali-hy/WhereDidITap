@@ -4,6 +4,10 @@ package com.budmon.app.identity
 import com.budmon.app.core.outbox.OutboxDao
 import com.budmon.app.core.outbox.OutboxRepository
 import com.budmon.app.identity.store.TokenStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -14,6 +18,9 @@ sealed interface OwnerDecision {
     data class AskDiscard(val count: Int) : OwnerDecision
 }
 
+/** The owner dialog's button that is running. */
+enum class OwnerChoice { Delete, Cancel }
+
 @Singleton
 class OutboxOwnerGuard
     @Inject
@@ -23,6 +30,8 @@ class OutboxOwnerGuard
         private val outbox: OutboxRepository,
         private val repository: AuthRepository,
     ) {
+        private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
         /** Stores [pending] and returns Proceed when the outbox is empty or the user's own. */
         suspend fun complete(pending: PendingSignIn): OwnerDecision {
             val count = dao.countAll()
@@ -40,6 +49,11 @@ class OutboxOwnerGuard
         /** Ends [pending]'s session; the entries, the owner and the stored values stay as they were. */
         suspend fun cancel(pending: PendingSignIn) {
             repository.abandonSignIn(pending)
+        }
+
+        /** Cancels [pending] on the guard's own scope, for a screen that is gone. */
+        fun release(pending: PendingSignIn) {
+            scope.launch { cancel(pending) }
         }
 
         private suspend fun accept(pending: PendingSignIn) {

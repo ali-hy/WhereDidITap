@@ -20,7 +20,8 @@ class AuthInterceptor
 
         override fun intercept(chain: Interceptor.Chain): Response {
             val request = chain.request()
-            if (!carriesToken(request.url)) return chain.proceed(request)
+            // A request that names its own token keeps it.
+            if (!carriesToken(request.url) || request.header("Authorization") != null) return chain.proceed(request)
             // Interceptors run on OkHttp's threads. The server decides whether an expired token is still good.
             val session = runBlocking { tokenStore.read() } ?: return chain.proceed(request)
             return chain.proceed(request.newBuilder().header("Authorization", "Bearer ${session.accessToken}").build())

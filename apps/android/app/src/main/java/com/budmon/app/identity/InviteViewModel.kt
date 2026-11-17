@@ -11,6 +11,7 @@ import com.budmon.app.core.error.Operation
 import com.budmon.app.core.error.UiText
 import com.budmon.app.core.network.ApiError
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -84,6 +85,10 @@ constructor(
 
     /** The number of another user's entries to ask about after the account was created, or null. */
     var ownerDialog by mutableStateOf<Int?>(null)
+        private set
+
+    /** The dialog button that is running, or null. */
+    var ownerBusy by mutableStateOf<OwnerChoice?>(null)
         private set
 
     private var pendingSignIn: PendingSignIn? = null
@@ -249,32 +254,62 @@ constructor(
                         }
                     }
                 }
-            } catch (e: ApiException) {
-                fail(e.error)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                fail((e as? ApiException)?.error ?: ApiError.Unknown)
             } finally {
                 busy = false
             }
         }
     }
 
-    /** The dialog's Delete and continue. */
+    /** The dialog's Delete and continue; ignored while a dialog action runs. */
     fun discardOtherUsersEntries(onDone: (Me) -> Unit) {
         val held = pendingSignIn ?: return
-        pendingSignIn = null
-        ownerDialog = null
+        if (ownerBusy != null) return
+        ownerBusy = OwnerChoice.Delete
         viewModelScope.launch {
-            guard.discardAndProceed(held)
-            onDone(held.me)
+            try {
+                guard.discardAndProceed(held)
+                pendingSignIn = null
+                ownerDialog = null
+                onDone(held.me)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                formError = IdentityErrorMessages.forError((e as? ApiException)?.error ?: ApiError.Unknown, Operation.Create)
+            } finally {
+                ownerBusy = null
+            }
         }
     }
 
-    /** The dialog's Cancel: the new session ends and the user signs in later. */
+    /** The dialog's Cancel, and its dismissal: the new session ends and the user signs in later. */
     fun keepOtherUsersEntries() {
         val held = pendingSignIn ?: return
+        if (ownerBusy != null) return
+        ownerBusy = OwnerChoice.Cancel
+        viewModelScope.launch {
+            try {
+                guard.cancel(held)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // The session ends on its own.
+            } finally {
+                pendingSignIn = null
+                ownerDialog = null
+                ownerBusy = null
+                accountReady()
+            }
+        }
+    }
+
+    /** A new session still waiting on the dialog is ended. */
+    override fun onCleared() {
+        pendingSignIn?.let { guard.release(it) }
         pendingSignIn = null
-        ownerDialog = null
-        accountReady()
-        viewModelScope.launch { guard.cancel(held) }
     }
 
     /** The account exists but this phone doesn't hold its session. */

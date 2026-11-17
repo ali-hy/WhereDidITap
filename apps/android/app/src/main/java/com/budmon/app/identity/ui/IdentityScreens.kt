@@ -73,6 +73,7 @@ import com.budmon.app.identity.InviteProblem
 import com.budmon.app.identity.InviteState
 import com.budmon.app.identity.InviteViewModel
 import com.budmon.app.identity.Me
+import com.budmon.app.identity.OwnerChoice
 import com.budmon.app.identity.ParseResult
 import com.budmon.app.identity.SignInFormState
 import com.budmon.app.identity.SignInViewModel
@@ -445,6 +446,7 @@ fun InviteFlowRoute(
     viewModel.ownerDialog?.let { count ->
         OutboxOwnerDialog(
             count,
+            busy = viewModel.ownerBusy,
             onDelete = { viewModel.discardOtherUsersEntries(onSignedUp) },
             onCancel = viewModel::keepOtherUsersEntries,
         )
@@ -663,12 +665,24 @@ fun OutboxOwnerDialog(
     count: Int,
     onDelete: () -> Unit,
     onCancel: () -> Unit,
+    busy: OwnerChoice? = null,
 ) {
+    // Taps are ignored while an action runs; the chosen button shows a spinner.
     AlertDialog(
-        onDismissRequest = onCancel,
+        onDismissRequest = { if (busy == null) onCancel() },
         text = { Text(pluralStringResource(R.plurals.outbox_other_user, count, count)) },
-        confirmButton = { TextButton(onClick = onDelete) { Text(stringResource(R.string.outbox_delete_continue)) } },
-        dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.outbox_cancel)) } },
+        confirmButton = {
+            TextButton(onClick = { if (busy == null) onDelete() }) {
+                if (busy == OwnerChoice.Delete) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                Text(stringResource(R.string.outbox_delete_continue))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { if (busy == null) onCancel() }) {
+                if (busy == OwnerChoice.Cancel) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                Text(stringResource(R.string.outbox_cancel))
+            }
+        },
     )
 }
 
@@ -719,6 +733,7 @@ fun SignInRoute(
     form.ownerDialog?.let { count ->
         OutboxOwnerDialog(
             count,
+            busy = form.ownerBusy,
             onDelete = { viewModel.discardOtherUsersEntries(savePassword, onSignedIn) },
             onCancel = viewModel::keepOtherUsersEntries,
         )

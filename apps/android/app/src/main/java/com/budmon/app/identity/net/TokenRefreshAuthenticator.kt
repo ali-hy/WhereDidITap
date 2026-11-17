@@ -59,7 +59,8 @@ class TokenRefreshAuthenticator
             val error = ApiErrorParser.parse(response.code, response.peekBody(PEEK_MAX).bytes())
             if (error !is ApiError.Defined || error.key != "UNAUTHENTICATED") return null
             val used = response.request.header("Authorization")
-            return runBlocking { mutex.withLock { retry(response.request, used) } }
+            val signOut = response.request.url.encodedPath == root.encodedPath + "auth/sign-out"
+            return runBlocking { mutex.withLock { retry(response.request, used, signOut) } }
         }
 
         /** Under the API root; `auth/` paths other than sign-out are excluded. */
@@ -74,11 +75,12 @@ class TokenRefreshAuthenticator
         private suspend fun retry(
             request: Request,
             used: String?,
+            signOut: Boolean,
         ): Request? {
             val stored = tokenStore.read() ?: return null
             // Another call refreshed while this one waited.
             if (used != "Bearer ${stored.accessToken}") return withToken(request, stored.accessToken)
-            val fresh = refresh(stored) ?: return null
+            val fresh = refresh(stored, signOut) ?: return null
             return withToken(request, fresh.accessToken)
         }
 
@@ -87,8 +89,14 @@ class TokenRefreshAuthenticator
             token: String,
         ): Request = request.newBuilder().header("Authorization", "Bearer $token").build()
 
-        /** The new session, or null when the refresh token was refused (the session is then ended). */
-        private suspend fun refresh(stored: StoredSession): StoredSession? {
+        /**
+         * The new session, or null when the refresh token was refused: the session is cleared, and
+         * announced as ended unless the refresh was for a sign-out.
+         */
+        private suspend fun refresh(
+            stored: StoredSession,
+            signOut: Boolean,
+        ): StoredSession? {
             val body =
                 buildJsonObject {
                     put("tokenDelivery", "body")
@@ -111,7 +119,7 @@ class TokenRefreshAuthenticator
                 val error = ApiErrorParser.parse(code, bytes)
                 if (error is ApiError.Defined && error.key == "REFRESH_INVALID") {
                     tokenStore.clear()
-                    sessionEvents.emit(SessionEvent.Ended)
+                    if (!signOut) sessionEvents.emit(SessionEvent.Ended)
                     return null
                 }
                 throw RefreshFailedException(error)

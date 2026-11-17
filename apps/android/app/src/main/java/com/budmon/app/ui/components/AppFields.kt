@@ -70,8 +70,7 @@ fun AppTextField(
         Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface)
         OutlinedTextField(
             value = value,
-            // A controlled field that was reset to its value reports no change.
-            onValueChange = { if (it != value) onValueChange(it) },
+            onValueChange = onValueChange,
             modifier =
             Modifier
                 .fillMaxWidth()
