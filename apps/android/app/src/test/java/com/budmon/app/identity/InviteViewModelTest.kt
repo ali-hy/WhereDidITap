@@ -1,12 +1,15 @@
 // F-212 InviteViewModel over F-204 AuthRepository and MockWebServer (identity LLD §4.15, A-37,
 // A-41, A-58). TP-1.34's ViewModel rows, TP-1.47's formError, TP-1.55's Android part, TP-3.48 (k)
-// (A-77), plus TP-1.34x.
+// (A-77), TP-3.57's A-86 cases for the owner dialog, plus TP-1.34x.
 // S-3 setup (A-69, §8.2): InviteViewModel(repository, guard) with TP-3.48's guard (a MockK OutboxDao
 // over `entries`, empty unless a test fills it, and a relaxed MockK OutboxRepository); the store is
 // written only after guard.complete.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.identity
 
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
 import com.budmon.app.R
 import com.budmon.app.core.error.UiText
 import com.budmon.app.core.outbox.OutboxDao
@@ -304,6 +307,70 @@ class InviteViewModelTest {
             coVerify(exactly = 0) { dao.deleteAll() }
             assertEquals("0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a99", store.outboxOwnerUserId())
             assertNull(store.read())
+        }
+
+    // ---- A-86 for the invitation's owner dialog ----
+
+    private fun signOuts() = authorizations.filter { it.first == "/api/v1/auth/sign-out" }
+
+    @Test
+    fun `TP-3_57 (InviteViewModel) Delete and continue tapped twice quickly - discarded once, onDone once (A-86)`() = runTest {
+        val vm = askingAboutOtherEntries { }
+        val done = mutableListOf<Me>()
+
+        vm.discardOtherUsersEntries { me -> done += me }
+        vm.discardOtherUsersEntries { me -> done += me }
+        await("onDone") { done.isNotEmpty() }
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf(ME), done)
+        coVerify(exactly = 1) { dao.deleteAll() }
+        verify(exactly = 1) { outbox.kick() }
+    }
+
+    @Test
+    fun `TP-3_57 (InviteViewModel) the dialog dismissed twice quickly (Back is Cancel) - one sign-out with the pending token, Problem(Used(true)) (A-86)`() =
+        runTest {
+            val vm = askingAboutOtherEntries { }
+
+            vm.keepOtherUsersEntries()
+            vm.keepOtherUsersEntries()
+            await("Problem") { vm.state is InviteState.Problem }
+            await("the sign-out") { signOuts().isNotEmpty() }
+            testScheduler.advanceUntilIdle()
+
+            assertEquals(listOf("Bearer $acceptedAccess"), signOuts().map { it.second })
+            coVerify(exactly = 0) { dao.deleteAll() }
+            assertNull(store.read())
+        }
+
+    @Test
+    fun `TP-3_57 (InviteViewModel) cleared while the owner dialog is shown - the pending sign-in released once (a sign-out with its token), nothing stored (A-86)`() =
+        runTest {
+            entries = 3
+            runBlocking { store.setOutboxOwnerUserId("0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a99") }
+            Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+            val repository = AuthRepository(OkHttpClient(), server.url("/"), store, mockk(relaxed = true))
+            val guard = OutboxOwnerGuard(dao, store, outbox, repository)
+            val viewModels = ViewModelStore()
+            val factory = object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T = InviteViewModel(repository, guard) as T
+            }
+            val vm = ViewModelProvider(viewModels, factory)[InviteViewModel::class.java]
+            toSetUp(vm)
+            vm.name = "Mona Hassan"
+            vm.password = "violet staircase umbrella"
+            vm.submit { }
+            await("ownerDialog") { vm.ownerDialog != null }
+
+            viewModels.clear()
+            // release() runs on the guard's own scope (Dispatchers.IO), not the test scheduler.
+            eventually("the release's sign-out") { signOuts().isNotEmpty() }
+
+            assertEquals(listOf("Bearer $acceptedAccess"), signOuts().map { it.second })
+            assertNull(store.read())
+            coVerify(exactly = 0) { dao.deleteAll() }
         }
 
     private fun problemCases(): List<Pair<() -> MockResponse, (InviteProblem) -> Boolean>> = listOf(

@@ -1,5 +1,5 @@
 // F-203 TokenRefreshAuthenticator and AppModule's @Named("refreshClient") client (identity LLD §4.15,
-// §8.2's S-3 signatures, A-68). TP-3.55 (a) to (j), plus TP-3.55x.
+// §8.2's S-3 signatures, A-68). TP-3.55 (a) to (k), plus TP-3.55x.
 // Setup per TP-3.55: Robolectric; the real TokenStore over an in-memory key holding a session (tokens
 // "O"); MockWebServer. The clients are AppModule's own: refreshClient(VERSION), and
 // okHttpClient(VERSION, AuthInterceptor, the authenticator); the real AuthRepository makes the calls.
@@ -304,6 +304,22 @@ class TokenRefreshAuthenticatorTest {
                 listOf("Bearer ${old.accessToken}", "Bearer ${new.accessToken}"),
                 http.of(PATH_SIGN_OUT).map { it.authorization },
             )
+            assertNull(store.read())
+        }
+
+    @Test
+    fun `TP-3_55 (k) sign-out 401 UNAUTHENTICATED, refresh REFRESH_INVALID - cleared, no Ended, signOut returns normally (A-87)`() =
+        runBlocking {
+            http.answers[PATH_SIGN_OUT] = { unauthenticated() }
+            http.answers[PATH_REFRESH] = { definedError("REFRESH_INVALID", 401) }
+
+            events.events.test {
+                repository.signOut()
+
+                expectNoEvents()
+            }
+            assertEquals(1, http.of(PATH_REFRESH).size)
+            assertEquals(1, http.of(PATH_SIGN_OUT).size)
             assertNull(store.read())
         }
 

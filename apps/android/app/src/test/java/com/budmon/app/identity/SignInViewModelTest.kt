@@ -1,18 +1,24 @@
 // F-208 SignInViewModel (identity LLD §4.15, §8.2's S-3 signatures, A-70, A-75). TP-3.57's
-// SignInViewModel rows, plus TP-3.57x. The screens are SignInSignOutScreensTest.
+// SignInViewModel rows (with A-86's), plus TP-3.57x. The screens are SignInSignOutScreensTest.
 // Setup per TP-3.57: a MockK AuthRepository and a relaxed MockK OutboxOwnerGuard; a MockK TokenStore
 // whose lastEmail() is null unless a test says otherwise; Dispatchers.setMain(StandardTestDispatcher)
 // so viewModelScope runs on virtual time. `log` records savePassword and onSignedIn in order.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.identity
 
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
 import com.budmon.app.R
+import com.budmon.app.core.error.Operation
 import com.budmon.app.core.error.UiText
 import com.budmon.app.core.network.ApiError
 import com.budmon.app.identity.store.TokenStore
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.verify
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
@@ -236,5 +242,107 @@ class SignInViewModelTest {
 
         coVerify(exactly = 1) { repository.signIn(EMAIL, PASSWORD) }
         assertEquals(false, vm.form.busy)
+    }
+
+    // ---- A-86: release, double taps, Back, unexpected exceptions ----
+
+    /** A view model in [store] (so clearing the store runs onCleared), asking about 3 entries. */
+    private fun TestScope.askingIn(store: ViewModelStore): SignInViewModel {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        coEvery { repository.signIn(EMAIL, PASSWORD) } returns SignInOutcome.Ready(pending)
+        coEvery { guard.complete(pending) } returns OwnerDecision.AskDiscard(3)
+        val factory = object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T = SignInViewModel(repository, guard, tokenStore) as T
+        }
+        val vm = ViewModelProvider(store, factory)[SignInViewModel::class.java]
+        advanceUntilIdle()
+        vm.onEmailChange(EMAIL)
+        vm.onPasswordChange(PASSWORD)
+        vm.submit(true, savePassword, onSignedIn)
+        advanceUntilIdle()
+        assertEquals(3, vm.form.ownerDialog)
+        return vm
+    }
+
+    @Test
+    fun `TP-3_57 Delete and continue tapped twice quickly - discardAndProceed once (A-86)`() = runTest {
+        val vm = askingIn(ViewModelStore())
+        val gate = CompletableDeferred<Unit>()
+        coEvery { guard.discardAndProceed(pending) } coAnswers { gate.await() }
+
+        vm.discardOtherUsersEntries(savePassword, onSignedIn)
+        runCurrent()
+        vm.discardOtherUsersEntries(savePassword, onSignedIn)
+        runCurrent()
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { guard.discardAndProceed(pending) }
+        assertEquals(listOf("save $EMAIL $PASSWORD", "signedIn ${ME.id}"), log)
+    }
+
+    @Test
+    fun `TP-3_57 the view model cleared while ownerDialog is shown - guard release(pending) once (A-86)`() = runTest {
+        val store = ViewModelStore()
+        askingIn(store)
+
+        store.clear()
+        advanceUntilIdle()
+
+        verify(exactly = 1) { guard.release(pending) }
+        assertEquals(emptyList<String>(), log)
+    }
+
+    @Test
+    fun `TP-3_57x the view model cleared after a Proceed - nothing to release (A-86)`() = runTest {
+        val store = ViewModelStore()
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        coEvery { repository.signIn(EMAIL, PASSWORD) } returns SignInOutcome.Ready(pending)
+        coEvery { guard.complete(pending) } returns OwnerDecision.Proceed
+        val factory = object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T = SignInViewModel(repository, guard, tokenStore) as T
+        }
+        val vm = ViewModelProvider(store, factory)[SignInViewModel::class.java]
+        vm.onEmailChange(EMAIL)
+        vm.onPasswordChange(PASSWORD)
+        vm.submit(true, savePassword, onSignedIn)
+        advanceUntilIdle()
+
+        store.clear()
+        advanceUntilIdle()
+
+        verify(exactly = 0) { guard.release(any()) }
+    }
+
+    @Test
+    fun `TP-3_57 the owner dialog dismissed (Back is Cancel), dismissed twice quickly - cancel once, ownerDialog null (A-86)`() = runTest {
+        val vm = askingIn(ViewModelStore())
+        val gate = CompletableDeferred<Unit>()
+        coEvery { guard.cancel(pending) } coAnswers { gate.await() }
+
+        vm.keepOtherUsersEntries()
+        runCurrent()
+        vm.keepOtherUsersEntries()
+        runCurrent()
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { guard.cancel(pending) }
+        coVerify(exactly = 0) { guard.discardAndProceed(any()) }
+        assertNull(vm.form.ownerDialog)
+        assertEquals(emptyList<String>(), log)
+    }
+
+    @Test
+    fun `TP-3_57 repository signIn throwing IllegalStateException - formError F-220's Unknown text, busy false (A-86)`() = runTest {
+        coEvery { repository.signIn(EMAIL, PASSWORD) } throws IllegalStateException("unexpected")
+
+        val vm = submitted(EMAIL, PASSWORD)
+
+        assertEquals(IdentityErrorMessages.forError(ApiError.Unknown, Operation.Read), vm.form.formError)
+        assertEquals(false, vm.form.busy)
+        assertEquals(emptyList<String>(), log)
     }
 }

@@ -89,11 +89,11 @@ class AuthInterceptorTest {
     }
 
     @Test
-    fun `TP-0_29 (e) Bearer other is replaced by the stored token`() {
+    fun `TP-0_29 (e) Bearer other is kept unchanged (A-87)`() {
         runBlocking { store.save(session()) }
         val request = at("me").newBuilder().header("Authorization", "Bearer other").build()
 
-        assertEquals("Bearer $access", authorizationOf(request))
+        assertEquals("Bearer other", authorizationOf(request))
     }
 
     @Test

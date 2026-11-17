@@ -1,11 +1,15 @@
 // S-3's Android screens (identity LLD §8.2's S-3 signatures and strings, A-70, A-71): SignInScreen,
 // OutboxOwnerDialog, SignOutDialog and HomeFirstRunScreen's account menu. TP-3.57's screen rows,
-// plus TP-3.57x. Screens get fake lambdas that count their calls.
+// plus TP-3.57x. Screens get fake lambdas that count their calls; a host that types into a field
+// keeps `form` in its own mutableStateOf (P-A-534).
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.identity.ui
 
 import android.content.Context
+import android.view.KeyEvent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -16,6 +20,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -119,13 +124,21 @@ class SignInSignOutScreensTest {
         val email = Counter()
         val password = Counter()
         val submit = Counter()
+        // The host keeps `form` in its own state, updated by the lambdas (P-A-534).
+        val state = mutableStateOf(form(emailError = R.string.form_email_invalid, formError = UiText(R.string.error_invalid_credentials)))
         show {
             SignInScreen(
                 reason = SignedOutReason.None,
                 isOnline = true,
-                form = form(emailError = R.string.form_email_invalid, formError = UiText(R.string.error_invalid_credentials)),
-                onEmailChange = email.text,
-                onPasswordChange = password.text,
+                form = state.value,
+                onEmailChange = {
+                    email.text(it)
+                    state.value = state.value.copy(email = it)
+                },
+                onPasswordChange = {
+                    password.text(it)
+                    state.value = state.value.copy(password = it)
+                },
                 onSubmit = submit.call,
                 onHaveLink = {},
                 onPrivacy = {},
@@ -158,6 +171,25 @@ class SignInSignOutScreensTest {
         compose.onNodeWithText(text(R.string.outbox_cancel)).performClick()
         assertEquals(1, cancel.calls)
         assertEquals(1, delete.calls)
+    }
+
+    @Test
+    fun `TP-3_57 OutboxOwnerDialog dismissed with Back - onCancel once, onDelete never (A-86)`() {
+        val delete = Counter()
+        val cancel = Counter()
+        show { OutboxOwnerDialog(count = 3, onDelete = delete.call, onCancel = cancel.call) }
+        compose.onNodeWithText(plural(R.plurals.outbox_other_user, 3)).assertIsDisplayed()
+
+        // Back goes to the dialog's window, as a real key press does.
+        val dialogRoot = (compose.onNode(isDialog()).fetchSemanticsNode().root as ViewRootForTest).view.rootView
+        compose.runOnUiThread {
+            dialogRoot.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK))
+            dialogRoot.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK))
+        }
+        compose.waitForIdle()
+
+        assertEquals(1, cancel.calls)
+        assertEquals(0, delete.calls)
     }
 
     // ---- SignOutDialog (F-218's J-10 dialog) ----
