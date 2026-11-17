@@ -488,21 +488,35 @@ test.describe("TP-3.59: axe with the account menu open (F-162, A-88)", () => {
     await expect(menu).toBeHidden();
     await expect(trigger).toBeFocused();
 
-    // A-93 (2): an outside click on a focusable element (the wordmark link) keeps focus there.
+    // A-93 (2), A-94 (b): an outside click on a focusable element (main's h1) keeps focus there.
+    const heading = page.locator("main h1");
     await trigger.click();
     await expect(menu).toBeVisible();
-    const wordmark = page.getByRole("banner").getByRole("link", { name: "wDit" });
-    await wordmark.click();
+    await heading.click();
     await expect(menu).toBeHidden();
-    await expect(wordmark).toBeFocused();
+    await expect(heading).toBeFocused();
+
+    // A-94 (a): with the menu closed, the wordmark on its own page stays on / and focuses the h1.
+    const wordmark = page.getByRole("banner").getByRole("link", { name: "wDit" });
+    await trigger.focus();
+    await expect(heading).not.toBeFocused();
+    await wordmark.click();
+    expect(new URL(page.url()).pathname).toBe("/");
+    await expect(heading).toBeFocused();
 
     // A-93 (1): Settings navigates; focus goes to the new page's h1 (P-F-216).
     await trigger.click();
     await expect(menu).toBeVisible();
     await menu.getByRole("menuitem", { name: catalogText("Settings") }).click();
     await expect(page).toHaveURL((u) => u.pathname === "/settings");
-    await expect(page.locator("main h1")).toHaveText(catalogText("Settings"));
-    await expect(page.locator("main h1")).toBeFocused();
+    await expect(heading).toHaveText(catalogText("Settings"));
+    await expect(heading).toBeFocused();
+
+    // A-94 (a): from /settings the wordmark navigates to / with focus on its h1.
+    await wordmark.click();
+    await expect(page).toHaveURL((u) => u.pathname === "/");
+    await expect(heading).toHaveText(looseText("Welcome, Menu Axe."));
+    await expect(heading).toBeFocused();
   }
 
   /** A point inside `main` whose topmost element is `main` itself (nothing focusable under it). */
@@ -525,7 +539,7 @@ test.describe("TP-3.59: axe with the account menu open (F-162, A-88)", () => {
     test.describe(`${mode} mode`, () => {
       test.use({ colorScheme: mode });
 
-      test(`TP-3.59: ${mode} mode: with the account menu open, no axe violation and main not aria-hidden; Escape closes it with focus on the trigger; outside clicks and Settings move focus as A-93 says`, async ({
+      test(`TP-3.59: ${mode} mode: with the account menu open, no axe violation and main not aria-hidden; Escape closes it with focus on the trigger; outside clicks, Settings and the wordmark move focus as A-93 and A-94 say`, async ({
         page,
         request,
       }, testInfo) => {
@@ -538,7 +552,7 @@ test.describe("TP-3.59: axe with the account menu open (F-162, A-88)", () => {
     });
   }
 
-  test("TP-3.59: pseudo-RTL (an ar-XB user): with the account menu open, no axe violation and main not aria-hidden; Escape closes it with focus on the trigger; outside clicks and Settings move focus as A-93 says", async ({
+  test("TP-3.59: pseudo-RTL (an ar-XB user): with the account menu open, no axe violation and main not aria-hidden; Escape closes it with focus on the trigger; outside clicks, Settings and the wordmark move focus as A-93 and A-94 say", async ({
     page,
     request,
   }, testInfo) => {
