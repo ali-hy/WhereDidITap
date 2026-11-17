@@ -283,11 +283,20 @@ test.describe("TP-3.46: pseudo-RTL (ar-XB; A-75)", () => {
     await signInByApi(request, email);
 
     await open(page, { path: "/settings/security", h1: "Sign-in & security" });
+    const signOutOthers = page
+      .locator("main")
+      .getByRole("button", { name: catalogText("Sign out of all other devices") });
+    await expect(signOutOthers).toBeVisible();
+
+    // A-77: only Sign out of all other devices sits in a button row; a session row's Sign out doesn't.
     await expect(
-      page
-        .locator("main")
-        .getByRole("button", { name: catalogText("Sign out of all other devices") }),
-    ).toBeVisible();
+      page.locator("main [data-button-row]").getByRole("button", {
+        name: catalogText("Sign out of all other devices"),
+      }),
+    ).toHaveCount(1);
+    const rowSignOut = page.locator("main").getByRole("button", { name: catalogText("Sign out") });
+    await expect(rowSignOut).toHaveCount(1);
+    expect(await rowSignOut.evaluate((b) => b.closest("[data-button-row]") === null)).toBe(true);
 
     await expectRtlRules(page);
   });
