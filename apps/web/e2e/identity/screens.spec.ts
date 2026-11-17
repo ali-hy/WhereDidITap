@@ -512,6 +512,16 @@ test.describe("TP-3.59: axe with the account menu open (F-162, A-88)", () => {
     await expect(heading).toHaveText(catalogText("Settings"));
     await expect(heading).toBeFocused();
 
+    // A-96: on /settings, the menu's Settings stays on /settings, closes the menu and focuses the h1.
+    await trigger.click();
+    await expect(menu).toBeVisible();
+    await expect(heading).not.toBeFocused();
+    await menu.getByRole("menuitem", { name: catalogText("Settings") }).click();
+    await expect(menu).toBeHidden();
+    expect(new URL(page.url()).pathname).toBe("/settings");
+    await expect(heading).toHaveText(catalogText("Settings"));
+    await expect(heading).toBeFocused();
+
     // A-94 (a): from /settings the wordmark navigates to / with focus on its h1.
     await wordmark.click();
     await expect(page).toHaveURL((u) => u.pathname === "/");
@@ -539,7 +549,7 @@ test.describe("TP-3.59: axe with the account menu open (F-162, A-88)", () => {
     test.describe(`${mode} mode`, () => {
       test.use({ colorScheme: mode });
 
-      test(`TP-3.59: ${mode} mode: with the account menu open, no axe violation and main not aria-hidden; Escape closes it with focus on the trigger; outside clicks, Settings and the wordmark move focus as A-93 and A-94 say`, async ({
+      test(`TP-3.59: ${mode} mode: with the account menu open, no axe violation and main not aria-hidden; Escape closes it with focus on the trigger; outside clicks, Settings and the wordmark move focus as A-93, A-94 and A-96 say`, async ({
         page,
         request,
       }, testInfo) => {
@@ -552,7 +562,7 @@ test.describe("TP-3.59: axe with the account menu open (F-162, A-88)", () => {
     });
   }
 
-  test("TP-3.59: pseudo-RTL (an ar-XB user): with the account menu open, no axe violation and main not aria-hidden; Escape closes it with focus on the trigger; outside clicks, Settings and the wordmark move focus as A-93 and A-94 say", async ({
+  test("TP-3.59: pseudo-RTL (an ar-XB user): with the account menu open, no axe violation and main not aria-hidden; Escape closes it with focus on the trigger; outside clicks, Settings and the wordmark move focus as A-93, A-94 and A-96 say", async ({
     page,
     request,
   }, testInfo) => {
