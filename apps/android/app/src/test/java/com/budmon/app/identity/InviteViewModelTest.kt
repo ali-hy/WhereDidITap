@@ -1,5 +1,6 @@
 // F-212 InviteViewModel over F-204 AuthRepository and MockWebServer (identity LLD §4.15, A-37,
-// A-41, A-58). TP-1.34's ViewModel rows, TP-1.47's formError, TP-1.55's Android part, plus TP-1.34x.
+// A-41, A-58). TP-1.34's ViewModel rows, TP-1.47's formError, TP-1.55's Android part, TP-3.48 (k)
+// (A-77), plus TP-1.34x.
 // S-3 setup (A-69, §8.2): InviteViewModel(repository, guard) with TP-3.48's guard (a MockK OutboxDao
 // over `entries`, empty unless a test fills it, and a relaxed MockK OutboxRepository); the store is
 // written only after guard.complete.
@@ -215,7 +216,7 @@ class InviteViewModelTest {
     // ---- Review B-7 (A-37, A-41, A-45), changed in S-3 (A-69) ----
 
     @Test
-    fun `TP-1_34x accept 200 then me 503 - Problem(Used(recent = true)), no onDone, a sign-out with the pending token, nothing stored`() =
+    fun `TP-3_48 (k) accept 200 then me 503 - Problem(Used(recent = true)) with the preview's inviter and origin, no onDone, a sign-out with the pending token, nothing stored`() =
         runTest {
             answers["/api/v1/me"] = { unavailable() }
             val vm = viewModel()
@@ -227,7 +228,11 @@ class InviteViewModelTest {
             vm.submit { called = true }
             await("Problem") { vm.state is InviteState.Problem }
 
-            assertEquals(InviteProblem.Used(recent = true), (vm.state as InviteState.Problem).problem)
+            // A-77: the preview's inviterName and origin; Used(recent = true) shows no ask line (screen rule).
+            assertEquals(
+                InviteState.Problem(InviteProblem.Used(recent = true), inviter = "Ahmed", origin = "direct"),
+                vm.state,
+            )
             assertEquals(false, called)
             await("the best-effort sign-out") { authorizations.any { it.first == "/api/v1/auth/sign-out" } }
             assertEquals(
@@ -235,6 +240,8 @@ class InviteViewModelTest {
                 authorizations.single { it.first == "/api/v1/auth/sign-out" }.second,
             )
             assertNull(store.read())
+            assertNull(store.deviceTokenFor(invitedEmail))
+            assertNull(store.lastEmail())
             verify(exactly = 0) { outbox.kick() }
         }
 

@@ -26,7 +26,6 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -52,15 +51,21 @@ class SignOutViewModelTest {
     }
 
     @Test
-    fun `TP-3_57 0 entries - signed out at once, then onSignedOut`() = runTest {
+    fun `TP-3_57 0 entries - signed out at once, Idle, then onSignedOut`() = runTest {
         val vm = viewModel()
+        var stateAtCallback: SignOutState? = null
 
-        vm.requestSignOut(onSignedOut)
+        vm.requestSignOut {
+            stateAtCallback = vm.state
+            onSignedOut()
+        }
         advanceUntilIdle()
 
         coVerify(exactly = 1) { repository.signOut() }
         assertEquals(1, signedOut)
-        assertTrue("no dialog: ${vm.state}", vm.state !is SignOutState.Confirming)
+        // A-77: Idle before onSignedOut runs, and it stays Idle.
+        assertEquals(SignOutState.Idle, stateAtCallback)
+        assertEquals(SignOutState.Idle, vm.state)
     }
 
     @Test
@@ -83,17 +88,23 @@ class SignOutViewModelTest {
     }
 
     @Test
-    fun `TP-3_57 2 entries then Sign out anyway - signOut, then onSignedOut, entries left`() = runTest {
+    fun `TP-3_57 2 entries then Sign out anyway - signOut, Idle, then onSignedOut, entries left`() = runTest {
         entries = 2
         val vm = viewModel()
+        var stateAtCallback: SignOutState? = null
         vm.requestSignOut(onSignedOut)
         advanceUntilIdle()
 
-        vm.signOutAnyway(onSignedOut)
+        vm.signOutAnyway {
+            stateAtCallback = vm.state
+            onSignedOut()
+        }
         advanceUntilIdle()
 
         coVerify(exactly = 1) { repository.signOut() }
         assertEquals(1, signedOut)
+        assertEquals(SignOutState.Idle, stateAtCallback)
+        assertEquals(SignOutState.Idle, vm.state)
         coVerify(exactly = 0) { dao.deleteAll() }
         verify(exactly = 0) { outbox.kick() }
     }

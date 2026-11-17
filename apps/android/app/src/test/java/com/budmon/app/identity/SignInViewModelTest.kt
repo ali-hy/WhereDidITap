@@ -154,21 +154,23 @@ class SignInViewModelTest {
     }
 
     @Test
-    fun `TP-3_57 Ready then AskDiscard(3) - ownerDialog 3, discardOtherUsersEntries - discardAndProceed, then onSignedIn`() = runTest {
+    fun `TP-3_57 Ready then AskDiscard(3) - ownerDialog 3, discardOtherUsersEntries - discardAndProceed, then as Proceed - savePassword once, ownerDialog null, password cleared, onSignedIn`() = runTest {
         coEvery { repository.signIn(EMAIL, PASSWORD) } returns SignInOutcome.Ready(pending)
         coEvery { guard.complete(pending) } returns OwnerDecision.AskDiscard(3)
 
         val vm = submitted(EMAIL, PASSWORD)
 
         assertEquals(3, vm.form.ownerDialog)
-        assertEquals("not signed in while asking", false, log.contains("signedIn ${ME.id}"))
+        assertEquals("nothing saved or signed in while asking", emptyList<String>(), log)
 
         vm.discardOtherUsersEntries(savePassword, onSignedIn)
         advanceUntilIdle()
 
+        // A-77: from here it behaves as Proceed.
         coVerify(exactly = 1) { guard.discardAndProceed(pending) }
-        assertEquals("signedIn ${ME.id}", log.last())
-        assertEquals(1, log.count { it == "signedIn ${ME.id}" })
+        assertEquals(listOf("save $EMAIL $PASSWORD", "signedIn ${ME.id}"), log)
+        assertNull(vm.form.ownerDialog)
+        assertEquals("", vm.form.password)
     }
 
     @Test
