@@ -1,5 +1,5 @@
 // F-203 TokenRefreshAuthenticator and AppModule's @Named("refreshClient") client (identity LLD §4.15,
-// §8.2's S-3 signatures, A-68). TP-3.55 (a) to (i), plus TP-3.55x.
+// §8.2's S-3 signatures, A-68). TP-3.55 (a) to (j), plus TP-3.55x.
 // Setup per TP-3.55: Robolectric; the real TokenStore over an in-memory key holding a session (tokens
 // "O"); MockWebServer. The clients are AppModule's own: refreshClient(VERSION), and
 // okHttpClient(VERSION, AuthInterceptor, the authenticator); the real AuthRepository makes the calls.
@@ -16,6 +16,7 @@ import com.budmon.app.identity.AuthRepository
 import com.budmon.app.identity.ME
 import com.budmon.app.identity.PATH_ME
 import com.budmon.app.identity.PATH_REFRESH
+import com.budmon.app.identity.PATH_SIGN_IN
 import com.budmon.app.identity.PATH_SIGN_OUT
 import com.budmon.app.identity.PathDispatcher
 import com.budmon.app.identity.SessionEvent
@@ -238,7 +239,9 @@ class TokenRefreshAuthenticatorTest {
 
     @Test
     fun `TP-3_55 (h) the refresh connection fails - the session kept, nothing emitted, ApiException(Network)`() = runBlocking {
-        http.answers[PATH_REFRESH] = { MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START) }
+        // DISCONNECT_AT_START is read through Dispatcher.peek(), which PathDispatcher doesn't override;
+        // DISCONNECT_AFTER_REQUEST applies to a dispatched response.
+        http.answers[PATH_REFRESH] = { MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST) }
 
         events.events.test {
             val error = apiErrorOf { repository.getMe() }
@@ -288,13 +291,30 @@ class TokenRefreshAuthenticatorTest {
     }
 
     @Test
-    fun `TP-3_55x a 401 UNAUTHENTICATED from auth-sign-out - no refresh (only requests outside auth-)`() = runBlocking {
-        http.answers[PATH_SIGN_OUT] = { unauthenticated() }
+    fun `TP-3_55 (j) sign-out 401 UNAUTHENTICATED, refresh 200, retried sign-out 200 - one refresh, retried with the new token, then signOut clears the session (A-81)`() =
+        runBlocking {
+            http.answers[PATH_SIGN_OUT] = { request ->
+                if (request.authorization == "Bearer ${new.accessToken}") jsonResponse("""{"ok":true}""") else unauthenticated()
+            }
 
-        repository.signOut()
+            repository.signOut()
+
+            assertEquals(1, http.of(PATH_REFRESH).size)
+            assertEquals(
+                listOf("Bearer ${old.accessToken}", "Bearer ${new.accessToken}"),
+                http.of(PATH_SIGN_OUT).map { it.authorization },
+            )
+            assertNull(store.read())
+        }
+
+    @Test
+    fun `TP-3_55x a 401 UNAUTHENTICATED from auth-sign-in - no refresh (A-81 keeps the other auth- exclusions)`() = runBlocking {
+        http.answers[PATH_SIGN_IN] = { unauthenticated() }
+
+        apiErrorOf { repository.signIn(ME.email, "violet staircase umbrella") }
 
         assertTrue(http.of(PATH_REFRESH).isEmpty())
-        assertEquals(1, http.of(PATH_SIGN_OUT).size)
+        assertEquals(1, http.of(PATH_SIGN_IN).size)
     }
 
     @Test
