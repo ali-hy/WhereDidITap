@@ -20,6 +20,8 @@ export function initialsOf(name: string): string {
   return letters.join("").toLocaleUpperCase() || "?";
 }
 
+const FOCUSABLE = "a[href],button,input,select,textarea,summary,[tabindex]";
+
 const ITEM =
   "flex min-h-11 cursor-pointer items-center rounded-control px-3 text-fg outline-none data-[highlighted]:bg-accent-tint data-[highlighted]:text-on-accent-tint";
 
@@ -27,6 +29,25 @@ export function AccountMenu(): JSX.Element {
   const { t } = useI18n();
   const session = useSession();
   const navigate = useNavigate();
+
+  let trigger: HTMLElement | undefined;
+  // The outside element the last outside interaction landed on; null when the menu closed otherwise.
+  let outsideTarget: EventTarget | null = null;
+  // Set when an item navigates: the new page's h1 takes focus.
+  let leaving = false;
+
+  /** Focus returns to the trigger, unless the person clicked something focusable or navigated. */
+  const restoreFocus = (event: Event): void => {
+    event.preventDefault();
+    const target = outsideTarget;
+    outsideTarget = null;
+    if (leaving) {
+      leaving = false;
+      return;
+    }
+    if (target instanceof Element && target.closest(FOCUSABLE) !== null) return;
+    trigger?.focus();
+  };
 
   const signOut = async (): Promise<void> => {
     try {
@@ -40,6 +61,9 @@ export function AccountMenu(): JSX.Element {
   return (
     <DropdownMenu placement="bottom-end" modal={false}>
       <DropdownMenu.Trigger
+        ref={(el: HTMLElement) => {
+          trigger = el;
+        }}
         aria-label={t(m.menuAccount)}
         class="inline-flex size-11 items-center justify-center rounded-full border border-line-strong bg-surface text-sm font-semibold text-fg"
       >
@@ -47,9 +71,22 @@ export function AccountMenu(): JSX.Element {
           {initialsOf(session.me()?.displayName ?? "")}
         </span>
       </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content class="z-10 mt-1 min-w-48 rounded-card border border-line bg-surface-raised p-1 shadow-overlay">
-          <DropdownMenu.Item class={ITEM} onSelect={() => void navigate({ to: "/settings" })}>
+      {/* Inside the header landmark; the body is the fallback when there is none. */}
+      <DropdownMenu.Portal mount={document.querySelector("header") as Node}>
+        <DropdownMenu.Content
+          onInteractOutside={(e) => {
+            outsideTarget = e.target;
+          }}
+          onCloseAutoFocus={restoreFocus}
+          class="z-10 mt-1 min-w-48 rounded-card border border-line bg-surface-raised p-1 shadow-overlay"
+        >
+          <DropdownMenu.Item
+            class={ITEM}
+            onSelect={() => {
+              leaving = true;
+              void navigate({ to: "/settings" });
+            }}
+          >
             {t(m.menuSettings)}
           </DropdownMenu.Item>
           <DropdownMenu.Item class={ITEM} onSelect={() => void signOut()}>

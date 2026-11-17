@@ -7,6 +7,8 @@ import { APP_NAME } from "../app/brand.js";
 export interface WordmarkProps {
   /** Makes the wordmark a link (signed-in screens link home). */
   href?: string;
+  /** Click handler of the link. */
+  onClick?: (event: MouseEvent) => void;
 }
 
 // The parts join to APP_NAME; anything else renders the plain name.
@@ -36,7 +38,7 @@ export function Wordmark(props: WordmarkProps): JSX.Element {
       }
     >
       {(href) => (
-        <a href={href()} dir="ltr" class={CLASSES}>
+        <a href={href()} dir="ltr" class={CLASSES} onClick={(e) => props.onClick?.(e)}>
           <Name />
         </a>
       )}

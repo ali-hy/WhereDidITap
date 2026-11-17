@@ -4,6 +4,7 @@ import {
   createRoute,
   createRouter,
   Outlet,
+  useNavigate,
   useRouterState,
   type AnyRoute,
   type ErrorComponentProps,
@@ -28,12 +29,13 @@ import { ErrorFallback } from "./ui/ErrorFallback.js";
 /** The layout's frame; the error fallback renders inside it too (§4.18, Q-D2). */
 function Shell(props: { children: JSX.Element }): JSX.Element {
   const session = useSession();
+  const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   // Settings has room for two columns from 960 px.
   const width = () => (pathname().startsWith("/settings") ? "max-w-[72rem]" : "max-w-[40rem]");
   return (
     <>
-      <AppHeader width={width()} />
+      <AppHeader width={width()} navigate={(to) => void navigate({ to })} />
       <main
         id="main"
         aria-busy={session.status() === "loading" ? "true" : undefined}
