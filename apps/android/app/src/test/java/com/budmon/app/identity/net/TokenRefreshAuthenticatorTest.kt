@@ -1,5 +1,5 @@
 // F-203 TokenRefreshAuthenticator and AppModule's @Named("refreshClient") client (identity LLD §4.15,
-// §8.2's S-3 signatures, A-68). TP-3.55 (a) to (k), plus TP-3.55x.
+// §8.2's S-3 signatures, A-68). TP-3.55 (a) to (l), plus TP-3.55x.
 // Setup per TP-3.55: Robolectric; the real TokenStore over an in-memory key holding a session (tokens
 // "O"); MockWebServer. The clients are AppModule's own: refreshClient(VERSION), and
 // okHttpClient(VERSION, AuthInterceptor, the authenticator); the real AuthRepository makes the calls.
@@ -19,6 +19,7 @@ import com.budmon.app.identity.PATH_REFRESH
 import com.budmon.app.identity.PATH_SIGN_IN
 import com.budmon.app.identity.PATH_SIGN_OUT
 import com.budmon.app.identity.PathDispatcher
+import com.budmon.app.identity.PendingSignIn
 import com.budmon.app.identity.SessionEvent
 import com.budmon.app.identity.SessionEvents
 import com.budmon.app.identity.WireTokens
@@ -321,6 +322,24 @@ class TokenRefreshAuthenticatorTest {
             assertEquals(1, http.of(PATH_REFRESH).size)
             assertEquals(1, http.of(PATH_SIGN_OUT).size)
             assertNull(store.read())
+        }
+
+    @Test
+    fun `TP-3_55 (l) explicit-token getMe and abandonSignIn answered 401 - no refresh, no retry with the stored token, S kept (A-95)`() =
+        runBlocking {
+            val other = wireTokens('X')
+            val pending = PendingSignIn(session = other.stored(userId = ME.id), deviceToken = null, me = ME)
+            http.answers[PATH_SIGN_OUT] = { unauthenticated() }
+
+            val error = apiErrorOf { repository.getMe(accessToken = other.accessToken) }
+            repository.abandonSignIn(pending)
+
+            assertEquals("UNAUTHENTICATED", (error as ApiError.Defined).key)
+            assertTrue(http.of(PATH_REFRESH).isEmpty())
+            assertEquals(listOf("Bearer ${other.accessToken}"), bearers())
+            assertEquals(listOf("Bearer ${other.accessToken}"), http.of(PATH_SIGN_OUT).map { it.authorization })
+            assertTrue(http.seen.none { it.authorization == "Bearer ${old.accessToken}" })
+            assertEquals(oldSession, store.read())
         }
 
     @Test
