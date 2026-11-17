@@ -46,7 +46,7 @@ export async function trimForUser(h: DbHandle, userId: string, keep: number): Pr
 export async function purgeExpired(h: DbHandle, now: Date, limit: number): Promise<number> {
   const { rowCount } = await h.executeSql(
     `DELETE FROM known_devices WHERE id IN (
-       SELECT id FROM known_devices WHERE expires_at < $1 LIMIT $2)`,
+       SELECT id FROM known_devices WHERE expires_at <= $1 LIMIT $2)`,
     [now, limit],
   );
   return rowCount;

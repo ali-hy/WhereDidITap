@@ -7,6 +7,7 @@ import { defineJob, type JobDefinition } from "../platform/queue/jobs.js";
 import type { JobHandler } from "../platform/queue/workers.js";
 import { EMAIL_KINDS } from "./emailTemplates.js";
 import { handleEmailSend, type EmailSendPayload } from "./emailJobService.js";
+import { runIdentityPurge } from "./purgeService.js";
 
 export const identityJobs = {
   emailSend: defineJob({
@@ -58,8 +59,11 @@ export const identityJobs = {
   }),
 };
 
-/** S-0: only the email job is registered. */
-export const identityJobDefinitions: readonly JobDefinition<unknown>[] = [identityJobs.emailSend];
+/** The jobs whose handlers exist so far: the email job (S-0) and the purge (S-3). */
+export const identityJobDefinitions: readonly JobDefinition<unknown>[] = [
+  identityJobs.emailSend,
+  identityJobs.purge,
+];
 
 /** One handler per registered definition. */
 export function identityHandlers(c: WorkerContainer): [string, JobHandler][] {
@@ -68,5 +72,6 @@ export function identityHandlers(c: WorkerContainer): [string, JobHandler][] {
       identityJobs.emailSend.name,
       (payload, ctx) => handleEmailSend(c.identity.deps, payload as EmailSendPayload, ctx),
     ],
+    [identityJobs.purge.name, () => runIdentityPurge(c.identity.deps)],
   ];
 }

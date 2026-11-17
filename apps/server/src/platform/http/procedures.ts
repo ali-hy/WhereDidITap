@@ -65,4 +65,8 @@ export const PUBLIC_PROCEDURES: ReadonlySet<string> = new Set([
   "auth.signUpOptions",
   "invitations.preview",
   "invitations.accept",
+  // Identity S-3.
+  "auth.methods",
+  "auth.signIn",
+  "auth.refresh",
 ]);

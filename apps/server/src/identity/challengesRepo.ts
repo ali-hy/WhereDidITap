@@ -164,10 +164,11 @@ export async function consume(h: DbHandle, id: string, at: Date): Promise<boolea
   return rowCount > 0;
 }
 
+/** Rows whose consumption (else expiry) is before `before`. */
 export async function purge(h: DbHandle, before: Date, limit: number): Promise<number> {
   const { rowCount } = await h.executeSql(
     `DELETE FROM auth_challenges WHERE id IN (
-       SELECT id FROM auth_challenges WHERE expires_at < $1 LIMIT $2)`,
+       SELECT id FROM auth_challenges WHERE COALESCE(consumed_at, expires_at) < $1 LIMIT $2)`,
     [before, limit],
   );
   return rowCount;

@@ -150,3 +150,25 @@ export async function countUnusedCodes(h: DbHandle, userId: string): Promise<num
   );
   return rows[0]?.["n"] as number;
 }
+
+/**
+ * Deletes pending rows whose setup expired and clears the pending columns of enabled rows whose
+ * replacement setup expired. Returns the rows touched.
+ */
+export async function purgeExpiredPending(h: DbHandle, now: Date, limit: number): Promise<number> {
+  const deleted = await h.executeSql(
+    `DELETE FROM two_step_credentials WHERE user_id IN (
+       SELECT user_id FROM two_step_credentials
+        WHERE state = 'pending' AND pending_expires_at < $1 LIMIT $2)`,
+    [now, limit],
+  );
+  const cleared = await h.executeSql(
+    `UPDATE two_step_credentials SET pending_secret_envelope = NULL, pending_expires_at = NULL,
+       updated_at = now()
+      WHERE user_id IN (
+        SELECT user_id FROM two_step_credentials
+         WHERE state = 'enabled' AND pending_expires_at < $1 LIMIT $2)`,
+    [now, limit],
+  );
+  return deleted.rowCount + cleared.rowCount;
+}
