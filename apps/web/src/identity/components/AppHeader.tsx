@@ -9,7 +9,9 @@ export function AppHeader(props: { width?: string }): JSX.Element {
   const session = useSession();
   return (
     <header class="border-b border-line bg-surface">
-      <div class={`mx-auto flex min-h-14 ${props.width ?? "max-w-[40rem]"} items-center justify-between px-4 min-[600px]:px-6`}>
+      <div
+        class={`mx-auto flex min-h-14 ${props.width ?? "max-w-[40rem]"} items-center justify-between px-4 min-[600px]:px-6`}
+      >
         <Wordmark {...(session.status() === "signed_in" ? { href: "/" } : {})} />
         <Show when={session.status() === "signed_in"}>
           <AccountMenu />

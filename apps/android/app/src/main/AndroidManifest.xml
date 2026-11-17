@@ -16,6 +16,7 @@
         android:supportsRtl="true"
         android:icon="@mipmap/ic_launcher"
         android:theme="@style/Theme.Budmon"
+        tools:ignore="CredManMissingDal"
         tools:targetApi="34">
 
         <activity
