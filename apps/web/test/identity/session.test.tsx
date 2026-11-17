@@ -528,6 +528,19 @@ describe("TP-0.28 (S-3): signOut() and sessionEnded() (F-152)", () => {
     expect(navigate).toHaveBeenCalledWith("/sign-in");
   });
 
+  it("TP-0.28x (S-3, A-74): signOut({ navigate: false }) with auth.signOut 200 → signed_out, the marker removed, the query cache cleared, and no navigate", async () => {
+    const { s, navigate, queryClient, storage } = await signedIn();
+    const calls = signOutRoute(() => HttpResponse.json({ ok: true }));
+
+    await s.signOut({ navigate: false });
+
+    expect(calls.n).toBe(1);
+    expect(s.status()).toBe("signed_out");
+    expect(storage.map.has(MARKER)).toBe(false);
+    expect(queryClient.getQueryData(SENTINEL)).toBeUndefined();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
   it("TP-0.28x (S-3): signOut() with auth.signOut 401 UNAUTHENTICATED → the same as 200", async () => {
     const { s, navigate, queryClient, storage } = await signedIn();
     signOutRoute(() =>

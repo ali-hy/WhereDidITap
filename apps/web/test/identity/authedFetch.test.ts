@@ -233,7 +233,7 @@ describe("TP-0.27: createAuthedFetch (F-150)", () => {
 
 const server = setupServer();
 beforeAll(() => {
-  server.listen({ onUnhandledRequest: "error" });
+  server.listen({ onUnhandledFrame: "error" });
 });
 afterEach(() => {
   server.resetHandlers();
