@@ -1,5 +1,6 @@
 // Identity's container wiring (identity LLD F-34, §1.1, A-26 c). TP-0.32's container (U) and server
-// (I) halves with S-0's expectations, and TP-0.37 (the subscriber check), plus extra cases TP-0.32x.
+// (I) halves with S-0's expectations (S-3 adds the identity.purge handler), and TP-0.37 (the
+// subscriber check), plus extra cases TP-0.32x.
 // The static half of TP-0.32 is in test/unit/identity/wiring.test.ts.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { afterAll, describe, expect, it } from "vitest";
@@ -74,12 +75,13 @@ describe("TP-0.32: the containers with identity (S-0)", () => {
     expect((await worker({ erasureHandler: handler })).erasureHandler).toBe(handler);
   });
 
-  it("TP-0.32: buildHandlerMap(c) has a handler for every registered job, identity.email-send included", async () => {
+  it("TP-0.32: buildHandlerMap(c) has a handler for every registered job, identity.email-send and (S-3) identity.purge included", async () => {
     const c = await worker();
 
     const keys = [...buildHandlerMap(c).keys()].sort();
 
     expect(keys).toContain("identity.email-send");
+    expect(keys).toContain("identity.purge");
     expect(keys).toEqual(
       c.registry
         .all()

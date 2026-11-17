@@ -1,5 +1,5 @@
-// F-33 job definitions (identity LLD §4.1, LD-13). TP-0.21 with S-0's expectations, plus extra cases
-// TP-0.21x.
+// F-33 job definitions (identity LLD §4.1, LD-13). TP-0.21 with S-3's expectations (S-3 registers
+// identity.purge), plus extra cases TP-0.21x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import type { WorkerContainer } from "../../../src/platform/container.js";
@@ -29,7 +29,7 @@ function shape(def: JobDefinition<unknown>) {
   };
 }
 
-describe("TP-0.21: identity's job definitions (S-0)", () => {
+describe("TP-0.21: identity's job definitions (as of S-3)", () => {
   it("TP-0.21: every definition passes P-F-70 (re-defining it gives the same definition)", () => {
     for (const def of identityJobDefinitions) {
       const { name, role, payload, ...rest } = def;
@@ -37,9 +37,11 @@ describe("TP-0.21: identity's job definitions (S-0)", () => {
     }
   });
 
-  it("TP-0.21: S-0 registers exactly identity.email-send, with F-33's policy and retries", () => {
-    expect(identityJobDefinitions.map((d) => d.name)).toEqual(["identity.email-send"]);
-    expect(shape(identityJobDefinitions[0] as JobDefinition<unknown>)).toEqual({
+  it("TP-0.21 (S-3): exactly identity.email-send and identity.purge are registered, with F-33's policies, retries and cron", () => {
+    const byName = new Map(identityJobDefinitions.map((d) => [d.name, d]));
+
+    expect([...byName.keys()].sort()).toEqual(["identity.email-send", "identity.purge"]);
+    expect(shape(byName.get("identity.email-send") as JobDefinition<unknown>)).toEqual({
       name: "identity.email-send",
       role: "general",
       policy: "standard",
@@ -48,6 +50,17 @@ describe("TP-0.21: identity's job definitions (S-0)", () => {
       retryBackoff: true,
       expireInSeconds: 900,
       cron: undefined,
+    });
+    // "default" in F-33's table: P-F-70's retry delay (30 s, backoff) and expiry (900 s).
+    expect(shape(byName.get("identity.purge") as JobDefinition<unknown>)).toEqual({
+      name: "identity.purge",
+      role: "general",
+      policy: "singleton",
+      retryLimit: 2,
+      retryDelaySeconds: 30,
+      retryBackoff: true,
+      expireInSeconds: 900,
+      cron: "5 * * * *",
     });
   });
 
@@ -67,18 +80,12 @@ describe("TP-0.21: identity's job definitions (S-0)", () => {
 });
 
 describe("TP-0.21x: every identityJobs member is defined from S-0 (F-33's table)", () => {
-  it("TP-0.21x: emailSend is the registered definition", () => {
-    expect(identityJobs.emailSend).toBe(identityJobDefinitions[0]);
+  it("TP-0.21x: emailSend and purge are the registered definitions themselves", () => {
+    expect(identityJobDefinitions).toContain(identityJobs.emailSend);
+    expect(identityJobDefinitions).toContain(identityJobs.purge);
   });
 
-  it("TP-0.21x: purge, exportBuild, erasureSweep and eraseUser have F-33's values but aren't registered yet", () => {
-    expect(shape(identityJobs.purge)).toMatchObject({
-      name: "identity.purge",
-      role: "general",
-      policy: "singleton",
-      retryLimit: 2,
-      cron: "5 * * * *",
-    });
+  it("TP-0.21x: exportBuild, erasureSweep and eraseUser have F-33's values but aren't registered yet", () => {
     expect(shape(identityJobs.exportBuild)).toMatchObject({
       name: "identity.export-build",
       role: "general",
@@ -104,12 +111,7 @@ describe("TP-0.21x: every identityJobs member is defined from S-0 (F-33's table)
       retryBackoff: true,
     });
     const registry = buildJobRegistry();
-    for (const name of [
-      "identity.purge",
-      "identity.export-build",
-      "identity.erasure-sweep",
-      "identity.erase-user",
-    ]) {
+    for (const name of ["identity.export-build", "identity.erasure-sweep", "identity.erase-user"]) {
       expect(registry.get(name)).toBeUndefined();
     }
   });
