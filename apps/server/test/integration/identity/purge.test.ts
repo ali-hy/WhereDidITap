@@ -431,6 +431,26 @@ describe("TP-3.25: runIdentityPurge's boundaries", () => {
     expect(purgedLines(logFrom)).toHaveLength(10);
   });
 
+  it("TP-3.25x (A-73): a known device expiring exactly now is purged; one expiring 1 ms later is kept", async () => {
+    const user = await userFactory(h);
+    const atNow = await knownDeviceFactory(h, {
+      userId: user.id,
+      now: NOW.subtract(days(400)),
+      expiresAt: NOW,
+    });
+    const later = await knownDeviceFactory(h, {
+      userId: user.id,
+      now: NOW.subtract(days(10)),
+      expiresAt: NOW.add({ milliseconds: 1 }),
+    });
+
+    const counts = await runIdentityPurge(deps);
+
+    expect(counts.known_devices).toBe(1);
+    expect(await exists("known_devices", atNow.deviceId)).toBe(false);
+    expect(await exists("known_devices", later.deviceId)).toBe(true);
+  });
+
   it("TP-3.25x: the identity.purge handler runs F-130 with the worker's identity deps", async () => {
     const user = await userFactory(h);
     const expired = await knownDeviceFactory(h, {

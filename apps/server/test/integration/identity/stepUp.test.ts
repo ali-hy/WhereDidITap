@@ -160,6 +160,49 @@ describe("TP-3.21: me.confirm with a password", () => {
     expect(last.headers["retry-after"]).toBeDefined();
   }, 60_000);
 
+  it("TP-3.21x (A-73): a password user sending {} → 400 VALIDATION_FAILED required (path password); confirmed_at unchanged", async () => {
+    const before = NOW.subtract({ hours: 1 });
+    const { session } = await signedIn("password", before);
+
+    const res = await confirm(session.accessToken, {});
+
+    expect(res.status).toBe(400);
+    expect(errorOf(res)).toMatchObject({
+      code: "VALIDATION_FAILED",
+      status: 400,
+      data: { issues: [{ path: ["password"], code: "required", message: "Required" }] },
+    });
+    expect(await confirmedAt(session.sessionId)).toBe(before.epochMilliseconds);
+  });
+
+  it("TP-3.21x (A-73): a two-step user sending {} → 400 VALIDATION_FAILED required (path code)", async () => {
+    const { session } = await signedIn("two_step", NOW.subtract({ hours: 1 }));
+
+    const res = await confirm(session.accessToken, {});
+
+    expect(res.status).toBe(400);
+    expect(errorOf(res)).toMatchObject({
+      code: "VALIDATION_FAILED",
+      status: 400,
+      data: { issues: [{ path: ["code"], code: "required", message: "Required" }] },
+    });
+  });
+
+  it("TP-3.21x (A-73): {} is refused before the limiter: 9 wrong passwords, then {} → 400 required, then a 10th wrong one → 401 INVALID_CREDENTIALS (not RATE_LIMITED)", async () => {
+    const { session } = await signedIn("password", NOW.subtract({ hours: 1 }));
+    for (let i = 0; i < 9; i += 1) {
+      await confirm(session.accessToken, { password: "wrong password!" });
+    }
+
+    const empty = await confirm(session.accessToken, {});
+    const tenth = await confirm(session.accessToken, { password: "wrong password!" });
+
+    expect(empty.status).toBe(400);
+    expect(errorOf(empty).code).toBe("VALIDATION_FAILED");
+    expect(tenth.status).toBe(401);
+    expect(errorOf(tenth).code).toBe("INVALID_CREDENTIALS");
+  }, 60_000);
+
   it("TP-3.21x: without credentials → 401 UNAUTHENTICATED", async () => {
     const res = await call(api.app, "POST", "/me/confirm", { password: FACTORY_PASSWORD });
 

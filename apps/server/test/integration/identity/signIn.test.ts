@@ -248,6 +248,27 @@ describe("TP-3.1: signing in with a password", () => {
     expect(second.status).toBe(200);
     expect((second.json() as { tokens: TokensWire }).tokens.deviceToken).toBeNull();
   });
+
+  it("TP-3.1x (A-73): a device token expiring exactly now isn't known → a new deviceToken is issued", async () => {
+    const user = await passwordUser();
+    const device = await knownDeviceFactory(h, {
+      userId: user.id,
+      now: NOW.subtract(days(10)),
+      expiresAt: NOW,
+    });
+
+    const res = await signIn({
+      email: user.email,
+      password: FACTORY_PASSWORD,
+      tokenDelivery: "body",
+      deviceToken: device.token,
+    });
+
+    expect(res.status).toBe(200);
+    const issued = (res.json() as { tokens: TokensWire }).tokens.deviceToken;
+    expect(issued).toMatch(TOKEN("bmd"));
+    expect(issued).not.toBe(device.token);
+  });
 });
 
 describe("TP-3.2: wrong credentials cost the same and say the same", () => {

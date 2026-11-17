@@ -269,6 +269,42 @@ describe("TP-3.20: listing and revoking sessions", () => {
     ]);
   });
 
+  it("TP-3.20x (A-73): a session whose idle expiry is exactly now isn't listed; one 1 ms later is", async () => {
+    const a = await userFactory(h);
+    const current = await sessionFactory(h, { userId: a.id, now: NOW });
+    const atNow = await sessionFactory(h, {
+      userId: a.id,
+      now: NOW,
+      lastUsedAt: NOW.subtract({ hours: 1 }),
+      idleExpiresAt: NOW,
+    });
+    const later = await sessionFactory(h, {
+      userId: a.id,
+      now: NOW,
+      lastUsedAt: NOW.subtract({ hours: 2 }),
+      idleExpiresAt: NOW.add({ milliseconds: 1 }),
+    });
+
+    const res = await call(api.app, "GET", "/me/sessions", undefined, as(current));
+
+    expect(res.status).toBe(200);
+    const listed = (res.json() as { items: { id: string }[] }).items.map((i) => i.id);
+    expect(listed).toEqual([current.sessionId, later.sessionId]);
+    expect(listed).not.toContain(atNow.sessionId);
+  });
+
+  it("TP-3.20x (A-73): revoke others with no other live session → { revoked: 0 } and no session_revoked event", async () => {
+    const a = await userFactory(h);
+    const current = await sessionFactory(h, { userId: a.id, now: NOW });
+
+    const res = await call(api.app, "POST", "/me/sessions/revoke-others", {}, as(current));
+
+    expect(res.status).toBe(200);
+    expect(res.json()).toEqual({ revoked: 0 });
+    expect(await eventKinds(a.id)).toEqual([]);
+    expect((await sessionRow(current.sessionId))["revoked_at"]).toBeNull();
+  });
+
   it("TP-3.20x: a revoked session can't use the API any more (the hook refuses its access token)", async () => {
     const f = await fixture();
     await revoke(f.current, f.s2.sessionId);
