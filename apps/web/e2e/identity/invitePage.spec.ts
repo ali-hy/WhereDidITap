@@ -1,8 +1,9 @@
 // F-159's S-1 QA fixes (identity LLD v0.32, A-52 to A-57): a later link in the same tab, long
-// text at 360 px, focus on a step change, the set-up privacy link in a new tab, a signed-in visitor.
-// TP-1.48, TP-1.51 to TP-1.54, TP-1.56 (a fragment without t, A-65), TP-1.57 to TP-1.59 (stale
-// responses and a hashchange during an accept, A-64), and TP-1.32x (a bootstrap problem has no ask
-// line, A-58; review B-2).
+// text at 360 px, focus on a step change, the set-up privacy link in a new tab, a signed-in visitor
+// (as changed in S-3, A-74). TP-1.48, TP-1.51 to TP-1.54 (with TP-1.54x), TP-1.56 (a fragment
+// without t, A-65), TP-1.57 to TP-1.59 (stale responses and a hashchange during an accept, A-64),
+// and TP-1.32x (a bootstrap problem has no ask line, A-58; review B-2).
+// IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import type { Request } from "@playwright/test";
 import {
   catalogText,
@@ -178,18 +179,9 @@ test.describe("TP-1.53: the set-up privacy link opens in a new tab (A-56)", () =
   });
 });
 
-test.describe("TP-1.54: a signed-in visitor on /invite goes home (A-57)", () => {
-  test("TP-1.54: signed in, /invite#t=<another token> and then /invite land on / with no preview, no #t= in the URL or history, nothing stored", async ({
-    page,
-    request,
-  }) => {
-    const first = await createInvitation(request, { email: uniqueEmail() });
-    await signUpThroughUi(page, first.token, "Signed In");
-    const second = await createInvitation(request, { email: uniqueEmail() });
-    const previews = countPreviews(page);
-
-    await page.goto(`/invite#t=${second.token}`);
-
+test.describe("TP-1.54: a signed-in visitor on /invite without a usable invitation goes home (A-57, A-74)", () => {
+  /** On the first-run home: no #t= in the URL or behind it in history, nothing stored. */
+  async function expectHomeWithNothingStored(page: Page, token: string | null): Promise<void> {
     await expect(page).toHaveURL(/\/$/);
     await expect(page.locator("main h1")).toHaveText(looseText("Welcome, Signed In."));
     expect(page.url()).not.toContain("#t=");
@@ -197,15 +189,101 @@ test.describe("TP-1.54: a signed-in visitor on /invite goes home (A-57)", () => 
     // The /invite entry was replaced by /, so going back can't reach the token.
     await page.goBack();
     expect(page.url()).not.toContain("#t=");
-    expect(page.url()).not.toContain(second.token);
+    if (token !== null) expect(page.url()).not.toContain(token);
+  }
+
+  test("TP-1.54: signed in, /invite, /invite#t=bmi_short and /invite#t=<expired token> each land on / with no #t= in the URL or history and nothing stored; no preview for the first two, one for the third", async ({
+    page,
+    request,
+  }) => {
+    const first = await createInvitation(request, { email: uniqueEmail() });
+    await signUpThroughUi(page, first.token, "Signed In");
+    const expired = await createInvitation(request, { email: uniqueEmail(), state: "expired" });
+    const previews = countPreviews(page);
 
     await page.goto("/invite");
-
-    await expect(page).toHaveURL(/\/$/);
-    await expect(page.locator("main h1")).toHaveText(looseText("Welcome, Signed In."));
-    expect(await page.evaluate((k) => sessionStorage.getItem(k), STORED)).toBeNull();
+    await expectHomeWithNothingStored(page, null);
     expect(previews.n).toBe(0);
+
+    await page.goto("/invite#t=bmi_short");
+    await expectHomeWithNothingStored(page, "bmi_short");
+    expect(previews.n).toBe(0);
+
+    await page.goto(`/invite#t=${expired.token}`);
+    await expectHomeWithNothingStored(page, expired.token);
+    expect(previews.n).toBe(1);
   });
+
+  test("TP-1.54x: signed in, a well-formed link whose preview couldn't load (503) stays on /invite with the problem's Try again and the token kept; Try again then shows signedInAsOther (A-74)", async ({
+    page,
+    request,
+  }) => {
+    const email = uniqueEmail();
+    const own = await createInvitation(request, { email });
+    await signUpThroughUi(page, own.token, "Signed In");
+    const other = await createInvitation(request, { email: uniqueEmail() });
+    let failing = true;
+    await page.route(`**${PREVIEW}`, async (route) => {
+      if (failing) {
+        await route.fulfill({
+          status: 503,
+          contentType: "text/plain",
+          body: "Service Unavailable",
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.goto(`/invite#t=${other.token}`);
+
+    const retry = page.locator("main").getByRole("button", { name: catalogText("Try again") });
+    await expect(retry).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe("/invite");
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), STORED)).toBe(other.token);
+
+    failing = false;
+    await retry.click();
+
+    await expect(
+      page.getByText(
+        looseText(`You're signed in as ${email}. Sign out to accept this invitation.`),
+      ),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: catalogText("Sign out and continue") }),
+    ).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe("/invite");
+  });
+
+  for (const [code, status, data] of [
+    ["INVITATION_REVOKED", 410, { inviterName: "Dev Owner", origin: "direct" }],
+    ["INVITATION_USED", 409, { recent: false, inviterName: "Dev Owner", origin: "direct" }],
+    ["INVITATION_USED", 409, { recent: true, inviterName: "Dev Owner", origin: "direct" }],
+  ] as const) {
+    test(`TP-1.54x: signed in, a preview answering ${code} ${JSON.stringify(data)} also lands on / with nothing stored (A-74: any other problem)`, async ({
+      page,
+      request,
+    }) => {
+      const own = await createInvitation(request, { email: uniqueEmail() });
+      await signUpThroughUi(page, own.token, "Signed In");
+      // The preview is answered here, so any well-formed token will do.
+      const token = `bmi_${"P".repeat(43)}`;
+      await page.route(`**${PREVIEW}`, (route) =>
+        route.fulfill({
+          status,
+          contentType: "application/json",
+          body: JSON.stringify({ defined: true, code, status, message: code, data }),
+        }),
+      );
+      const previews = countPreviews(page);
+
+      await page.goto(`/invite#t=${token}`);
+
+      await expectHomeWithNothingStored(page, token);
+      expect(previews.n).toBe(1);
+    });
+  }
 });
 
 test.describe("TP-1.32x: a bootstrap invitation's problem has no ask line (A-58, review B-2)", () => {

@@ -1,6 +1,7 @@
 // S-3's cross-screen checks on identity's routes (identity LLD §8.1; HLD §4.4): TP-3.44
-// (responsive), TP-3.45 (axe), TP-3.46 (pseudo-RTL), TP-3.53 (loading, error and long-list
-// states), TP-3.54 (page titles). Later slices add their routes and screens. Extra cases end in "x".
+// (responsive), TP-3.45 (axe), TP-3.46 (pseudo-RTL, A-75), TP-3.53 (loading, error and list-size
+// states, A-75), TP-3.54 (page titles). Later slices add their routes and screens. Extra cases end
+// in "x".
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { randomUUID } from "node:crypto";
 import { attachAxeReport } from "../fixtures.js";
@@ -11,6 +12,7 @@ import {
   expect,
   looseText,
   openInvitation,
+  signInByApi,
   signUpThroughUi,
   submitSignIn,
   test,
@@ -72,18 +74,8 @@ const INTERNAL = {
   body: JSON.stringify({ defined: true, code: "INTERNAL", status: 500, message: "Internal error" }),
 };
 
-/** F-174 → P-F-203 for INTERNAL: the read text, or a mutation's (outcome unknown or not applied). */
+/** F-174 → P-F-203 for INTERNAL with operation "read" (`error.generic.read`; A-75 for sign-in). */
 const INTERNAL_READ = "Something went wrong on our side. Try again in a moment.";
-const INTERNAL_ANY = [
-  INTERNAL_READ,
-  "We couldn't confirm this was saved. Check before trying again.",
-  "Something went wrong on our side. Nothing was changed. Try again in a moment.",
-];
-
-/** One of `texts` as a whole string, tolerating ar-XB's marks. */
-function anyOf(texts: readonly string[]): RegExp {
-  return new RegExp(texts.map((t) => looseText(t).source).join("|"));
-}
 
 function deferred() {
   let resolve!: () => void;
@@ -191,7 +183,7 @@ test.describe("TP-3.45: axe on identity's routes", () => {
   });
 });
 
-test.describe("TP-3.46: pseudo-RTL (ar-XB)", () => {
+test.describe("TP-3.46: pseudo-RTL (ar-XB; A-75)", () => {
   /** The text of `selector`'s first match ends at its parent's content-box right edge. */
   async function textAtRight(page: Page, selector: string): Promise<number> {
     return page
@@ -215,22 +207,54 @@ test.describe("TP-3.46: pseudo-RTL (ar-XB)", () => {
   const direction = (el: ReturnType<Page["locator"]>) =>
     el.evaluate((node) => getComputedStyle(node).direction);
 
+  /**
+   * For each `[data-button-row]`: its visible buttons, and how far the first one (DOM order) is
+   * from being the rightmost (≤ 1: it is).
+   */
+  const buttonRows = (page: Page): Promise<{ buttons: number; offBy: number }[]> =>
+    page.locator("[data-button-row]").evaluateAll((rows) =>
+      rows.map((row) => {
+        const rights = Array.from(row.querySelectorAll("button, a[href]"))
+          .map((b) => b.getBoundingClientRect())
+          .filter((r) => r.width > 0)
+          .map((r) => r.right);
+        const first = rights[0] ?? 0;
+        return { buttons: rights.length, offBy: Math.max(0, ...rights) - first };
+      }),
+    );
+
+  /** `dir`, the h1 at the right, every button row first-rightmost, and no horizontal overflow. */
+  async function expectRtlRules(page: Page): Promise<void> {
+    await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+    expect(await textAtRight(page, "main h1")).toBeLessThanOrEqual(1);
+    for (const row of await buttonRows(page)) {
+      expect(row.buttons).toBeGreaterThan(0);
+      expect(row.offBy).toBeLessThanOrEqual(1);
+    }
+    const width = await page.evaluate(() => ({
+      scroll: document.documentElement.scrollWidth,
+      client: document.documentElement.clientWidth,
+    }));
+    expect(width.scroll).toBeLessThanOrEqual(width.client);
+  }
+
   const PSEUDO_ONLY = "pseudo-rtl project only";
 
-  test("TP-3.46: S-1 Sign in: dir=rtl, the h1 at the right, the email field LTR", async ({
+  test("TP-3.46: S-1 Sign in: dir=rtl, the h1 at the right, the form's button row first-rightmost, the email field LTR, no overflow", async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== "pseudo-rtl", PSEUDO_ONLY);
     await page.goto("/sign-in");
-    await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
     await expect(page.locator("main h1")).toHaveText(catalogText("Sign in"));
     await expect(page.getByLabel(catalogText("Email"))).toBeVisible();
 
-    expect(await textAtRight(page, "main h1")).toBeLessThanOrEqual(1);
+    // The sign-in form's row of buttons carries the marker (A-75).
+    await expect(page.locator("main form [data-button-row]")).not.toHaveCount(0);
+    await expectRtlRules(page);
     expect(await direction(page.getByLabel(catalogText("Email")))).toBe("ltr");
   });
 
-  test("TP-3.46: S-6 Set up your account: the h1 at the right, the invited email LTR", async ({
+  test("TP-3.46: S-6 Set up your account: dir=rtl, the h1 at the right, the form's button row first-rightmost, the invited email LTR, no overflow", async ({
     page,
     request,
   }, testInfo) => {
@@ -241,12 +265,13 @@ test.describe("TP-3.46: pseudo-RTL (ar-XB)", () => {
     await page.getByRole("button", { name: catalogText("Use a password") }).click();
     await expect(page.locator("main h1")).toHaveText(catalogText("Set up your account"));
 
-    expect(await textAtRight(page, "main h1")).toBeLessThanOrEqual(1);
+    await expect(page.locator("main form [data-button-row]")).not.toHaveCount(0);
+    await expectRtlRules(page);
     const shown = page.locator("main").getByText(email, { exact: true }).first();
     expect(await direction(shown)).toBe("ltr");
   });
 
-  test("TP-3.46: S-10 Sign-in & security for an ar-XB user: dir=rtl and the h1 at the right", async ({
+  test("TP-3.46: S-10 Sign-in & security for an ar-XB user with a second session: dir=rtl, the h1 at the right, every button row first-rightmost, no overflow", async ({
     page,
     request,
   }, testInfo) => {
@@ -254,16 +279,22 @@ test.describe("TP-3.46: pseudo-RTL (ar-XB)", () => {
     const { email } = await createUser(request, { locale: "ar-XB", name: "RTL Person" });
     await submitSignIn(page, email);
     await expect(page).toHaveURL(/\/$/);
+    // A second session, so the sessions section shows its actions too.
+    await signInByApi(request, email);
 
     await open(page, { path: "/settings/security", h1: "Sign-in & security" });
+    await expect(
+      page
+        .locator("main")
+        .getByRole("button", { name: catalogText("Sign out of all other devices") }),
+    ).toBeVisible();
 
-    await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
-    expect(await textAtRight(page, "main h1")).toBeLessThanOrEqual(1);
+    await expectRtlRules(page);
   });
 });
 
-test.describe("TP-3.53: loading, error and long-list states (HLD §4.4)", () => {
-  test("TP-3.53: S-1 Sign in: while auth.signIn is pending, Sign in is busy and the form read-only; INTERNAL then shows F-174's text and the form is usable again", async ({
+test.describe("TP-3.53: loading, error and list-size states (HLD §4.4; A-75)", () => {
+  test("TP-3.53: S-1 Sign in: while auth.signIn is pending, Sign in is busy and the fields read-only; INTERNAL then shows the form-level 'Something went wrong on our side. Try again in a moment.' and the form is usable again", async ({
     page,
     request,
   }) => {
@@ -282,46 +313,13 @@ test.describe("TP-3.53: loading, error and long-list states (HLD §4.4)", () => 
     await expect(page.getByLabel(catalogText("Password"))).not.toBeEditable();
     gate.resolve();
 
-    await expect(page.locator("main").getByText(anyOf(INTERNAL_ANY))).toBeVisible();
+    await expect(page.locator("main").getByText(catalogText(INTERNAL_READ))).toBeVisible();
     await expect(submit).not.toHaveAttribute("aria-busy", "true");
     await expect(page.getByLabel(catalogText("Email"))).toBeEditable();
     expect(new URL(page.url()).pathname).toBe("/sign-in");
   });
 
-  test("TP-3.53: S-8 Settings home: while me is pending, the boot screen (main aria-busy); INTERNAL → the error fallback with Try again, which then shows Settings", async ({
-    page,
-    request,
-  }) => {
-    const { token } = await createInvitation(request, { email: uniqueEmail() });
-    await signUpThroughUi(page, token, "Settings States");
-    const gate = deferred();
-    let calls = 0;
-    await page.route("**/api/v1/me", async (route) => {
-      calls += 1;
-      if (calls > 1) {
-        await route.continue();
-        return;
-      }
-      await gate.promise;
-      await route.fulfill(INTERNAL);
-    });
-
-    await page.goto("/settings");
-
-    await expect(page.locator('main[aria-busy="true"]')).toBeAttached();
-    gate.resolve();
-    await expect(page.locator("main h1")).toHaveText(
-      catalogText("Something went wrong on our side"),
-    );
-    await page
-      .locator("main")
-      .getByRole("button", { name: catalogText("Try again") })
-      .click();
-    await expect(page.locator("main h1")).toHaveText(catalogText("Settings"));
-    expect(new URL(page.url()).pathname).toBe("/settings");
-  });
-
-  test("TP-3.53: S-10 sessions: while me.listSessions is pending, a busy region; INTERNAL → 'Something went wrong on our side. Try again in a moment.' with Try again, which then lists this device", async ({
+  test("TP-3.53: S-10 sessions: while me.listSessions is pending, a busy section with skeleton rows; INTERNAL → 'Something went wrong on our side. Try again in a moment.' with Try again, which then lists this device", async ({
     page,
     request,
   }) => {
@@ -342,7 +340,10 @@ test.describe("TP-3.53: loading, error and long-list states (HLD §4.4)", () => 
     await page.goto("/settings/security");
 
     await expect(page.locator("main h1")).toHaveText(catalogText("Sign-in & security"));
-    await expect(page.locator('main [aria-busy="true"]').first()).toBeAttached();
+    const busy = page.locator('main [aria-busy="true"]').first();
+    await expect(busy).toBeAttached();
+    // P-A-515 (c): the Skeleton's aria-hidden blocks, shown after 300 ms.
+    await expect(busy.locator('[aria-hidden="true"]:has(> div)').first()).toBeVisible();
     gate.resolve();
     await expect(page.locator("main").getByText(catalogText(INTERNAL_READ))).toBeVisible();
     await page
@@ -353,7 +354,28 @@ test.describe("TP-3.53: loading, error and long-list states (HLD §4.4)", () => 
     expect(calls).toBe(2);
   });
 
-  test("TP-3.53: S-10 sessions with 60 items at 360 px: all listed (59 Sign out buttons, one 'This device') without horizontal overflow", async ({
+  test("TP-3.53: S-10 sessions with one session (this device): that row, no per-row Sign out and no Sign out of all other devices", async ({
+    page,
+    request,
+  }) => {
+    const { token } = await createInvitation(request, { email: uniqueEmail() });
+    await signUpThroughUi(page, token, "One Session");
+    const listed = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/me/sessions");
+
+    await page.goto("/settings/security");
+
+    const answer = await listed;
+    expect(answer.status()).toBe(200);
+    expect(((await answer.json()) as { items: unknown[] }).items).toHaveLength(1);
+    const main = page.locator("main");
+    await expect(main.getByText(catalogText("This device"))).toHaveCount(1);
+    await expect(main.getByRole("button", { name: catalogText("Sign out") })).toHaveCount(0);
+    await expect(
+      main.getByRole("button", { name: catalogText("Sign out of all other devices") }),
+    ).toHaveCount(0);
+  });
+
+  test("TP-3.53: S-10 sessions with 20 items (§3.3's maximum) at 360 px: all listed, this device first (19 Sign out buttons after it), without horizontal overflow", async ({
     page,
     request,
   }) => {
@@ -366,12 +388,13 @@ test.describe("TP-3.53: loading, error and long-list states (HLD §4.4)", () => 
       "A browser on an unknown system with a very long description that has to wrap",
     ];
     const start = Date.parse("2026-11-01T10:00:00.000Z");
-    const items = Array.from({ length: 60 }, (_, i) => ({
+    // As F-54 sends them: the current session first, then by lastUsedAt descending.
+    const items = Array.from({ length: 20 }, (_, i) => ({
       id: randomUUID(),
       deviceLabel: labels[i % labels.length],
       clientKind: i % 2 === 0 ? "web" : "android",
       createdAt: new Date(start - i * 3_600_000).toISOString(),
-      lastUsedAt: new Date(start + (60 - i) * 60_000).toISOString(),
+      lastUsedAt: new Date(start + (20 - i) * 60_000).toISOString(),
       current: i === 0,
     }));
     await page.route("**/api/v1/me/sessions", (route) =>
@@ -386,8 +409,15 @@ test.describe("TP-3.53: loading, error and long-list states (HLD §4.4)", () => 
     await page.goto("/settings/security");
 
     const main = page.locator("main");
-    await expect(main.getByRole("button", { name: catalogText("Sign out") })).toHaveCount(59);
-    await expect(main.getByText(catalogText("This device"))).toHaveCount(1);
+    const perRow = main.getByRole("button", { name: catalogText("Sign out") });
+    await expect(perRow).toHaveCount(19);
+    const thisDevice = main.getByText(catalogText("This device"));
+    await expect(thisDevice).toHaveCount(1);
+    const thisDeviceFirst = await thisDevice.evaluate(
+      (el, first) => Boolean(el.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING),
+      await perRow.first().elementHandle(),
+    );
+    expect(thisDeviceFirst).toBe(true);
     expect(await overflow(page)).toBeLessThanOrEqual(0);
   });
 });

@@ -51,23 +51,23 @@ function deferred<T = void>() {
   return { promise, resolve };
 }
 
-/** The refresh cookie's value from a response's Set-Cookie headers. */
+/** The refresh cookie's value from a response's Set-Cookie headers (unprefixed on localhost, A-76). */
 function refreshCookieOf(res: APIResponse): string | undefined {
   for (const h of res.headersArray()) {
     if (h.name.toLowerCase() !== "set-cookie") continue;
     for (const line of h.value.split("\n")) {
-      const m = /^(?:__Secure-)?budmon_rt=([^;]*)/.exec(line.trim());
+      const m = /^budmon_rt=([^;]*)/.exec(line.trim());
       if (m !== null) return m[1];
     }
   }
   return undefined;
 }
 
-/** The refresh cookie the browser holds now. */
+/** The refresh cookie the browser holds now (unprefixed on localhost, A-76). */
 async function jarRefreshToken(page: Page): Promise<string | undefined> {
   const origin = new URL(page.url()).origin;
   const cookies = await page.context().cookies(`${origin}/api/v1/auth/refresh`);
-  return cookies.find((c) => /^(__Secure-)?budmon_rt$/.test(c.name))?.value;
+  return cookies.find((c) => c.name === "budmon_rt")?.value;
 }
 
 /**
@@ -150,7 +150,7 @@ async function raceTwoRefreshes(
 }
 
 test.describe("TP-3.41: a session revoked from another device (F-150, F-152)", () => {
-  test("TP-3.41: B revokes the other sessions; the browser opens Sign-in & security: me.listSessions 401, the refresh REFRESH_INVALID, then /sign-in?reason=ended&next=… with 'Your session ended. Sign in again.'", async ({
+  test("TP-3.41: B revokes the other sessions; the browser opens Sign-in & security: me.listSessions 401, the refresh REFRESH_INVALID, then /sign-in?reason=ended&next=/settings/security with 'Your session ended. Sign in again.'", async ({
     page,
     request,
   }) => {
@@ -186,7 +186,8 @@ test.describe("TP-3.41: a session revoked from another device (F-150, F-152)", (
     const url = new URL(page.url());
     expect(url.pathname).toBe("/sign-in");
     expect(url.searchParams.get("reason")).toBe("ended");
-    expect(url.searchParams.get("next")).toMatch(/^\/settings(\/security)?$/);
+    // A-76: next is where the 401 happened.
+    expect(url.searchParams.get("next")).toBe("/settings/security");
     expect(sessions).toEqual([401]);
     expect(await Promise.all(refreshes)).toEqual([{ status: 401, code: "REFRESH_INVALID" }]);
   });
@@ -307,7 +308,7 @@ test.describe("TP-3.53x: the sessions section (F-164, J-10)", () => {
     expect(otherMe.status()).toBe(401);
   });
 
-  test("TP-3.53x: Sign out of all other devices with two other sessions: toast 'Signed out of 2 other devices.' and only this device remains", async ({
+  test("TP-3.53x: Sign out of all other devices with two other sessions: toast 'Signed out of 2 other devices.', only this device remains, and the button is gone (A-75)", async ({
     page,
     request,
   }) => {
@@ -325,6 +326,11 @@ test.describe("TP-3.53x: the sessions section (F-164, J-10)", () => {
     await expect(page.getByText(looseText("Signed out of 2 other devices."))).toBeVisible();
     await expect(signOutButtons(page)).toHaveCount(0);
     await expect(page.locator("main").getByText(catalogText("This device"))).toHaveCount(1);
+    await expect(
+      page
+        .locator("main")
+        .getByRole("button", { name: catalogText("Sign out of all other devices") }),
+    ).toHaveCount(0);
     expect(new URL(page.url()).pathname).toBe("/settings/security");
   });
 });

@@ -8,7 +8,7 @@
 // - createUser(request, opts): a user made through the API only (no session in the browser).
 // - submitSignIn(page, email, password, path): the S-3 sign-in form, submitted.
 // - signInByApi(request, email): auth.signIn with body delivery → the session's tokens.
-// - accountMenuButton(page), signOutFromMenu(page): F-162's account menu.
+// - accountMenuButton(page), signOutFromMenu(page): F-162's account menu (A-76).
 import { randomInt, randomUUID } from "node:crypto";
 import type { APIRequestContext } from "@playwright/test";
 import { catalogText, expect, test as base, type Page } from "./fixtures.js";
@@ -107,7 +107,7 @@ export async function primaryCount(page: Page): Promise<number> {
     );
 }
 
-/** The X-Budmon-Client header of the e2e web build (build number 0). */
+/** The X-Budmon-Client header of the e2e web build (build number 0; A-76). */
 export const WEB_CLIENT = { "X-Budmon-Client": "web/0" } as const;
 
 export interface TestUser {
@@ -182,8 +182,9 @@ export async function signInByApi(
   return body.tokens as ApiSession;
 }
 
-/** F-162's account menu trigger: the one button in the header. */
-export const accountMenuButton = (page: Page) => page.getByRole("banner").getByRole("button");
+/** F-162's account menu trigger: the header's button named "Account" (`menu.account`, A-76). */
+export const accountMenuButton = (page: Page) =>
+  page.getByRole("banner").getByRole("button", { name: catalogText("Account") });
 
 /** Opens the account menu and chooses Sign out. */
 export async function signOutFromMenu(page: Page): Promise<void> {

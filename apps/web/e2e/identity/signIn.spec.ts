@@ -1,6 +1,6 @@
 // S-3 sign-in, sign-out and session end in the browser (identity LLD §8.1, F-150, F-152, F-153,
-// F-155, F-159's signedInAsOther state, F-162's account menu). TP-1.31, TP-3.28 (E), TP-3.40,
-// TP-3.42, TP-3.43, TP-3.47, plus extra cases ending in "x".
+// F-155, F-159's signedInAsOther state, F-162's account menu; A-74, A-76). TP-1.31, TP-3.28 (E),
+// TP-3.40, TP-3.42, TP-3.43, TP-3.47, plus extra cases ending in "x".
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { randomInt } from "node:crypto";
 import {
@@ -346,13 +346,15 @@ test.describe("TP-3.47: sign in, sign out, next (F-155, F-162)", () => {
     expect(await page.evaluate((key) => localStorage.getItem(key), MARKER)).toBe("1");
   });
 
-  test("TP-3.47x: the account menu offers Settings, which opens /settings", async ({
+  test("TP-3.47x: the header's only button is the account menu ('Account'), which offers Settings, opening /settings", async ({
     page,
     request,
   }) => {
     await signedInUser(page, request, "Menu Settings");
 
     await expect(accountMenuButton(page)).toBeVisible();
+    // A-76: in S-3 the header's only button is the account menu trigger.
+    await expect(page.getByRole("banner").getByRole("button")).toHaveCount(1);
     await accountMenuButton(page).click();
     await page.getByRole("menuitem", { name: catalogText("Settings") }).click();
 
@@ -378,8 +380,10 @@ test.describe("TP-3.28 (E): the web device cookie survives sign-out (P-9)", () =
     await expect(page.locator("main h1")).toHaveText(looseText(`Welcome, ${name}.`));
     const origin = new URL(page.url()).origin;
     const deviceCookie = async () =>
-      (await page.context().cookies(`${origin}/api/v1/auth/sign-in`)).find((c) =>
-        /^(__Secure-)?budmon_dv$/.test(c.name),
+      (await page.context().cookies(`${origin}/api/v1/auth/sign-in`)).find(
+        (c) =>
+          // On localhost only the unprefixed name is set (A-76).
+          c.name === "budmon_dv",
       );
     const before = await deviceCookie();
     expect(before, "the device cookie after the first sign-in").toBeDefined();
@@ -417,8 +421,8 @@ test.describe("TP-3.28 (E): the web device cookie survives sign-out (P-9)", () =
   });
 });
 
-test.describe("TP-1.31: signed in as someone else on /invite (F-159, A-57)", () => {
-  test("TP-1.31: signed in as A, B's link shows 'You're signed in as {A}. Sign out to accept this invitation.' and Sign out and continue leads to B's Join screen", async ({
+test.describe("TP-1.31: signed in as someone else on /invite (F-159, F-152; A-74)", () => {
+  test("TP-1.31: signed in as A, B's link shows 'You're signed in as {A}. Sign out to accept this invitation.'; Sign out and continue stays on /invite (never /sign-in), shows B's join screen and removes the marker; a later / lands on /sign-in without a me request", async ({
     page,
     request,
   }) => {
@@ -435,26 +439,29 @@ test.describe("TP-1.31: signed in as someone else on /invite (F-159, A-57)", () 
     ).toBeVisible();
     expect(page.url()).not.toContain(token);
     expect(here(page).path).toBe("/invite");
+    // Every path the page goes to from here on, client-side history changes included.
+    const paths: string[] = [];
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame()) paths.push(new URL(frame.url()).pathname);
+    });
+    const signOut = page.waitForResponse(
+      (r) => new URL(r.url()).pathname === "/api/v1/auth/sign-out",
+    );
 
     await page.getByRole("button", { name: catalogText("Sign out and continue") }).click();
 
+    expect((await signOut).status()).toBe(200);
     await expect(page.locator("main h1")).toHaveText(catalogText("You've been invited"));
     await expect(page.getByText(looseText(`This invitation is for ${b}.`))).toBeVisible();
     expect(here(page).path).toBe("/invite");
-  });
+    expect(paths.filter((p) => p !== "/invite")).toEqual([]);
+    expect(await page.evaluate((key) => localStorage.getItem(key), MARKER)).toBeNull();
 
-  test("TP-1.31x: signed in, an expired link (a problem) still goes home with nothing stored (A-57)", async ({
-    page,
-    request,
-  }) => {
-    const { name } = await signedInUser(page, request, "Expired Link");
-    const { token } = await createInvitation(request, { email: uniqueEmail(), state: "expired" });
+    const me = countRequests(page, ["/api/v1/me"]);
+    await page.goto("/");
 
-    await page.goto(`/invite#t=${token}`);
-
-    await expect(page.locator("main h1")).toHaveText(looseText(`Welcome, ${name}.`));
-    expect(here(page).path).toBe("/");
-    expect(page.url()).not.toContain(token);
-    expect(await page.evaluate(() => sessionStorage.getItem("budmon.invite"))).toBeNull();
+    await expect(page.locator("main h1")).toHaveText(catalogText("Sign in"));
+    expect(here(page).path).toBe("/sign-in");
+    expect(me["/api/v1/me"]).toBe(0);
   });
 });
