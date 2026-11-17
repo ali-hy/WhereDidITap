@@ -42,6 +42,8 @@ export function createSessionStore(deps: {
   const [me, setMe] = createSignal<Me | null>(null);
   const [error, setError] = createSignal<unknown>(undefined);
   const [endedDuringBoot, setEndedDuringBoot] = createSignal(false);
+  // True while `signOut` runs: a session end then only removes the marker.
+  let signingOut = false;
   const waiting: ((s: Exclude<SessionStatus, "loading">) => void)[] = [];
 
   const storage = (): Storage_ | null => {
@@ -134,11 +136,14 @@ export function createSessionStore(deps: {
       await probe();
     },
     async signOut(options) {
+      signingOut = true;
       try {
         await deps.api.auth.signOut({});
       } catch (e) {
         const app = toAppError(e);
         if (!(app.kind === "defined" && app.key === "UNAUTHENTICATED")) throw e;
+      } finally {
+        signingOut = false;
       }
       removeMarker();
       deps.queryClient.clear();
@@ -148,6 +153,7 @@ export function createSessionStore(deps: {
     },
     sessionEnded(next) {
       removeMarker();
+      if (signingOut) return;
       setMe(null);
       // During the boot probe the guard that awaits `ready()` does the one redirect. The probe's
       // own query stays, so its 401 still reaches `probe`.

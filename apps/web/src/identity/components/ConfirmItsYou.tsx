@@ -15,16 +15,26 @@ import { identityMessages as m } from "../messages.js";
 type Pending = { resolve: (confirmed: boolean) => void };
 const [pending, setPending] = createSignal<Pending | null>(null);
 
-/** Opens the dialog and resolves with whether the person confirmed. */
+/** The dialog that is open now, as a promise of whether the person confirmed. */
+let open: Promise<boolean> | null = null;
+
+/** Opens the dialog, or joins the one already open; resolves with whether the person confirmed. */
 function ask(): Promise<boolean> {
-  return new Promise((resolve) => {
-    setPending({ resolve });
+  open ??= new Promise<boolean>((resolve) => {
+    setPending({
+      resolve: (confirmed) => {
+        open = null;
+        resolve(confirmed);
+      },
+    });
   });
+  return open;
 }
 
 /**
  * Runs `run()`. On CONFIRMATION_REQUIRED it asks the person to confirm, then runs it once more;
- * cancelling gives `undefined`.
+ * cancelling gives `undefined`. Calls that arrive while the dialog is open share its outcome:
+ * each runs once more on a confirmation (in call order), or gives `undefined` on a cancel.
  */
 export async function withConfirmation<T>(run: () => Promise<T>): Promise<T | undefined> {
   try {

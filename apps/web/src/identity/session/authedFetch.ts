@@ -1,5 +1,5 @@
 // F-150: the API client's fetch. A 401 UNAUTHENTICATED triggers one refresh (single-flight across
-// requests and tabs), then one retry.
+// requests and tabs), then one retry. Other `/api/v1/auth/` paths are left alone, except sign-out.
 
 const REFRESH_LOCK = "budmon-refresh";
 
@@ -31,6 +31,8 @@ async function replayable(input: RequestInfo | URL): Promise<() => RequestInfo |
       signal: input.signal,
     });
 }
+
+const SIGN_OUT_PATH = "/api/v1/auth/sign-out";
 
 const pathOf = (input: RequestInfo | URL): string => {
   if (input instanceof Request) return new URL(input.url, location.href).pathname;
@@ -71,7 +73,8 @@ export function createAuthedFetch(
     const make = await replayable(input);
     const response = await inner(make(), init);
     if (response.status !== 401) return response;
-    if (pathOf(input).startsWith("/api/v1/auth/")) return response;
+    const path = pathOf(input);
+    if (path.startsWith("/api/v1/auth/") && path !== SIGN_OUT_PATH) return response;
     if ((await errorCode(response)) !== "UNAUTHENTICATED") return response;
 
     const refreshed = epoch > sentAt ? true : await refreshOnce();

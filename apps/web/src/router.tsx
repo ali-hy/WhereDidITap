@@ -33,7 +33,7 @@ function Shell(props: { children: JSX.Element }): JSX.Element {
   const width = () => (pathname().startsWith("/settings") ? "max-w-[72rem]" : "max-w-[40rem]");
   return (
     <>
-      <AppHeader />
+      <AppHeader width={width()} />
       <main
         id="main"
         aria-busy={session.status() === "loading" ? "true" : undefined}
