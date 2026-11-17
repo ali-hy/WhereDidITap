@@ -1,4 +1,4 @@
-// F-211 InvitationLinkParser (identity LLD §4.15, A-37). TP-1.34's parser rows, plus TP-1.34x.
+// F-211 InvitationLinkParser (identity LLD §4.15, A-37, A-98). TP-1.34's parser rows, plus TP-1.34x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.identity
 
@@ -69,6 +69,47 @@ class InvitationLinkParserTest {
         assertEquals(
             ParseResult.NotAnInvitation,
             InvitationLinkParser.parse("https://h.example/invite#t=$token", prefixed),
+        )
+    }
+
+    // ---- A-98: the debug host alias ----
+
+    private val emulatorBase = "http://10.0.2.2:4173/".toHttpUrl()
+    private val loopback = setOf("localhost", "127.0.0.1")
+
+    @Test
+    fun `TP-1_34 (A-98) with the aliases, a localhost or 127_0_0_1 link on the same scheme and port gives the token`() {
+        assertEquals(
+            ParseResult.Token(token),
+            InvitationLinkParser.parse("http://localhost:4173/invite#t=$token", emulatorBase, loopback),
+        )
+        assertEquals(
+            ParseResult.Token(token),
+            InvitationLinkParser.parse("http://127.0.0.1:4173/invite#t=$token", emulatorBase, loopback),
+        )
+    }
+
+    @Test
+    fun `TP-1_34 (A-98) with the aliases, another port is OtherServer, and without them localhost is OtherServer`() {
+        assertEquals(
+            ParseResult.OtherServer,
+            InvitationLinkParser.parse("http://localhost:8080/invite#t=$token", emulatorBase, loopback),
+        )
+        assertEquals(
+            ParseResult.OtherServer,
+            InvitationLinkParser.parse("http://localhost:4173/invite#t=$token", emulatorBase),
+        )
+    }
+
+    @Test
+    fun `TP-1_34x (A-98) with the aliases, another scheme is OtherServer and the base host still works`() {
+        assertEquals(
+            ParseResult.OtherServer,
+            InvitationLinkParser.parse("https://localhost:4173/invite#t=$token", emulatorBase, loopback),
+        )
+        assertEquals(
+            ParseResult.Token(token),
+            InvitationLinkParser.parse("http://10.0.2.2:4173/invite#t=$token", emulatorBase, loopback),
         )
     }
 }
