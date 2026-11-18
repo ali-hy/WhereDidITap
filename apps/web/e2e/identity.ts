@@ -9,7 +9,10 @@
 // - submitSignIn(page, email, password, path): the S-3 sign-in form, submitted.
 // - signInByApi(request, email): auth.signIn with body delivery → the session's tokens.
 // - accountMenuButton(page), signOutFromMenu(page): F-162's account menu (A-76).
-import { randomInt, randomUUID } from "node:crypto";
+// - TestAuthenticator: §10.1's RFC 6238 helper for a two-step user (S-4).
+// - enableTwoStep(page, opts): turns two-step on through the setup page (S-4).
+// - unconfirmSessions(request, email): §10.1's step-up test route (S-4).
+import { createHmac, randomInt, randomUUID } from "node:crypto";
 import type { APIRequestContext, Locator } from "@playwright/test";
 import { catalogText, expect, test as base, type Page } from "./fixtures.js";
 
@@ -209,4 +212,141 @@ export async function signOutFromMenu(page: Page): Promise<void> {
   await expect(accountMenuButton(page)).toBeVisible();
   await accountMenuButton(page).click();
   await page.getByRole("menuitem", { name: catalogText("Sign out") }).click();
+}
+
+// ---- Two-step verification (S-4; §10.1 "A two-step user, and codes for it") ----
+
+const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+/** RFC 4648 base32 → bytes; spaces ignored, case-insensitive. */
+export function base32Bytes(text: string): Buffer {
+  const chars = text.replace(/\s/g, "").toUpperCase();
+  let bits = 0;
+  let value = 0;
+  const out: number[] = [];
+  for (const c of chars) {
+    const v = BASE32.indexOf(c);
+    if (v < 0) throw new RangeError(`not base32: ${c}`);
+    value = (value << 5) | v;
+    bits += 5;
+    if (bits >= 8) {
+      out.push((value >>> (bits - 8)) & 255);
+      bits -= 8;
+    }
+  }
+  return Buffer.from(out);
+}
+
+/** RFC 6238 TOTP for one 30-second step: HOTP with SHA-1, 6 digits, zero-padded. */
+export function totpAt(secret: Buffer, step: number): string {
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(step));
+  const mac = createHmac("sha1", secret).update(counter).digest();
+  const offset = (mac[mac.length - 1] ?? 0) & 0x0f;
+  const binary = mac.readUInt32BE(offset) & 0x7fffffff;
+  return String(binary % 1_000_000).padStart(6, "0");
+}
+
+/** Seconds a chosen step must stay acceptable (s − 1 to s + 1) after it is picked. */
+const STEP_MARGIN_SECONDS = 10;
+
+/**
+ * An authenticator app for one test's user. F-60 accepts steps s − 1 to s + 1 and skips any at
+ * or below the last one used, so `nextCode` takes the lowest free step above the last it used
+ * (with STEP_MARGIN_SECONDS of validity left) and waits for the next 30-second boundary when none
+ * is free.
+ */
+export class TestAuthenticator {
+  private lastStep: number | null = null;
+
+  constructor(private readonly secret: Buffer) {}
+
+  /** From the key the setup page shows (grouped in 4s). */
+  static fromKey(key: string): TestAuthenticator {
+    return new TestAuthenticator(base32Bytes(key));
+  }
+
+  private freeStep(): number | null {
+    const now = Date.now() / 1000;
+    const s = Math.floor(now / 30);
+    for (const step of [s - 1, s, s + 1]) {
+      if (this.lastStep !== null && step <= this.lastStep) continue;
+      if ((step + 2) * 30 - now < STEP_MARGIN_SECONDS) continue;
+      return step;
+    }
+    return null;
+  }
+
+  /** A code the server accepts once (marks its step used). */
+  async nextCode(): Promise<string> {
+    await expect.poll(() => this.freeStep(), { timeout: 45_000, intervals: [250] }).not.toBeNull();
+    const step = this.freeStep();
+    if (step === null) throw new Error("no free TOTP step");
+    this.lastStep = step;
+    return totpAt(this.secret, step);
+  }
+
+  /** Six digits that match none of the steps s − 2 to s + 2. */
+  wrongCode(): string {
+    const s = Math.floor(Date.now() / 30_000);
+    const near = new Set([-2, -1, 0, 1, 2].map((d) => totpAt(this.secret, s + d)));
+    for (let n = 0; ; n += 1) {
+      const code = String(n).padStart(6, "0");
+      if (!near.has(code)) return code;
+    }
+  }
+}
+
+/** A recovery code as F-61 formats it. */
+export const RECOVERY_CODE = /^[A-Z2-7]{4}-[A-Z2-7]{4}-[A-Z2-7]{4}$/;
+
+/** True when the response is a POST to `path`. */
+export const isPost = (path: string) => (r: { url(): string; request(): { method(): string } }) =>
+  new URL(r.url()).pathname === path && r.request().method() === "POST";
+
+/**
+ * Turns two-step on for the signed-in user in `page` (F-165): opens the setup page, reads the key
+ * it shows, enters a code and waits for the ten recovery codes. With `acknowledge`, ticks the
+ * checkbox and presses Done (back on Sign-in & security).
+ */
+export async function enableTwoStep(
+  page: Page,
+  opts: { acknowledge: boolean },
+): Promise<{ auth: TestAuthenticator; codes: string[] }> {
+  const setup = page.waitForResponse(isPost("/api/v1/me/two-step/setup"));
+  await page.goto("/settings/security/two-step");
+  const setupAnswer = await setup;
+  expect(setupAnswer.status(), await setupAnswer.text()).toBe(200);
+  const { secret } = (await setupAnswer.json()) as { secret: string };
+  await expect(page.locator("main").getByText(secret, { exact: true })).toBeVisible();
+  const auth = TestAuthenticator.fromKey(secret);
+
+  const enable = page.waitForResponse(isPost("/api/v1/me/two-step/enable"));
+  await page
+    .locator("main")
+    .getByLabel(catalogText("Code"))
+    .fill(await auth.nextCode());
+  await page
+    .locator("main")
+    .getByRole("button", { name: catalogText("Verify and turn on") })
+    .click();
+  const enableAnswer = await enable;
+  expect(enableAnswer.status(), await enableAnswer.text()).toBe(200);
+  const { recoveryCodes: codes } = (await enableAnswer.json()) as { recoveryCodes: string[] };
+  expect(codes).toHaveLength(10);
+  await expect(page.getByText(catalogText("Save your recovery codes"))).toBeVisible();
+  for (const code of codes) await expect(page.getByText(code).first()).toBeVisible();
+
+  if (opts.acknowledge) {
+    await page.getByRole("checkbox", { name: catalogText("I've saved my recovery codes") }).check();
+    await page.getByRole("button", { name: catalogText("Done") }).click();
+    await expect(page).toHaveURL(/\/settings\/security$/);
+  }
+  return { auth, codes };
+}
+
+/** §10.1's test route: every live session of `email` needs step-up for its next sensitive action. */
+export async function unconfirmSessions(request: APIRequestContext, email: string): Promise<void> {
+  const res = await request.post("/api/v1/__test/sessions/unconfirm", { data: { email } });
+  expect(res.status(), await res.text()).toBe(204);
 }

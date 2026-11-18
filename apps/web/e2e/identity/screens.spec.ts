@@ -1,7 +1,8 @@
 // S-3's cross-screen checks on identity's routes (identity LLD §8.1; HLD §4.4): TP-3.44
 // (responsive), TP-3.45 (axe), TP-3.46 (pseudo-RTL, A-75), TP-3.53 (loading, error and list-size
 // states, A-75), TP-3.54 (page titles), TP-3.59 (axe with the account menu open, A-88). Later
-// slices add their routes and screens. Extra cases end in "x".
+// slices add their routes and screens: S-4 adds TP-3.53's S-2, S-11 and S-16 cases (S-16 with a
+// code factor, A-75). Extra cases end in "x".
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
@@ -12,12 +13,17 @@ import {
   catalogText,
   createInvitation,
   createUser,
+  E2E_PASSWORD,
+  enableTwoStep,
   expect,
+  isPost,
   looseText,
   openInvitation,
   signUpThroughUi,
   submitSignIn,
   test,
+  TestAuthenticator,
+  unconfirmSessions,
   uniqueEmail,
   type Page,
 } from "../identity.js";
@@ -429,6 +435,204 @@ test.describe("TP-3.53: loading, error and list-size states (HLD §4.4; A-75)", 
     );
     expect(thisDeviceFirst).toBe(true);
     expect(await overflow(page)).toBeLessThanOrEqual(0);
+  });
+});
+
+test.describe("TP-3.53: S-4's screens: S-2, S-11 and S-16 (HLD §4.4; A-75)", () => {
+  test.describe.configure({ timeout: 120_000 });
+
+  const json = (status: number, body: unknown) => ({
+    status,
+    contentType: "application/json",
+    body: JSON.stringify(body),
+  });
+
+  const QR_ALT = "QR code for your authenticator app. Use the key below if you can't scan.";
+
+  test("TP-3.53: S-2 Two-step verification: the code field starts empty; while auth.verifyTwoStep is pending, Verify is busy; TWO_STEP_CHALLENGE_EXPIRED on the first try → /sign-in with 'This sign-in timed out. Sign in again.'", async ({
+    page,
+    request,
+  }) => {
+    const { email } = await createUser(request);
+    // The first factor answers two_step_required (cookie delivery: no token in the body).
+    await page.route("**/api/v1/auth/sign-in", (route) =>
+      route.fulfill(
+        json(200, {
+          status: "two_step_required",
+          challengeToken: null,
+          expiresAt: new Date(Date.now() + 300_000).toISOString(),
+        }),
+      ),
+    );
+    const gate = deferred();
+    await page.route("**/api/v1/auth/two-step/verify", async (route) => {
+      await gate.promise;
+      await route.fulfill(
+        json(401, {
+          defined: true,
+          code: "TWO_STEP_CHALLENGE_EXPIRED",
+          status: 401,
+          message: "Two-step challenge expired",
+        }),
+      );
+    });
+
+    await submitSignIn(page, email);
+
+    await expect(page).toHaveURL(/\/sign-in\/two-step$/);
+    const code = page.locator("main").getByLabel(catalogText("Code"));
+    await expect(code).toHaveValue("");
+    await code.fill("123456");
+    const verify = page.locator("main").getByRole("button", { name: catalogText("Verify") });
+    await verify.click();
+    await expect(verify).toHaveAttribute("aria-busy", "true");
+    gate.resolve();
+
+    await expect(page).toHaveURL(/\/sign-in(\?.*)?$/);
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign in"));
+    await expect(
+      page.locator("main").getByText(looseText("This sign-in timed out. Sign in again.")),
+    ).toBeVisible();
+  });
+
+  test("TP-3.53: S-11 Two-step setup: a busy QR area while me.twoStepSetup is pending, then the QR; a wrong code inline; Verify and turn on busy while pending; TWO_STEP_SETUP_EXPIRED → 'Setup timed out. Start again.'", async ({
+    page,
+    request,
+  }) => {
+    const { token } = await createInvitation(request, { email: uniqueEmail() });
+    await signUpThroughUi(page, token, "Setup States");
+    const setupGate = deferred();
+    await page.route("**/api/v1/me/two-step/setup", async (route) => {
+      await setupGate.promise;
+      await route.continue();
+    });
+    const setup = page.waitForResponse(isPost("/api/v1/me/two-step/setup"));
+
+    await page.goto("/settings/security/two-step");
+
+    const main = page.locator("main");
+    const qr = main.getByRole("img", { name: catalogText(QR_ALT) });
+    const busy = main.locator('[aria-busy="true"]').first();
+    await expect(busy).toBeAttached();
+    // P-A-515 (c): the Skeleton's aria-hidden blocks, shown after 300 ms.
+    await expect(busy.locator('[aria-hidden="true"]:has(> div)').first()).toBeVisible();
+    await expect(qr).toHaveCount(0);
+    setupGate.resolve();
+    const { secret } = (await (await setup).json()) as { secret: string };
+    await expect(qr).toBeVisible();
+
+    // A wrong code (the real server's TWO_STEP_CODE_INVALID): inline, the form stays.
+    const auth = TestAuthenticator.fromKey(secret);
+    const submit = main.getByRole("button", { name: catalogText("Verify and turn on") });
+    await main.getByLabel(catalogText("Code")).fill(auth.wrongCode());
+    await submit.click();
+    await expect(
+      main.getByText(
+        looseText("That code didn't work. Check that your phone's time is set automatically."),
+      ),
+    ).toBeVisible();
+
+    // Pending, then the 15-minute window has passed.
+    const enableGate = deferred();
+    await page.route("**/api/v1/me/two-step/enable", async (route) => {
+      await enableGate.promise;
+      await route.fulfill(
+        json(410, {
+          defined: true,
+          code: "TWO_STEP_SETUP_EXPIRED",
+          status: 410,
+          message: "Two-step setup expired",
+        }),
+      );
+    });
+    await main.getByLabel(catalogText("Code")).fill(auth.wrongCode());
+    await submit.click();
+    await expect(submit).toHaveAttribute("aria-busy", "true");
+    enableGate.resolve();
+    await expect(main.getByText(looseText("Setup timed out. Start again."))).toBeVisible();
+  });
+
+  test("TP-3.53: S-11 with an expired step-up (password user): S-16 opens with an empty, focused Password field; after Confirm the setup continues without another click", async ({
+    page,
+    request,
+  }) => {
+    const email = uniqueEmail();
+    const { token } = await createInvitation(request, { email });
+    await signUpThroughUi(page, token, "Setup Step Up");
+    await unconfirmSessions(request, email);
+    const setup: number[] = [];
+    page.on("response", (r) => {
+      if (isPost("/api/v1/me/two-step/setup")(r)) setup.push(r.status());
+    });
+
+    await page.goto("/settings/security/two-step");
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText(catalogText("Confirm it's you"))).toBeVisible();
+    const password = dialog.getByLabel(catalogText("Password"));
+    await expect(password).toHaveValue("");
+    await expect(password).toBeFocused();
+    await password.fill(E2E_PASSWORD);
+    await dialog.getByRole("button", { name: catalogText("Confirm") }).click();
+
+    await expect(dialog).toBeHidden();
+    await expect(
+      page.locator("main").getByRole("img", { name: catalogText(QR_ALT) }),
+    ).toBeVisible();
+    expect(setup).toEqual([403, 200]);
+  });
+
+  test("TP-3.53: S-16 Confirm it's you with a code factor: an empty, focused Code field and no Password; busy while me.confirm is pending; a wrong code inline; the right one resumes Create new codes", async ({
+    page,
+    request,
+  }) => {
+    const email = uniqueEmail();
+    const { token } = await createInvitation(request, { email });
+    await signUpThroughUi(page, token, "Code Step Up");
+    const { auth } = await enableTwoStep(page, { acknowledge: true });
+    await unconfirmSessions(request, email);
+    await page.goto("/settings/security");
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
+    const gate = deferred();
+    let confirms = 0;
+    await page.route("**/api/v1/me/confirm", async (route) => {
+      confirms += 1;
+      if (confirms === 1) await gate.promise;
+      await route.continue();
+    });
+
+    await page
+      .locator("main")
+      .getByRole("button", { name: catalogText("Create new codes") })
+      .click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByText(catalogText("Confirm it's you"))).toBeVisible();
+    const code = dialog.getByLabel(catalogText("Code"));
+    await expect(code).toHaveValue("");
+    await expect(code).toBeFocused();
+    await expect(code).toHaveAttribute("inputmode", "numeric");
+    await expect(dialog.getByLabel(catalogText("Password"))).toHaveCount(0);
+
+    await code.fill(auth.wrongCode());
+    await code.press("Enter");
+    await expect(dialog.locator('button[aria-busy="true"]')).toHaveCount(1);
+    gate.resolve();
+    await expect(
+      dialog.getByText(looseText("That code didn't work. Check your app and try again.")),
+    ).toBeVisible();
+    await expect(dialog.locator('button[aria-busy="true"]')).toHaveCount(0);
+
+    const fresh = page.waitForResponse(
+      (r) => isPost("/api/v1/me/two-step/recovery-codes")(r) && r.status() === 200,
+    );
+    await code.fill(await auth.nextCode());
+    await code.press("Enter");
+    const { recoveryCodes } = (await (await fresh).json()) as { recoveryCodes: string[] };
+    await expect(dialog).toBeHidden();
+    await expect(page.getByText(recoveryCodes[0] ?? "-").first()).toBeVisible();
+    expect(confirms).toBe(2);
   });
 });
 
