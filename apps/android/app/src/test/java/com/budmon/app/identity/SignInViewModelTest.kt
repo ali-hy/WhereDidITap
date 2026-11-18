@@ -1,8 +1,12 @@
-// F-208 SignInViewModel (identity LLD §4.15, §8.2's S-3 signatures, A-70, A-75). TP-3.57's
-// SignInViewModel rows (with A-86's), plus TP-3.57x. The screens are SignInSignOutScreensTest.
+// F-208 SignInViewModel (identity LLD §4.15, §8.2's S-3 and S-4 signatures, A-70, A-75, A-99).
+// TP-3.57's SignInViewModel rows (with A-86's and A-99's TwoStepRequired), TP-4.35x for
+// showTwoStepEnded, plus TP-3.57x. The screens are SignInSignOutScreensTest.
+// S-4 (A-99): submit and discardOtherUsersEntries gain `onTwoStep: (TwoStepChallenge) -> Unit`; the LLD
+// gives no position, so every call passes its lambdas by name.
 // Setup per TP-3.57: a MockK AuthRepository and a relaxed MockK OutboxOwnerGuard; a MockK TokenStore
 // whose lastEmail() is null unless a test says otherwise; Dispatchers.setMain(StandardTestDispatcher)
-// so viewModelScope runs on virtual time. `log` records savePassword and onSignedIn in order.
+// so viewModelScope runs on virtual time. `log` records savePassword and onSignedIn in order;
+// `challenges` records onTwoStep.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.identity
 
@@ -55,6 +59,8 @@ class SignInViewModelTest {
     private val log = mutableListOf<String>()
     private val savePassword: suspend (String, String) -> Unit = { email, password -> log += "save $email $password" }
     private val onSignedIn: (Me) -> Unit = { me -> log += "signedIn ${me.id}" }
+    private val challenges = mutableListOf<TwoStepChallenge>()
+    private val onTwoStep: (TwoStepChallenge) -> Unit = { challenges += it }
 
     @After
     fun tearDown() {
@@ -70,7 +76,7 @@ class SignInViewModelTest {
         val vm = viewModel()
         vm.onEmailChange(email)
         vm.onPasswordChange(password)
-        vm.submit(isOnline, savePassword, onSignedIn)
+        vm.submit(isOnline = isOnline, savePassword = savePassword, onSignedIn = onSignedIn, onTwoStep = onTwoStep)
         advanceUntilIdle()
         return vm
     }
@@ -136,15 +142,50 @@ class SignInViewModelTest {
     }
 
     @Test
-    fun `TP-3_57 TwoStepRequired - formError error_generic_read, the guard not called`() = runTest {
-        coEvery { repository.signIn(EMAIL, PASSWORD) } returns
-            SignInOutcome.TwoStepRequired("bmc_" + "C".repeat(43), Instant.parse("2026-11-15T10:05:00Z"))
+    fun `TP-3_57 TwoStepRequired - onTwoStep(TwoStepChallenge(token, expiresAt, email, password)) once, no formError, busy false (A-99)`() =
+        runTest {
+            val token = "bmc_" + "C".repeat(43)
+            val expiresAt = Instant.parse("2026-11-15T10:05:00Z")
+            coEvery { repository.signIn(EMAIL, PASSWORD) } returns SignInOutcome.TwoStepRequired(token, expiresAt)
 
-        val vm = submitted(EMAIL, PASSWORD)
+            val vm = submitted(EMAIL, PASSWORD)
 
-        assertEquals(UiText(R.string.error_generic_read), vm.form.formError)
-        assertEquals(emptyList<String>(), log)
-        coVerify(exactly = 0) { guard.complete(any()) }
+            assertEquals(listOf(TwoStepChallenge(token, expiresAt, EMAIL, PASSWORD)), challenges)
+            assertNull(vm.form.formError)
+            assertEquals(false, vm.form.busy)
+            assertEquals("nothing saved or signed in", emptyList<String>(), log)
+            coVerify(exactly = 0) { guard.complete(any()) }
+        }
+
+    @Test
+    fun `TP-3_57x Ready then Proceed - onTwoStep never called (A-99)`() = runTest {
+        coEvery { repository.signIn(EMAIL, PASSWORD) } returns SignInOutcome.Ready(pending)
+        coEvery { guard.complete(pending) } returns OwnerDecision.Proceed
+
+        submitted(EMAIL, PASSWORD)
+
+        assertEquals(emptyList<TwoStepChallenge>(), challenges)
+        assertEquals(listOf("save $EMAIL $PASSWORD", "signedIn ${ME.id}"), log)
+    }
+
+    // ---- S-4: back from two-step (A-99) ----
+
+    @Test
+    fun `TP-4_35x showTwoStepEnded(TooManyAttempts) - formError twostep_too_many`() = runTest {
+        val vm = viewModel()
+
+        vm.showTwoStepEnded(TwoStepEndReason.TooManyAttempts)
+
+        assertEquals(UiText(R.string.twostep_too_many), vm.form.formError)
+    }
+
+    @Test
+    fun `TP-4_35x showTwoStepEnded(Expired) - formError twostep_timeout`() = runTest {
+        val vm = viewModel()
+
+        vm.showTwoStepEnded(TwoStepEndReason.Expired)
+
+        assertEquals(UiText(R.string.twostep_timeout), vm.form.formError)
     }
 
     @Test
@@ -169,7 +210,7 @@ class SignInViewModelTest {
         assertEquals(3, vm.form.ownerDialog)
         assertEquals("nothing saved or signed in while asking", emptyList<String>(), log)
 
-        vm.discardOtherUsersEntries(savePassword, onSignedIn)
+        vm.discardOtherUsersEntries(savePassword = savePassword, onSignedIn = onSignedIn, onTwoStep = onTwoStep)
         advanceUntilIdle()
 
         // A-77: from here it behaves as Proceed.
@@ -206,7 +247,7 @@ class SignInViewModelTest {
         vm.onEmailChange(EMAIL)
         vm.onPasswordChange(PASSWORD)
 
-        vm.submit(true, throwing, onSignedIn)
+        vm.submit(isOnline = true, savePassword = throwing, onSignedIn = onSignedIn, onTwoStep = onTwoStep)
         advanceUntilIdle()
 
         assertEquals(listOf("signedIn ${ME.id}"), log)
@@ -234,10 +275,10 @@ class SignInViewModelTest {
         vm.onEmailChange(EMAIL)
         vm.onPasswordChange(PASSWORD)
 
-        vm.submit(true, savePassword, onSignedIn)
+        vm.submit(isOnline = true, savePassword = savePassword, onSignedIn = onSignedIn, onTwoStep = onTwoStep)
         runCurrent()
         assertEquals(true, vm.form.busy)
-        vm.submit(true, savePassword, onSignedIn)
+        vm.submit(isOnline = true, savePassword = savePassword, onSignedIn = onSignedIn, onTwoStep = onTwoStep)
         advanceUntilIdle()
 
         coVerify(exactly = 1) { repository.signIn(EMAIL, PASSWORD) }
@@ -259,7 +300,7 @@ class SignInViewModelTest {
         advanceUntilIdle()
         vm.onEmailChange(EMAIL)
         vm.onPasswordChange(PASSWORD)
-        vm.submit(true, savePassword, onSignedIn)
+        vm.submit(isOnline = true, savePassword = savePassword, onSignedIn = onSignedIn, onTwoStep = onTwoStep)
         advanceUntilIdle()
         assertEquals(3, vm.form.ownerDialog)
         return vm
@@ -271,9 +312,9 @@ class SignInViewModelTest {
         val gate = CompletableDeferred<Unit>()
         coEvery { guard.discardAndProceed(pending) } coAnswers { gate.await() }
 
-        vm.discardOtherUsersEntries(savePassword, onSignedIn)
+        vm.discardOtherUsersEntries(savePassword = savePassword, onSignedIn = onSignedIn, onTwoStep = onTwoStep)
         runCurrent()
-        vm.discardOtherUsersEntries(savePassword, onSignedIn)
+        vm.discardOtherUsersEntries(savePassword = savePassword, onSignedIn = onSignedIn, onTwoStep = onTwoStep)
         runCurrent()
         gate.complete(Unit)
         advanceUntilIdle()
@@ -307,7 +348,7 @@ class SignInViewModelTest {
         val vm = ViewModelProvider(store, factory)[SignInViewModel::class.java]
         vm.onEmailChange(EMAIL)
         vm.onPasswordChange(PASSWORD)
-        vm.submit(true, savePassword, onSignedIn)
+        vm.submit(isOnline = true, savePassword = savePassword, onSignedIn = onSignedIn, onTwoStep = onTwoStep)
         advanceUntilIdle()
 
         store.clear()

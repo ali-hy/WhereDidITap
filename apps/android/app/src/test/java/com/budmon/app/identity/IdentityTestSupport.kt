@@ -1,7 +1,7 @@
 // Shared test fixtures for identity's Android tests (test-architect): TP-1.34, TP-3.48, TP-3.49,
-// TP-3.55, TP-3.57.
+// TP-3.55, TP-3.57, TP-4.35, TP-4.38.
 // - testTokenStore(): the real TokenStore over an in-memory AES key (A-7, A-8, A-37).
-// - ME and meJson(): one Me and its wire JSON (MeSchema, S-1 fields).
+// - ME and meJson(): one Me and its wire JSON (MeSchema; `twoStep` from Me's S-4 fields, A-99).
 // - eventually(): polls a condition (the repository runs on Dispatchers.IO, outside virtual time).
 // - Wire JSON for S-3's auth answers (§5.2: SessionTokens, SignInResult, auth.refresh's output).
 // - PathDispatcher: a MockWebServer dispatcher answering by path and recording each request.
@@ -45,7 +45,8 @@ fun meJson(me: Me = ME): String =
      "timeZone":"${me.timeZone}","baseCurrency":"${me.baseCurrency}","status":"${me.status}",
      "deletionScheduledFor":null,"isOwner":${me.isOwner},"hasPassword":true,
      "passwordUpdatedAt":"2026-11-01T10:00:00.000Z","google":null,
-     "twoStep":{"enabled":false,"recoveryCodesLeft":0,"codesAcknowledged":false},
+     "twoStep":{"enabled":${me.twoStepEnabled},"recoveryCodesLeft":${me.recoveryCodesLeft},
+                "codesAcknowledged":${me.codesAcknowledged}},
      "confirmedUntil":null,"sessionId":"0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a02"}
     """.trimIndent()
 
@@ -75,6 +76,18 @@ const val PATH_SIGN_IN = "/api/v1/auth/sign-in"
 const val PATH_SIGN_OUT = "/api/v1/auth/sign-out"
 const val PATH_REFRESH = "/api/v1/auth/refresh"
 const val PATH_ME = "/api/v1/me"
+
+// ---- S-4 paths (§7) ----
+
+const val PATH_VERIFY_TWO_STEP = "/api/v1/auth/two-step/verify"
+const val PATH_CONFIRM = "/api/v1/me/confirm"
+const val PATH_TWO_STEP_SETUP = "/api/v1/me/two-step/setup"
+const val PATH_TWO_STEP_ENABLE = "/api/v1/me/two-step/enable"
+const val PATH_ACK_CODES = "/api/v1/me/two-step/acknowledge-codes"
+const val PATH_TWO_STEP_DISABLE = "/api/v1/me/two-step/disable"
+const val PATH_RECOVERY_CODES = "/api/v1/me/two-step/recovery-codes"
+const val PATH_REPLACE_START = "/api/v1/me/two-step/replace/start"
+const val PATH_REPLACE_CONFIRM = "/api/v1/me/two-step/replace/confirm"
 
 /** A JSON answer. */
 fun jsonResponse(body: String, code: Int = 200): MockResponse =
@@ -121,6 +134,10 @@ fun wireTokens(tag: Char, deviceToken: String? = "bmd_" + tag.toString().repeat(
 /** `auth.signIn`'s `signed_in` answer. */
 fun signedInJson(tokens: WireTokens): String =
     """{"status":"signed_in","recoveryCodesLeft":null,"tokens":${tokens.json()}}"""
+
+/** `auth.verifyTwoStep`'s answer (SignInResult, always `signed_in`). */
+fun verifiedJson(tokens: WireTokens, recoveryCodesLeft: Int? = null): String =
+    """{"status":"signed_in","recoveryCodesLeft":${recoveryCodesLeft ?: "null"},"tokens":${tokens.json()}}"""
 
 /** `auth.refresh`'s answer: `{ tokens, accessExpiresAt }`. */
 fun refreshJson(tokens: WireTokens): String =
