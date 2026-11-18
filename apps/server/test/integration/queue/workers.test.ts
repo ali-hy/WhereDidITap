@@ -748,13 +748,31 @@ describe("TP-6.11: jobs:dead runs a cli-mode pg-boss (F-93, A-218)", () => {
 });
 
 describe("TP-6.14: createWorkerContainer's module defaults (F-96, A-26)", () => {
-  it("TP-6.14: with no overrides: onGeneralStarted is [], erasureHandler is null, sealedColumns.all() is []", async () => {
+  it("TP-6.14 (A-511): with no overrides: onGeneralStarted is [], erasureHandler is null, sealedColumns.all() is the modules' columns (identity's two TOTP columns, from its S-4)", async () => {
     const testDb = await createTestDatabase();
     const c = createWorkerContainer(testWorkerConfig(testDb.endpoint, testDb.name, "general"));
     try {
       expect(c.onGeneralStarted).toEqual([]);
       expect(c.erasureHandler).toBeNull();
-      expect(c.sealedColumns.all()).toEqual([]);
+      expect(c.sealedColumns.all()).toHaveLength(2);
+      expect(c.sealedColumns.all()).toEqual(
+        expect.arrayContaining([
+          {
+            table: "two_step_credentials",
+            idColumn: "user_id",
+            column: "secret_envelope",
+            purpose: "totp",
+            provider: "api",
+          },
+          {
+            table: "two_step_credentials",
+            idColumn: "user_id",
+            column: "pending_secret_envelope",
+            purpose: "totp",
+            provider: "api",
+          },
+        ]),
+      );
       expect([...c.roles]).toEqual(["general"]);
     } finally {
       await c.close();

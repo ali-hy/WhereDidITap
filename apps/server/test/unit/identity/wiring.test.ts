@@ -1,5 +1,5 @@
 // Identity's wiring into the platform's composition points (identity LLD §1.1, A-26, A-202). TP-0.32's
-// static (U) half with S-3's expectations; the container half is in
+// static (U) half with S-4's expectations; the container half is in
 // test/integration/identity/wiring.test.ts.
 import { contract } from "@budmon/contract";
 import { describe, expect, it } from "vitest";
@@ -22,13 +22,13 @@ const PLATFORM_TABLES = [
   "rate_limit_counters",
 ];
 
-describe("TP-0.32 (U): the wiring points, as of S-3", () => {
+describe("TP-0.32 (U): the wiring points, as of S-4", () => {
   it("TP-0.32 (S-1): appRouter and the contract have meta plus identity's auth, me and invitations", () => {
     expect(Object.keys(appRouter).sort()).toEqual(["auth", "invitations", "me", "meta"]);
     expect(Object.keys(contract).sort()).toEqual(["auth", "invitations", "me", "meta"]);
   });
 
-  it("TP-0.32 (S-3): identityRouter has S-1's and S-3's procedures", () => {
+  it("TP-0.32 (S-4): identityRouter has S-1's, S-3's and S-4's procedures", () => {
     const procedures = Object.entries(identityRouter as Record<string, object>)
       .flatMap(([group, router]) => Object.keys(router).map((name) => `${group}.${name}`))
       .sort();
@@ -48,11 +48,20 @@ describe("TP-0.32 (U): the wiring points, as of S-3", () => {
         "me.listSessions",
         "me.revokeOtherSessions",
         "me.revokeSession",
+        // S-4
+        "auth.verifyTwoStep",
+        "me.acknowledgeRecoveryCodes",
+        "me.regenerateRecoveryCodes",
+        "me.twoStepDisable",
+        "me.twoStepEnable",
+        "me.twoStepReplaceConfirm",
+        "me.twoStepReplaceStart",
+        "me.twoStepSetup",
       ].sort(),
     );
   });
 
-  it("TP-0.32 (S-3): PUBLIC_PROCEDURES is meta.clientConfig plus §5.1's S-1 and S-3 entries", () => {
+  it("TP-0.32 (S-4): PUBLIC_PROCEDURES is meta.clientConfig plus §5.1's S-1, S-3 and S-4 entries", () => {
     expect([...PUBLIC_PROCEDURES].sort()).toEqual(
       [
         "auth.signUpOptions",
@@ -63,6 +72,8 @@ describe("TP-0.32 (U): the wiring points, as of S-3", () => {
         "auth.methods",
         "auth.refresh",
         "auth.signIn",
+        // S-4
+        "auth.verifyTwoStep",
       ].sort(),
     );
   });

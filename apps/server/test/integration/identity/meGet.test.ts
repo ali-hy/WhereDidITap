@@ -1,4 +1,4 @@
-// me.get (F-56; identity LLD §5.3) and default deny over the whole contract (TP-0.26, as of S-3).
+// me.get (F-56; identity LLD §5.3) and default deny over the whole contract (TP-0.26, as of S-4).
 // TP-3.23, TP-0.26, plus extra cases ending in "x".
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { contract, listProcedures } from "@budmon/contract";
@@ -147,7 +147,11 @@ describe("TP-0.26: default deny over every procedure in the contract", () => {
   const UUID = "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a99";
 
   /** Bodies valid for procedures whose input has required fields, so only auth decides. */
-  const BODIES: Record<string, unknown> = { "me.revokeSession": { sessionId: UUID } };
+  const BODIES: Record<string, unknown> = {
+    "me.revokeSession": { sessionId: UUID },
+    "me.twoStepEnable": { code: "123456" },
+    "me.twoStepReplaceConfirm": { code: "123456" },
+  };
 
   it("TP-0.26: S-1's public identity procedures are in PUBLIC_PROCEDURES", () => {
     for (const path of ["auth.signUpOptions", "invitations.preview", "invitations.accept"]) {
@@ -166,6 +170,22 @@ describe("TP-0.26: default deny over every procedure in the contract", () => {
       "me.listSessions",
       "me.revokeSession",
       "me.revokeOtherSessions",
+    ];
+    expect(procedures.map((p) => p.path)).toEqual(expect.arrayContaining(authed));
+    for (const path of authed) expect(PUBLIC_PROCEDURES.has(path), path).toBe(false);
+  });
+
+  it("TP-0.26 (S-4): auth.verifyTwoStep is public; S-4's me.* procedures are in the contract and not public", () => {
+    expect(PUBLIC_PROCEDURES.has("auth.verifyTwoStep")).toBe(true);
+    expect(procedures.map((p) => p.path)).toContain("auth.verifyTwoStep");
+    const authed = [
+      "me.twoStepSetup",
+      "me.twoStepEnable",
+      "me.acknowledgeRecoveryCodes",
+      "me.twoStepDisable",
+      "me.regenerateRecoveryCodes",
+      "me.twoStepReplaceStart",
+      "me.twoStepReplaceConfirm",
     ];
     expect(procedures.map((p) => p.path)).toEqual(expect.arrayContaining(authed));
     for (const path of authed) expect(PUBLIC_PROCEDURES.has(path), path).toBe(false);

@@ -1,7 +1,7 @@
 // Identity's factories (identity LLD §10.1), owned by the test-architect. Each writes through
 // identity's repos on a DbHandle and returns what tests need (plain tokens included). Later slices
-// add the known-code recovery factory and the export factory.
-import { randomBytes } from "node:crypto";
+// add the export factory.
+import { createHmac, randomBytes } from "node:crypto";
 import { Temporal, uuidv7Generator } from "@budmon/shared";
 import type { DbHandle } from "../../src/platform/db/types.js";
 import type { ApiSecretsCipher } from "../../src/platform/crypto/apiSecrets.js";
@@ -230,7 +230,7 @@ export const TWO_STEP_SECRET = "12345678901234567890";
 /**
  * Two-step enabled with TWO_STEP_SECRET, sealed with `apiSecrets` (SealContext
  * { table: "two_step_credentials", rowId: userId, purpose: "totp" }), and `recoveryCodes` unused
- * codes (placeholder HMACs: they count, but don't verify; S-4 adds known codes).
+ * codes (placeholder HMACs: they count, but don't verify; recoveryCodesFactory stores known ones).
  */
 export async function twoStepFactory(
   h: DbHandle,
@@ -269,4 +269,70 @@ export async function twoStepFactory(
   for (const code of codes.slice(unused)) {
     await twoStepRepo.markCodeUsed(h, code.id, toDate(input.now));
   }
+}
+
+/** A pending TOTP secret (F-10 upsertPending): a new pending row, or pending_* on an enabled one. */
+export async function pendingSecretFactory(
+  h: DbHandle,
+  apiSecrets: ApiSecretsCipher,
+  input: { userId: string; expiresAt: Temporal.Instant; secret?: Buffer },
+): Promise<void> {
+  const envelope = apiSecrets.seal(input.secret ?? Buffer.from(TWO_STEP_SECRET, "utf8"), {
+    table: "two_step_credentials",
+    rowId: input.userId,
+    purpose: "totp",
+  });
+  await twoStepRepo.upsertPending(h, input.userId, envelope, toDate(input.expiresAt));
+}
+
+/** §10.1: ten known recovery codes in F-61's format. */
+export const KNOWN_RECOVERY_CODES: readonly string[] = [
+  "7KQ2-M3XD-4TRA",
+  "QWER-TY23-ZXCV",
+  "MNBV-CXZ2-LKJH",
+  "POIU-YTRE-WQ34",
+  "ASDF-GHJK-L567",
+  "ZAQ2-WSX3-EDC4",
+  "RFV5-TGB6-YHN7",
+  "UJMI-KOLP-AAAA",
+  "BBBB-CCCC-DDDD",
+  "EEEE-FFFF-GGG2",
+];
+
+/** The recovery-code key ring (`config.api.recoveryCodeKeys`, revealed). */
+export interface RecoveryRing {
+  current: string;
+  keys: ReadonlyMap<string, Buffer>;
+}
+
+/**
+ * Replaces the user's recovery codes with `codes` (default KNOWN_RECOVERY_CODES), each stored as
+ * HMAC-SHA-256(key, normalised code) under `keyId` (default the ring's current key), as F-61 and
+ * F-10 store them; the first `used` codes are marked used at `now`. Returns the codes.
+ */
+export async function recoveryCodesFactory(
+  h: DbHandle,
+  ring: RecoveryRing,
+  input: {
+    userId: string;
+    now: Temporal.Instant;
+    codes?: readonly string[];
+    keyId?: string;
+    used?: number;
+  },
+): Promise<readonly string[]> {
+  const codes = input.codes ?? KNOWN_RECOVERY_CODES;
+  const keyId = input.keyId ?? ring.current;
+  const key = ring.keys.get(keyId);
+  if (key === undefined) throw new Error(`recoveryCodesFactory: no key ${keyId} in the ring`);
+  const rows = codes.map((code) => ({
+    id: ids.next(),
+    keyId,
+    hmac: createHmac("sha256", key).update(code.replace(/[-\s]/g, "").toUpperCase()).digest(),
+  }));
+  await twoStepRepo.replaceRecoveryCodes(h, input.userId, rows);
+  for (const row of rows.slice(0, input.used ?? 0)) {
+    await twoStepRepo.markCodeUsed(h, row.id, toDate(input.now));
+  }
+  return codes;
 }

@@ -1,7 +1,7 @@
 // Identity's test helpers (identity LLD §10.1), owned by the test-architect.
 //
 // - buildIdentityApi(opts): an API container on a fresh test database with a memory email sender
-//   and a 5-entry common-password set, plus its server.
+//   and a 5-entry common-password set (and an optional config fixture), plus its server.
 // - buildIdentityWorker(opts): a general worker container (same sender) on a test database, and
 //   runJob(name, payload, attempt), which calls identityHandlers(c)'s handler directly.
 // - setCookies(res): every set-cookie value of an inject response; cookieJar(res) and
@@ -16,6 +16,7 @@ import { createMemoryEmailSender, type MemoryEmailSender } from "../../src/ident
 import { identityHandlers } from "../../src/identity/identityJobs.js";
 import type { IdentityOverrides } from "../../src/identity/identityModule.js";
 import { buildApiContainer, observed, type InjectedResponse, type Observed } from "./api.js";
+import type { Fixture } from "./configEnv.js";
 import type { ApiContainerOverrides } from "../../src/platform/container.js";
 import type { ApiContainer } from "../../src/platform/container.js";
 import type { JobContext } from "./jobs.js";
@@ -53,6 +54,8 @@ export async function buildIdentityApi(
     clock?: MutableClock;
     /** Other container overrides (for example `registry: templateJobRegistry()`). */
     overrides?: ApiContainerOverrides;
+    /** The configuration fixture (default devApi), for tests that need known key rings. */
+    fixture?: () => Fixture;
   } = {},
 ): Promise<IdentityApi> {
   const clock = opts.clock ?? fixedClock(T0);
@@ -71,6 +74,7 @@ export async function buildIdentityApi(
       },
     },
     opts.env ?? {},
+    opts.fixture,
   );
   const app = await createApiServer(built.container);
   return {

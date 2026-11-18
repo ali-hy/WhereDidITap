@@ -1,5 +1,6 @@
 // F-117 rewrapApiSecrets / rewrapApiSecretsCommand, F-118 platform.capture-rewrap, F-96's
-// sealedColumns feeding secrets:rewrap-api (A-26). TP-8.7, TP-8.8 and TP-8.16.
+// sealedColumns feeding secrets:rewrap-api (A-26). TP-8.7, TP-8.8 and TP-8.16 (A-511 (7): with
+// identity wired, from its S-4 the container registers identity's two TOTP columns).
 //
 // TP-8.7's "one row updated concurrently between select and update" has no hook in F-117; the
 // test wraps the database so that, just before the rewrap's UPDATE of the chosen row runs, another
@@ -463,14 +464,33 @@ describe("TP-8.16: the container's sealed-column registry feeds secrets:rewrap-a
     }
   });
 
-  it("TP-8.16: createApiContainer(config) with no override has sealedColumns.all() = []", async () => {
+  it("TP-8.16 (A-511): createApiContainer(config) with no override has exactly the modules' sealed columns (identity's two two_step_credentials columns)", async () => {
     const testDb = await createTestDatabase();
     const c = createApiContainer(
       testApiConfigFor(testDb, "budmon_app", {}, fixture),
       observed().overrides,
     );
     try {
-      expect(c.sealedColumns.all()).toEqual([]);
+      const columns = c.sealedColumns.all();
+      expect(columns).toHaveLength(2);
+      expect(columns).toEqual(
+        expect.arrayContaining([
+          {
+            table: "two_step_credentials",
+            idColumn: "user_id",
+            column: "secret_envelope",
+            purpose: "totp",
+            provider: "api",
+          },
+          {
+            table: "two_step_credentials",
+            idColumn: "user_id",
+            column: "pending_secret_envelope",
+            purpose: "totp",
+            provider: "api",
+          },
+        ]),
+      );
     } finally {
       await c.close();
       await testDb.drop();

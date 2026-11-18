@@ -1,6 +1,7 @@
-// Step-up: me.confirm with a password (F-55) through the real HTTP layer, and F-28's helpers
-// (requireConfirmedTx, requireConfirmed, confirmationFactor) against a real database (identity LLD
-// §4.1, §4.4, §5.3, §6). TP-3.21, TP-3.22, TP-3.29, plus extra cases ending in "x".
+// Step-up: me.confirm with a password, and (S-4, A-80) with a two-step code or recovery code
+// through F-62 (F-55), through the real HTTP layer, and F-28's helpers (requireConfirmedTx,
+// requireConfirmed, confirmationFactor) against a real database (identity LLD §4.1, §4.4, §4.5,
+// §5.3, §6). TP-3.21, TP-3.22, TP-3.29, plus extra cases ending in "x".
 // TP-3.22 and TP-3.29 are typed U in the LLD; F-28 reads the session and credentials through the
 // repos on a DbHandle (nothing injectable), so they run here on a real database.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
@@ -26,6 +27,8 @@ import {
 import { buildIdentityApi, T0, type IdentityApi } from "../../support/identity.js";
 import { call, errorOf } from "../../support/identityHttp.js";
 import { resetBetweenTests } from "../../support/testDatabase.js";
+import { codeAt, stepAt, wrongCode } from "../../support/totp.js";
+import { SECRET_BYTES, twoStepRow, twoStepUser } from "../../support/twoStep.js";
 
 let api: IdentityApi;
 let deps: IdentityDeps;
@@ -219,6 +222,111 @@ describe("TP-3.21: me.confirm with a password", () => {
     });
 
     expect(me.json()).toMatchObject({ confirmedUntil: wire(NOW.add({ minutes: 10 })) });
+  });
+});
+
+describe("TP-3.21x (S-4, A-80): me.confirm with a two-step code or a recovery code (F-55 through F-62)", () => {
+  const CODE_INVALID = {
+    defined: true,
+    code: "TWO_STEP_CODE_INVALID",
+    status: 400,
+    message: "Invalid two-step code",
+  };
+
+  /** A two-step user (TWO_STEP_SECRET, the known recovery codes) with a session confirmed an hour ago. */
+  async function twoStepSession() {
+    const { user, codes } = await twoStepUser(api, { now: NOW });
+    const session = await sessionFactory(h, {
+      userId: user.id,
+      now: NOW,
+      confirmedAt: NOW.subtract({ hours: 1 }),
+    });
+    return { user, codes, session };
+  }
+
+  const me = (accessToken: string) =>
+    call(api.app, "GET", "/me", undefined, {
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+
+  it("TP-3.21x: the right TOTP code → { confirmedUntil: now + 10 min }; confirmed_at now; the step recorded as used", async () => {
+    const { user, session } = await twoStepSession();
+
+    const res = await confirm(session.accessToken, { code: codeAt(SECRET_BYTES, NOW) });
+
+    expect(res.status).toBe(200);
+    expect(res.json()).toEqual({ confirmedUntil: wire(NOW.add({ minutes: 10 })) });
+    expect(await confirmedAt(session.sessionId)).toBe(NOW.epochMilliseconds);
+    expect((await twoStepRow(h, user.id))?.lastUsedStep).toBe(stepAt(NOW));
+  });
+
+  it("TP-3.21x: a wrong TOTP code → 400 TWO_STEP_CODE_INVALID; confirmed_at unchanged", async () => {
+    const { session } = await twoStepSession();
+
+    const res = await confirm(session.accessToken, { code: wrongCode(SECRET_BYTES, NOW) });
+
+    expect(res.status).toBe(400);
+    expect(errorOf(res)).toMatchObject(CODE_INVALID);
+    expect(await confirmedAt(session.sessionId)).toBe(NOW.subtract({ hours: 1 }).epochMilliseconds);
+  });
+
+  it("TP-3.21x: the same TOTP code twice in one step → the second is 400 TWO_STEP_CODE_INVALID (replay)", async () => {
+    const { session } = await twoStepSession();
+    const c = codeAt(SECRET_BYTES, NOW);
+    expect((await confirm(session.accessToken, { code: c })).status).toBe(200);
+
+    const again = await confirm(session.accessToken, { code: c });
+
+    expect(again.status).toBe(400);
+    expect(errorOf(again)).toMatchObject(CODE_INVALID);
+  });
+
+  it("TP-3.21x: a recovery code → { confirmedUntil: now + 10 min }; me.get then counts 9 left", async () => {
+    const { codes, session } = await twoStepSession();
+
+    const res = await confirm(session.accessToken, { recoveryCode: codes[0] });
+
+    expect(res.status).toBe(200);
+    expect(res.json()).toEqual({ confirmedUntil: wire(NOW.add({ minutes: 10 })) });
+    expect(await confirmedAt(session.sessionId)).toBe(NOW.epochMilliseconds);
+    expect((await me(session.accessToken)).json()).toMatchObject({
+      twoStep: { enabled: true, recoveryCodesLeft: 9 },
+    });
+  });
+
+  it("TP-3.21x: a recovery code already used → 400 TWO_STEP_CODE_INVALID", async () => {
+    const { codes, session } = await twoStepSession();
+    expect((await confirm(session.accessToken, { recoveryCode: codes[0] })).status).toBe(200);
+
+    const again = await confirm(session.accessToken, { recoveryCode: codes[0] });
+
+    expect(again.status).toBe(400);
+    expect(errorOf(again)).toMatchObject(CODE_INVALID);
+  });
+
+  it("TP-3.21x: an unknown recovery code → 400 TWO_STEP_CODE_INVALID; none used", async () => {
+    const { session } = await twoStepSession();
+
+    const res = await confirm(session.accessToken, { recoveryCode: "ZZZZ-ZZZZ-ZZZZ" });
+
+    expect(res.status).toBe(400);
+    expect(errorOf(res)).toMatchObject(CODE_INVALID);
+    expect((await me(session.accessToken)).json()).toMatchObject({
+      twoStep: { recoveryCodesLeft: 10 },
+    });
+  });
+
+  it("TP-3.21x: both a code and a recovery code (exactly one input is allowed) → 400 VALIDATION_FAILED; confirmed_at unchanged", async () => {
+    const { codes, session } = await twoStepSession();
+
+    const res = await confirm(session.accessToken, {
+      code: codeAt(SECRET_BYTES, NOW),
+      recoveryCode: codes[0],
+    });
+
+    expect(res.status).toBe(400);
+    expect(errorOf(res).code).toBe("VALIDATION_FAILED");
+    expect(await confirmedAt(session.sessionId)).toBe(NOW.subtract({ hours: 1 }).epochMilliseconds);
   });
 });
 

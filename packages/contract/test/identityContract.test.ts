@@ -1,4 +1,4 @@
-// Identity's contract (identity LLD F-35, §5.1, §6). TP-0.25 with S-3's expectations, plus
+// Identity's contract (identity LLD F-35, §5.1, §6). TP-0.25 with S-4's expectations, plus
 // extra cases TP-0.25x (the shared schemas) and TP-0.42x (the error map).
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { readFileSync } from "node:fs";
@@ -43,7 +43,7 @@ describe("TP-0.25: the contract with identity's S-0 part", () => {
     expect(await emitOpenapi()).toBe(readFileSync(path.join(PACKAGE_DIR, "openapi.json"), "utf8"));
   });
 
-  it("TP-0.25 (S-3): the document has S-1's and S-3's procedures, and API_MINOR stays 1 (one bump for the module's pull request)", async () => {
+  it("TP-0.25 (S-4): the document has S-1's, S-3's and S-4's procedures, and API_MINOR stays 1 (one bump for the module's pull request)", async () => {
     const document = JSON.parse(await emitOpenapi()) as {
       paths: Record<string, Record<string, { operationId?: string }>>;
       info: { version: string };
@@ -73,6 +73,15 @@ describe("TP-0.25: the contract with identity's S-0 part", () => {
         "GET /me/sessions me.listSessions",
         "POST /me/sessions/revoke me.revokeSession",
         "POST /me/sessions/revoke-others me.revokeOtherSessions",
+        // S-4
+        "POST /auth/two-step/verify auth.verifyTwoStep",
+        "POST /me/two-step/setup me.twoStepSetup",
+        "POST /me/two-step/enable me.twoStepEnable",
+        "POST /me/two-step/acknowledge-codes me.acknowledgeRecoveryCodes",
+        "POST /me/two-step/disable me.twoStepDisable",
+        "POST /me/two-step/recovery-codes me.regenerateRecoveryCodes",
+        "POST /me/two-step/replace/start me.twoStepReplaceStart",
+        "POST /me/two-step/replace/confirm me.twoStepReplaceConfirm",
       ].sort(),
     );
     expect(API_MINOR).toBe(1);
@@ -120,7 +129,7 @@ describe("TP-1.44: invitations.accept's documented errors (A-46)", () => {
   });
 });
 
-describe("TP-0.25x (S-3): S-3's procedures document the identity errors they throw (F-35; platform errors are on every route)", () => {
+describe("TP-0.25x (S-3, S-4): S-3's and S-4's procedures document the identity errors they throw (F-35; platform errors are on every route)", () => {
   /** Every error code a route's responses mention. */
   function documentedCodes(route: string, method: string): Set<string> {
     const document = JSON.parse(readFileSync(path.join(PACKAGE_DIR, "openapi.json"), "utf8")) as {
@@ -144,7 +153,29 @@ describe("TP-0.25x (S-3): S-3's procedures document the identity errors they thr
   it.each([
     ["/auth/sign-in", "post", ["INVALID_CREDENTIALS", "ACCOUNT_CLOSED"]],
     ["/auth/refresh", "post", ["REFRESH_INVALID"]],
-    ["/me/confirm", "post", ["INVALID_CREDENTIALS"]],
+    // S-4 (§5.2, §5.3): me.confirm gains the two-step factors
+    ["/auth/two-step/verify", "post", ["TWO_STEP_CHALLENGE_EXPIRED", "TWO_STEP_CODE_INVALID"]],
+    ["/me/confirm", "post", ["INVALID_CREDENTIALS", "TWO_STEP_CODE_INVALID"]],
+    ["/me/two-step/setup", "post", ["CONFIRMATION_REQUIRED", "TWO_STEP_ALREADY_ENABLED"]],
+    [
+      "/me/two-step/enable",
+      "post",
+      [
+        "CONFIRMATION_REQUIRED",
+        "TWO_STEP_SETUP_EXPIRED",
+        "TWO_STEP_ALREADY_ENABLED",
+        "TWO_STEP_CODE_INVALID",
+      ],
+    ],
+    ["/me/two-step/acknowledge-codes", "post", ["TWO_STEP_NOT_ENABLED"]],
+    ["/me/two-step/disable", "post", ["TWO_STEP_NOT_ENABLED", "TWO_STEP_CODE_INVALID"]],
+    ["/me/two-step/recovery-codes", "post", ["CONFIRMATION_REQUIRED", "TWO_STEP_NOT_ENABLED"]],
+    ["/me/two-step/replace/start", "post", ["CONFIRMATION_REQUIRED", "TWO_STEP_NOT_ENABLED"]],
+    [
+      "/me/two-step/replace/confirm",
+      "post",
+      ["TWO_STEP_NOT_ENABLED", "TWO_STEP_SETUP_EXPIRED", "TWO_STEP_CODE_INVALID"],
+    ],
   ])("TP-0.25x: %s (%s) documents %j", (route, method, expected) => {
     const codes = documentedCodes(route, method);
 

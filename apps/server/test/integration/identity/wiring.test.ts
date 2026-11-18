@@ -1,6 +1,6 @@
 // Identity's container wiring (identity LLD F-34, §1.1, A-26 c). TP-0.32's container (U) and server
-// (I) halves with S-0's expectations (S-3 adds the identity.purge handler), and TP-0.37 (the
-// subscriber check), plus extra cases TP-0.32x.
+// (I) halves with S-0's expectations (S-3 adds the identity.purge handler, S-4 the two TOTP sealed
+// columns), and TP-0.37 (the subscriber check), plus extra cases TP-0.32x.
 // The static half of TP-0.32 is in test/unit/identity/wiring.test.ts.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { afterAll, describe, expect, it } from "vitest";
@@ -16,6 +16,24 @@ import { buildApiContainer, injectJson } from "../../support/api.js";
 import { buildWorkerContainer } from "../../support/worker.js";
 
 const cleanups: (() => Promise<void>)[] = [];
+
+/** S-4: identity's two sealed columns (F-34). */
+const TOTP_COLUMNS = [
+  {
+    table: "two_step_credentials",
+    idColumn: "user_id",
+    column: "secret_envelope",
+    purpose: "totp",
+    provider: "api",
+  },
+  {
+    table: "two_step_credentials",
+    idColumn: "user_id",
+    column: "pending_secret_envelope",
+    purpose: "totp",
+    provider: "api",
+  },
+];
 
 afterAll(async () => {
   for (const cleanup of cleanups.reverse()) await cleanup();
@@ -56,17 +74,21 @@ describe("TP-0.32: the containers with identity (S-0)", () => {
     expect((await api({ moduleRoutes: [r] })).moduleRoutes).toEqual([r]);
   });
 
-  it("TP-0.32: sealedColumns.all() is [] (TOTP columns arrive in S-4)", async () => {
-    expect((await api()).sealedColumns.all()).toEqual([]);
+  it("TP-0.32 (S-4): sealedColumns.all() is the two two_step_credentials columns (provider api, purpose totp, id column user_id)", async () => {
+    const columns = (await api()).sealedColumns.all();
+
+    expect(columns).toHaveLength(2);
+    expect(columns).toEqual(expect.arrayContaining(TOTP_COLUMNS));
   });
 
-  it("TP-0.32: a general worker has identity, erasureHandler null and onGeneralStarted []", async () => {
+  it("TP-0.32: a general worker has identity, erasureHandler null and onGeneralStarted []; (S-4) the two TOTP sealed columns", async () => {
     const c = await worker();
 
     expect(c.identity).toBeDefined();
     expect(c.erasureHandler).toBeNull();
     expect(c.onGeneralStarted).toEqual([]);
-    expect(c.sealedColumns.all()).toEqual([]);
+    expect(c.sealedColumns.all()).toHaveLength(2);
+    expect(c.sealedColumns.all()).toEqual(expect.arrayContaining(TOTP_COLUMNS));
   });
 
   it("TP-0.32: an erasureHandler override wins", async () => {
