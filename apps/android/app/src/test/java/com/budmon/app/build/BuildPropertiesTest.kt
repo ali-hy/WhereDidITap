@@ -5,9 +5,10 @@
 //
 // A-348: `testImplementation(gradleTestKit())` in app/build.gradle.kts, which also sets the system
 // property `budmon.androidRoot`. Each case builds a temporary copy of apps/android (without build/,
-// .gradle/ and local.properties), so it never contends with the outer build. The copy keeps the
-// repository layout (<tmp>/apps/android) and brings the two files the build reads from outside
-// apps/android: packages/contract/openapi.json (openApiGenerate) and packages/shared/test-vectors.
+// .gradle/, .kotlin/ and local.properties; A-536), so it never contends with the outer build. The
+// copy keeps the repository layout (<tmp>/apps/android) and brings the two files the build reads
+// from outside apps/android: packages/contract/openapi.json (openApiGenerate) and
+// packages/shared/test-vectors.
 // AGP paths are in AgpPaths.kt.
 package com.budmon.app.build
 
@@ -36,7 +37,7 @@ class BuildPropertiesTest {
     fun copyProject() {
         base = Files.createTempDirectory("budmon-android-testkit-").toFile()
         root = File(base, "apps/android")
-        val skip = setOf("build", ".gradle", "local.properties")
+        val skip = setOf("build", ".gradle", ".kotlin", "local.properties")
         source.walkTopDown()
             .onEnter { dir -> dir == source || dir.name !in skip }
             .filter { it.isFile && it.name !in skip }
