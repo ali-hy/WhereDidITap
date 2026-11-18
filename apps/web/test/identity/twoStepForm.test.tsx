@@ -1,18 +1,28 @@
-// F-156 TwoStepForm's client rules (identity LLD §8.1 "Forms and validation"; HLD J-5). TP-4.30x:
-// TP-4.30 covers the form end to end; these cases pin the client rules, which no row names.
+// F-156 TwoStepForm's client rules (identity LLD §8.1 "Forms and validation"; HLD J-5), and F-166's
+// submitLabel (A-99 W2). TP-4.30x: TP-4.30 covers the form end to end; these cases pin the client
+// rules, which no row names.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { fireEvent, screen } from "@solidjs/testing-library";
 import { describe, expect, it, vi } from "vitest";
 import { TwoStepForm } from "../../src/identity/components/TwoStepForm.js";
 import { renderWithI18n } from "../support/render.js";
 
-function mount(allowRecovery: boolean) {
+function mount(allowRecovery: boolean, submitLabel?: { id: string; defaultMessage: string }) {
   const onSubmit = vi.fn<(v: { code?: string; recoveryCode?: string }) => Promise<void>>(() =>
     Promise.resolve(),
   );
-  renderWithI18n(() => (
-    <TwoStepForm onSubmit={onSubmit} allowRecovery={allowRecovery} busy={false} />
-  ));
+  renderWithI18n(() =>
+    submitLabel === undefined ? (
+      <TwoStepForm onSubmit={onSubmit} allowRecovery={allowRecovery} busy={false} />
+    ) : (
+      <TwoStepForm
+        onSubmit={onSubmit}
+        allowRecovery={allowRecovery}
+        busy={false}
+        submitLabel={submitLabel}
+      />
+    ),
+  );
   return { onSubmit };
 }
 
@@ -62,7 +72,7 @@ describe("TP-4.30x: TwoStepForm (F-156) client rules", () => {
     const field = screen.getByLabelText("Recovery code");
     expect(field.getAttribute("autocapitalize")).toBe("characters");
     expect(screen.queryByLabelText("Code")).toBeNull();
-    type("Recovery code", "7KQ2-M9XD-4TRA");
+    type("Recovery code", "7KQ2-M3XD-4TRA");
     verify();
 
     await vi.waitFor(() => {
@@ -72,19 +82,25 @@ describe("TP-4.30x: TwoStepForm (F-156) client rules", () => {
     expect(
       Object.keys(value ?? {}).filter((k) => value?.[k as keyof typeof value] !== undefined),
     ).toEqual(["recoveryCode"]);
-    expect(value?.recoveryCode?.replace(/[-\s]/g, "")).toBe("7KQ2M9XD4TRA");
+    expect(value?.recoveryCode?.replace(/[-\s]/g, "")).toBe("7KQ2M3XD4TRA");
   });
 
-  it("TP-4.30x: a recovery code of 8 characters → 'Enter a code like 7KQ2-M9XD-4TRA.' and nothing is submitted", async () => {
-    const { onSubmit } = mount(true);
+  it.each([
+    ["7KQ2-M3XD", "8 characters"],
+    ["7KQ2-M9XD-4TRA", "a 9, which isn't base32"],
+  ])(
+    "TP-4.30x: recovery code %j (%s) → 'Enter a code like 7KQ2-M3XD-4TRA.' and nothing is submitted",
+    async (input) => {
+      const { onSubmit } = mount(true);
 
-    fireEvent.click(screen.getByText("Use a recovery code instead"));
-    type("Recovery code", "7KQ2-M9XD");
-    verify();
+      fireEvent.click(screen.getByText("Use a recovery code instead"));
+      type("Recovery code", input);
+      verify();
 
-    expect(await screen.findByText("Enter a code like 7KQ2-M9XD-4TRA.")).toBeTruthy();
-    expect(onSubmit).not.toHaveBeenCalled();
-  });
+      expect(await screen.findByText("Enter a code like 7KQ2-M3XD-4TRA.")).toBeTruthy();
+      expect(onSubmit).not.toHaveBeenCalled();
+    },
+  );
 
   it("TP-4.30x: 'Use a code from your app' switches back to the Code field", () => {
     mount(true);
@@ -101,5 +117,18 @@ describe("TP-4.30x: TwoStepForm (F-156) client rules", () => {
 
     expect(screen.getByLabelText("Code")).toBeTruthy();
     expect(screen.queryByText("Use a recovery code instead")).toBeNull();
+  });
+
+  it("TP-4.30x (A-99 W2): with submitLabel confirm.submit the button reads 'Confirm' (no Verify) and submits the code", async () => {
+    const { onSubmit } = mount(false, { id: "confirm.submit", defaultMessage: "Confirm" });
+
+    expect(screen.queryByRole("button", { name: "Verify" })).toBeNull();
+    type("Code", "123456");
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+
+    await vi.waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+    expect(onSubmit).toHaveBeenCalledWith({ code: "123456" });
   });
 });

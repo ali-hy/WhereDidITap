@@ -1,13 +1,15 @@
 // S-4 two-step verification in the browser (identity LLD §8.1, F-156, F-164, F-165, F-166; HLD J-5,
-// J-7, J-15): TP-4.30, TP-4.31, TP-4.32, TP-4.33, plus extra cases ending in "x".
+// J-7, J-15; A-99): TP-4.30 to TP-4.33, TP-4.39, plus extra cases ending in "x".
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 //
-// Each test signs up its own user and turns two-step on through the setup page (§10.1); codes come
-// from TestAuthenticator, which may wait for the next 30-second step, hence the longer timeout.
+// Each test signs up its own user and turns two-step on from Sign-in & security's Turn on (§10.1);
+// codes come from TestAuthenticator, which may wait for the next 30-second step, hence the longer
+// timeout. TP-4.39's sign-in page cases route the first factor instead (no real two-step needed).
 import { readFile } from "node:fs/promises";
 import {
   catalogText,
   createInvitation,
+  createUser,
   enableTwoStep,
   expect,
   isPost,
@@ -31,6 +33,9 @@ test.describe.configure({ timeout: 120_000 });
 
 const WRONG_CODE = "That code didn't work. Check your app and try again.";
 const TOO_MANY = "Too many attempts. Sign in again.";
+const TIMED_OUT = "This sign-in timed out. Sign in again.";
+const NEW_CODES_DONE = "Your old codes no longer work.";
+const CONFIRM_ITS_YOU = "Confirm it's you";
 const TWO_STEP_ON =
   "Two-step verification is on. Your other devices have been signed out and will ask for a code next time.";
 const UNSAVED = "You may not have saved your recovery codes.";
@@ -60,6 +65,36 @@ async function signInToTwoStep(page: Page, email: string): Promise<void> {
 }
 
 const codeField = (page: Page) => page.locator("main").getByLabel(catalogText("Code"));
+/** F-166's dialog (its title "Confirm it's you"). */
+const confirmDialog = (page: Page) =>
+  page.getByRole("dialog").filter({ has: page.getByText(catalogText(CONFIRM_ITS_YOU)) });
+/** F-164's two-step section on Sign-in & security: the nearest section around its h2. */
+const twoStepSection = (page: Page) =>
+  page
+    .locator("main")
+    .getByRole("heading", { level: 2, name: catalogText("Two-step verification") })
+    .locator("xpath=ancestor::section[1]");
+
+const json = (status: number, body: unknown) => ({
+  status,
+  contentType: "application/json",
+  body: JSON.stringify(body),
+});
+
+/** Routes auth.signIn to answer two_step_required (cookie delivery) and submits the sign-in form. */
+async function routedSignInToTwoStep(page: Page, email: string): Promise<void> {
+  await page.route("**/api/v1/auth/sign-in", (route) =>
+    route.fulfill(
+      json(200, {
+        status: "two_step_required",
+        challengeToken: null,
+        expiresAt: new Date(Date.now() + 300_000).toISOString(),
+      }),
+    ),
+  );
+  await submitSignIn(page, email);
+  await expect(page).toHaveURL(/\/sign-in\/two-step$/);
+}
 const verifyButton = (page: Page) =>
   page.locator("main").getByRole("button", { name: catalogText("Verify") });
 
@@ -90,7 +125,7 @@ test.describe("TP-4.30: sign-in with two-step (F-156; §8.1 'Two-step wrong code
     await expect(page.locator("main h1")).toHaveText(looseText(`Welcome, ${name}.`));
   });
 
-  test("TP-4.30: a wrong code shows 'That code didn't work…' with the field cleared and refocused; the fifth wrong code ends on /sign-in with 'Too many attempts. Sign in again.'", async ({
+  test("TP-4.30, TP-4.39 (b): a wrong code shows 'That code didn't work…' with the field cleared and refocused; the fifth wrong code (TWO_STEP_CHALLENGE_EXPIRED too_many_attempts) ends on /sign-in?reason=two_step_too_many with 'Too many attempts. Sign in again.'", async ({
     page,
     request,
   }) => {
@@ -115,12 +150,20 @@ test.describe("TP-4.30: sign-in with two-step (F-156; §8.1 'Two-step wrong code
       expect(here(page)).toBe("/sign-in/two-step");
     }
 
+    const fifth = page.waitForResponse(isPost("/api/v1/auth/two-step/verify"));
     await codeField(page).fill(auth.wrongCode());
     await verifyButton(page).click();
 
-    await expect(page).toHaveURL(/\/sign-in(\?.*)?$/);
+    const answer = await fifth;
+    expect(answer.status()).toBe(401);
+    expect(await answer.json()).toMatchObject({
+      code: "TWO_STEP_CHALLENGE_EXPIRED",
+      data: { reason: "too_many_attempts" },
+    });
+    await expect(page).toHaveURL(/\/sign-in\?reason=two_step_too_many$/);
     await expect(page.locator("main h1")).toHaveText(looseText("Sign in"));
     await expect(page.locator("main").getByText(looseText(TOO_MANY))).toBeVisible();
+    await expect(page.locator("main").getByText(looseText(TIMED_OUT))).toHaveCount(0);
   });
 
   test("TP-4.30x: a recovery code via 'Use a recovery code instead' signs in and shows 'You used a recovery code. 9 codes left.'", async ({
@@ -152,7 +195,7 @@ test.describe("TP-4.30: sign-in with two-step (F-156; §8.1 'Two-step wrong code
 });
 
 test.describe("TP-4.31: step-up with a two-step code (F-166's two_step factor)", () => {
-  test("TP-4.31: after unconfirm, Create new codes asks for a code; once it's accepted, the new codes appear without clicking again", async ({
+  test("TP-4.31, TP-4.39 (e): after unconfirm, Create new codes asks for a code; Confirm sends it and, without another click, a dialog shows the ten new codes with 'Your old codes no longer work.' as text in it, not a toast", async ({
     page,
     request,
   }) => {
@@ -175,33 +218,36 @@ test.describe("TP-4.31: step-up with a two-step code (F-166's two_step factor)",
       .getByRole("button", { name: catalogText("Create new codes") })
       .click();
 
-    const dialog = page.getByRole("dialog");
+    const dialog = confirmDialog(page);
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText(catalogText("Confirm it's you"))).toBeVisible();
     await expect(dialog.getByLabel(catalogText("Code"))).toBeVisible();
     await expect(dialog.getByLabel(catalogText("Password"))).toHaveCount(0);
+    await expect(dialog.getByRole("button", { name: catalogText("Verify") })).toHaveCount(0);
     const code = await auth.nextCode();
     const fresh = page.waitForResponse(
       (r) => isPost("/api/v1/me/two-step/recovery-codes")(r) && r.status() === 200,
     );
     await dialog.getByLabel(catalogText("Code")).fill(code);
-    await dialog.getByLabel(catalogText("Code")).press("Enter");
+    await dialog.getByRole("button", { name: catalogText("Confirm") }).click();
 
     const answer = await fresh;
     const { recoveryCodes } = (await answer.json()) as { recoveryCodes: string[] };
-    await expect(dialog).toBeHidden();
+    await expect(dialog).toHaveCount(0);
     expect(regenerate).toEqual([403, 200]);
     expect(confirmBodies).toEqual([{ code }]);
     expect(recoveryCodes).toHaveLength(10);
+    // A-99 W5: the codes in a dialog on this page, newCodesDone inline in it.
+    const codesDialog = page.getByRole("dialog").filter({ hasText: NEW_CODES_DONE });
+    await expect(codesDialog).toBeVisible();
+    await expect(codesDialog.getByText(looseText(NEW_CODES_DONE))).toBeVisible();
     for (const c of recoveryCodes) {
       expect(c).toMatch(RECOVERY_CODE);
       expect(oldCodes).not.toContain(c);
-      await expect(page.getByText(c).first()).toBeVisible();
+      await expect(codesDialog.getByText(c)).toBeVisible();
     }
-    await expect(page.getByText(catalogText("Save your recovery codes")).first()).toBeVisible();
-    await expect(
-      toastWith(page, looseText("Your old codes no longer work.")).first(),
-    ).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe("/settings/security");
+    // The dialog's text is the only one outside the live regions: no toast.
+    await expect(toastWith(page, looseText(NEW_CODES_DONE))).toHaveCount(1);
   });
 
   test("TP-4.31x: Escape cancels the step-up: the dialog closes and no new codes are created", async ({
@@ -234,34 +280,41 @@ test.describe("TP-4.31: step-up with a two-step code (F-166's two_step factor)",
 });
 
 test.describe("TP-4.32: recovery codes are shown once (F-165)", () => {
-  test("TP-4.32: reloading on the codes step drops the codes; Sign-in & security shows 'You may not have saved your recovery codes.'", async ({
+  test("TP-4.32: reloading on the codes step: me.twoStepSetup answers TWO_STEP_ALREADY_ENABLED and the page replaces itself with /settings/security, which shows 'You may not have saved your recovery codes.'; the codes are gone", async ({
     page,
     request,
   }) => {
     await signedUpUser(page, request, "Reload Person");
     const { codes } = await enableTwoStep(page, { acknowledge: false });
+    const historyLength = await page.evaluate(() => history.length);
+    const setup = page.waitForResponse(isPost("/api/v1/me/two-step/setup"));
 
     await page.reload();
 
-    await expect(page.locator("main h1")).toBeVisible();
-    for (const code of codes) await expect(page.getByText(code)).toHaveCount(0);
-    await page.goto("/settings/security");
+    const answer = await setup;
+    expect(answer.status()).toBe(409);
+    expect(await answer.json()).toMatchObject({ code: "TWO_STEP_ALREADY_ENABLED" });
+    await expect(page).toHaveURL(/\/settings\/security$/);
     await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
     await expect(page.locator("main").getByText(looseText(UNSAVED))).toBeVisible();
-    await expect(
-      page.locator("main").getByRole("button", { name: catalogText("Create new codes") }),
-    ).not.toHaveCount(0);
     for (const code of codes) await expect(page.getByText(code)).toHaveCount(0);
+    // navigate({ replace: true }): no history entry added.
+    expect(await page.evaluate(() => history.length)).toBe(historyLength);
   });
 
-  test("TP-4.32x: turning on: QR with its alt text, the grouped key, Step 1 of 2; ten LTR codes; Download saves budmon-recovery-codes.txt; Done waits for the checkbox and returns with the 'on' toast; a password sign-in now needs a code", async ({
+  test("TP-4.32x: turning on from Turn on: QR with its alt text, the grouped key, Step 1 of 2; ten LTR codes; Download saves budmon-recovery-codes.txt; Done waits for the checkbox and returns with the 'on' toast; a password sign-in now needs a code", async ({
     page,
     request,
   }) => {
     // F-165 and HLD J-7 end to end; the helper does the same steps without these checks.
     const { email } = await signedUpUser(page, request, "Turn On Person");
+    await page.goto("/settings/security");
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
     const setup = page.waitForResponse(isPost("/api/v1/me/two-step/setup"));
-    await page.goto("/settings/security/two-step");
+    await twoStepSection(page)
+      .getByRole("button", { name: catalogText("Turn on") })
+      .click();
+    await expect(page).toHaveURL(/\/settings\/security\/two-step$/);
     const { secret } = (await (await setup).json()) as { secret: string };
 
     const main = page.locator("main");
@@ -367,5 +420,111 @@ test.describe("TP-4.33: turning two-step off (F-164)", () => {
     ).toHaveCount(0);
     // signInByApi expects status "signed_in" (no two-step challenge).
     await signInByApi(request, email);
+  });
+});
+
+test.describe("TP-4.39: two-step focus, end messages and S-10's two-step section (A-99)", () => {
+  test("TP-4.39 (a): arriving on /sign-in/two-step, the h1 'Two-step verification' is announced and focus ends on the code field", async ({
+    page,
+    request,
+  }) => {
+    const { email } = await createUser(request);
+
+    await routedSignInToTwoStep(page, email);
+
+    await expect(page.locator("main h1")).toHaveText(looseText("Two-step verification"));
+    await expect(codeField(page)).toBeFocused();
+    await expect(page.locator("#live-polite")).toHaveText(looseText("Two-step verification"));
+  });
+
+  test("TP-4.39 (c): a routed TWO_STEP_CHALLENGE_EXPIRED { reason: expired } → /sign-in?reason=two_step_timeout with 'This sign-in timed out. Sign in again.'", async ({
+    page,
+    request,
+  }) => {
+    const { email } = await createUser(request);
+    await page.route("**/api/v1/auth/two-step/verify", (route) =>
+      route.fulfill(
+        json(401, {
+          defined: true,
+          code: "TWO_STEP_CHALLENGE_EXPIRED",
+          status: 401,
+          message: "Two-step challenge expired",
+          data: { reason: "expired" },
+        }),
+      ),
+    );
+    await routedSignInToTwoStep(page, email);
+
+    await codeField(page).fill("123456");
+    await verifyButton(page).click();
+
+    await expect(page).toHaveURL(/\/sign-in\?reason=two_step_timeout$/);
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign in"));
+    await expect(page.locator("main").getByText(looseText(TIMED_OUT))).toBeVisible();
+    await expect(page.locator("main").getByText(looseText(TOO_MANY))).toHaveCount(0);
+  });
+
+  test("TP-4.39x: a routed TWO_STEP_CHALLENGE_EXPIRED { reason: too_many_attempts } on the first try → /sign-in?reason=two_step_too_many (the reason decides, not a count)", async ({
+    page,
+    request,
+  }) => {
+    const { email } = await createUser(request);
+    await page.route("**/api/v1/auth/two-step/verify", (route) =>
+      route.fulfill(
+        json(401, {
+          defined: true,
+          code: "TWO_STEP_CHALLENGE_EXPIRED",
+          status: 401,
+          message: "Two-step challenge expired",
+          data: { reason: "too_many_attempts" },
+        }),
+      ),
+    );
+    await routedSignInToTwoStep(page, email);
+
+    await codeField(page).fill("123456");
+    await verifyButton(page).click();
+
+    await expect(page).toHaveURL(/\/sign-in\?reason=two_step_too_many$/);
+    await expect(page.locator("main").getByText(looseText(TOO_MANY))).toBeVisible();
+    await expect(page.locator("main").getByText(looseText(TIMED_OUT))).toHaveCount(0);
+  });
+
+  test("TP-4.39x: opening /sign-in?reason=two_step_too_many and ?reason=two_step_timeout shows each message and not the other (F-155)", async ({
+    page,
+  }) => {
+    await page.goto("/sign-in?reason=two_step_too_many");
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign in"));
+    await expect(page.locator("main").getByText(looseText(TOO_MANY))).toBeVisible();
+    await expect(page.locator("main").getByText(looseText(TIMED_OUT))).toHaveCount(0);
+
+    await page.goto("/sign-in?reason=two_step_timeout");
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign in"));
+    await expect(page.locator("main").getByText(looseText(TIMED_OUT))).toBeVisible();
+    await expect(page.locator("main").getByText(looseText(TOO_MANY))).toHaveCount(0);
+  });
+
+  test("TP-4.39 (d): S-10's two-step section: without two-step, the h2 'Two-step verification' with 'Off' and Turn on; after turning it on, 'On' with Turn off", async ({
+    page,
+    request,
+  }) => {
+    await signedUpUser(page, request, "Section Person");
+    await page.goto("/settings/security");
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
+    const section = twoStepSection(page);
+
+    await expect(section).toBeVisible();
+    await expect(section.getByText(catalogText("Off"))).toBeVisible();
+    await expect(section.getByText(catalogText("On"))).toHaveCount(0);
+    await expect(section.getByRole("button", { name: catalogText("Turn on") })).toBeVisible();
+    await expect(section.getByRole("button", { name: catalogText("Turn off") })).toHaveCount(0);
+
+    // enableTwoStep presses this section's Turn on and returns here after Done.
+    await enableTwoStep(page, { acknowledge: true });
+
+    await expect(section.getByText(catalogText("On"))).toBeVisible();
+    await expect(section.getByText(catalogText("Off"))).toHaveCount(0);
+    await expect(section.getByRole("button", { name: catalogText("Turn off") })).toBeVisible();
+    await expect(section.getByRole("button", { name: catalogText("Turn on") })).toHaveCount(0);
   });
 });

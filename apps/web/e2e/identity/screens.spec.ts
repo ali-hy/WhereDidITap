@@ -449,7 +449,7 @@ test.describe("TP-3.53: S-4's screens: S-2, S-11 and S-16 (HLD §4.4; A-75)", ()
 
   const QR_ALT = "QR code for your authenticator app. Use the key below if you can't scan.";
 
-  test("TP-3.53: S-2 Two-step verification: the code field starts empty; while auth.verifyTwoStep is pending, Verify is busy; TWO_STEP_CHALLENGE_EXPIRED on the first try → /sign-in with 'This sign-in timed out. Sign in again.'", async ({
+  test("TP-3.53: S-2 Two-step verification: the code field starts empty; while auth.verifyTwoStep is pending, Verify is busy; TWO_STEP_CHALLENGE_EXPIRED { reason: expired } on the first try → /sign-in?reason=two_step_timeout with 'This sign-in timed out. Sign in again.'", async ({
     page,
     request,
   }) => {
@@ -473,6 +473,7 @@ test.describe("TP-3.53: S-4's screens: S-2, S-11 and S-16 (HLD §4.4; A-75)", ()
           code: "TWO_STEP_CHALLENGE_EXPIRED",
           status: 401,
           message: "Two-step challenge expired",
+          data: { reason: "expired" },
         }),
       );
     });
@@ -488,7 +489,7 @@ test.describe("TP-3.53: S-4's screens: S-2, S-11 and S-16 (HLD §4.4; A-75)", ()
     await expect(verify).toHaveAttribute("aria-busy", "true");
     gate.resolve();
 
-    await expect(page).toHaveURL(/\/sign-in(\?.*)?$/);
+    await expect(page).toHaveURL(/\/sign-in\?reason=two_step_timeout$/);
     await expect(page.locator("main h1")).toHaveText(looseText("Sign in"));
     await expect(
       page.locator("main").getByText(looseText("This sign-in timed out. Sign in again.")),
@@ -508,6 +509,7 @@ test.describe("TP-3.53: S-4's screens: S-2, S-11 and S-16 (HLD §4.4; A-75)", ()
     });
     const setup = page.waitForResponse(isPost("/api/v1/me/two-step/setup"));
 
+    // Opened by URL (as after a reload): this case checks S-11's own states.
     await page.goto("/settings/security/two-step");
 
     const main = page.locator("main");
@@ -565,6 +567,7 @@ test.describe("TP-3.53: S-4's screens: S-2, S-11 and S-16 (HLD §4.4; A-75)", ()
       if (isPost("/api/v1/me/two-step/setup")(r)) setup.push(r.status());
     });
 
+    // Opened by URL (as after a reload): this case checks S-11's own states.
     await page.goto("/settings/security/two-step");
 
     const dialog = page.getByRole("dialog");
@@ -583,7 +586,7 @@ test.describe("TP-3.53: S-4's screens: S-2, S-11 and S-16 (HLD §4.4; A-75)", ()
     expect(setup).toEqual([403, 200]);
   });
 
-  test("TP-3.53: S-16 Confirm it's you with a code factor: an empty, focused Code field and no Password; busy while me.confirm is pending; a wrong code inline; the right one resumes Create new codes", async ({
+  test("TP-3.53: S-16 Confirm it's you with a code factor: an empty, focused Code field and no Password; Confirm busy while me.confirm is pending; a wrong code inline; the right one resumes Create new codes", async ({
     page,
     request,
   }) => {
@@ -607,17 +610,20 @@ test.describe("TP-3.53: S-4's screens: S-2, S-11 and S-16 (HLD §4.4; A-75)", ()
       .getByRole("button", { name: catalogText("Create new codes") })
       .click();
 
-    const dialog = page.getByRole("dialog");
-    await expect(dialog.getByText(catalogText("Confirm it's you"))).toBeVisible();
+    const dialog = page
+      .getByRole("dialog")
+      .filter({ has: page.getByText(catalogText("Confirm it's you")) });
+    await expect(dialog).toBeVisible();
     const code = dialog.getByLabel(catalogText("Code"));
     await expect(code).toHaveValue("");
     await expect(code).toBeFocused();
     await expect(code).toHaveAttribute("inputmode", "numeric");
     await expect(dialog.getByLabel(catalogText("Password"))).toHaveCount(0);
+    const confirm = dialog.getByRole("button", { name: catalogText("Confirm") });
 
     await code.fill(auth.wrongCode());
-    await code.press("Enter");
-    await expect(dialog.locator('button[aria-busy="true"]')).toHaveCount(1);
+    await confirm.click();
+    await expect(confirm).toHaveAttribute("aria-busy", "true");
     gate.resolve();
     await expect(
       dialog.getByText(looseText("That code didn't work. Check your app and try again.")),
@@ -628,9 +634,9 @@ test.describe("TP-3.53: S-4's screens: S-2, S-11 and S-16 (HLD §4.4; A-75)", ()
       (r) => isPost("/api/v1/me/two-step/recovery-codes")(r) && r.status() === 200,
     );
     await code.fill(await auth.nextCode());
-    await code.press("Enter");
+    await confirm.click();
     const { recoveryCodes } = (await (await fresh).json()) as { recoveryCodes: string[] };
-    await expect(dialog).toBeHidden();
+    await expect(dialog).toHaveCount(0);
     await expect(page.getByText(recoveryCodes[0] ?? "-").first()).toBeVisible();
     expect(confirms).toBe(2);
   });
