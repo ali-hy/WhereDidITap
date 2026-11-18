@@ -2,7 +2,7 @@
 import { withTransaction } from "../platform/db/transaction.js";
 import type { DbHandle } from "../platform/db/types.js";
 import type { Config } from "../platform/config/schema.js";
-import { TWO_STEP_CHALLENGE_TTL } from "./constants.js";
+import { TWO_STEP_CHALLENGE_TTL, TWO_STEP_MAX_ATTEMPTS } from "./constants.js";
 import * as bansRepo from "./bansRepo.js";
 import * as challengesRepo from "./challengesRepo.js";
 import type { PendingGoogleLink } from "./challengesRepo.js";
@@ -13,14 +13,17 @@ import {
   AccountClosedError,
   GoogleAccountInUseError,
   InvalidCredentialsError,
+  TwoStepChallengeExpiredError,
+  TwoStepCodeInvalidError,
 } from "./identityErrors.js";
 import type { IdentityDeps } from "./identityModule.js";
 import { checkKnownDevice } from "./knownDevicesService.js";
 import { hitLimits } from "./limits.js";
 import { recordSecurityEvent } from "./securityEventsService.js";
 import { createSession, type ReqInfo, type SignInOutcome } from "./sessionService.js";
-import { generateToken, hashToken } from "./tokens.js";
+import { generateToken, hashToken, parseToken } from "./tokens.js";
 import * as twoStepRepo from "./twoStepRepo.js";
+import { checkSecondFactor, requireOneFactor } from "./twoStepService.js";
 import * as usersRepo from "./usersRepo.js";
 import type { UserRow } from "./usersRepo.js";
 import { acceptedLocales } from "./profileService.js";
@@ -276,4 +279,104 @@ export async function signInWithPassword(
     }
     throw e;
   }
+}
+
+type VerifyResult =
+  | { kind: "signed_in"; outcome: Extract<SignInOutcome, { status: "signed_in" }> }
+  | { kind: "expired"; reason: "too_many_attempts" | "expired" }
+  | { kind: "invalid"; attemptsLeft: number };
+
+/** F-52: a code or recovery code against a two-step challenge. */
+export async function verifyTwoStepAtSignIn(
+  deps: IdentityDeps,
+  input: {
+    challengeToken: string | null;
+    code: string | null;
+    recoveryCode: string | null;
+    delivery: "cookie" | "bearer";
+    presentedDeviceToken: string | null;
+  },
+  req: ReqInfo,
+): Promise<Extract<SignInOutcome, { status: "signed_in" }>> {
+  requireOneFactor(input);
+  const token = parseToken("challenge", input.challengeToken);
+  if (token === null) throw new TwoStepChallengeExpiredError();
+
+  const result = await withTransaction(
+    deps.database,
+    async (tx): Promise<VerifyResult> => {
+      const challenge = await challengesRepo.findByTokenHashForUpdate(
+        tx,
+        "two_step",
+        hashToken(token),
+      );
+      const now = deps.clock.now();
+      if (
+        challenge === null ||
+        challenge.userId === null ||
+        challenge.data.kind !== "two_step" ||
+        challenge.consumedAt !== null ||
+        challenge.expiresAt.getTime() <= now.epochMilliseconds ||
+        challenge.attempts >= TWO_STEP_MAX_ATTEMPTS ||
+        challenge.data.delivery !== input.delivery
+      ) {
+        return { kind: "expired", reason: "expired" };
+      }
+      const data = challenge.data;
+      const check = await checkSecondFactor(deps, tx, challenge.userId, input, req);
+
+      if (!check.ok) {
+        const attempts = await challengesRepo.incrementAttempts(tx, challenge.id);
+        if (attempts < TWO_STEP_MAX_ATTEMPTS) {
+          return { kind: "invalid", attemptsLeft: TWO_STEP_MAX_ATTEMPTS - attempts };
+        }
+        await challengesRepo.consume(tx, challenge.id, new Date(now.epochMilliseconds));
+        await recordSecurityEvent(deps, tx, {
+          userId: challenge.userId,
+          kind: "two_step_failed_sign_in",
+          clientKind: req.clientKind,
+          email: "two_step_failed",
+        });
+        return { kind: "expired", reason: "too_many_attempts" };
+      }
+
+      await challengesRepo.consume(tx, challenge.id, new Date(now.epochMilliseconds));
+      const user = await usersRepo.findById(tx, challenge.userId, { lock: true });
+      if (user === null) return { kind: "expired", reason: "expired" };
+      const outcome = await completeSignIn(
+        deps,
+        tx,
+        {
+          user,
+          method: data.method,
+          pendingLink: data.pendingLink,
+          delivery: input.delivery,
+          presentedDeviceToken: input.presentedDeviceToken,
+        },
+        req,
+      );
+      if (check.method === "recovery") {
+        await recordSecurityEvent(deps, tx, {
+          userId: user.id,
+          kind: "recovery_code_used",
+          sessionId: outcome.session.sessionId,
+          clientKind: req.clientKind,
+          email: "recovery_code_used",
+        });
+        return {
+          kind: "signed_in",
+          outcome: {
+            ...outcome,
+            recoveryCodesLeft: await twoStepRepo.countUnusedCodes(tx, user.id),
+          },
+        };
+      }
+      return { kind: "signed_in", outcome };
+    },
+    { tracker: req.tracker },
+  );
+
+  if (result.kind === "signed_in") return result.outcome;
+  if (result.kind === "invalid") throw new TwoStepCodeInvalidError(result.attemptsLeft);
+  throw new TwoStepChallengeExpiredError(result.reason);
 }

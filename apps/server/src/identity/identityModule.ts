@@ -122,6 +122,16 @@ export function createIdentityModule(
   overrides: IdentityOverrides = {},
 ): IdentityModule {
   const ports = composePorts(overrides.ports);
+  // F-34: the TOTP secrets, sealed by the API's cipher; one context for both columns.
+  for (const column of ["secret_envelope", "pending_secret_envelope"]) {
+    base.sealedColumns.register({
+      table: "two_step_credentials",
+      idColumn: "user_id",
+      column,
+      purpose: "totp",
+      provider: "api",
+    });
+  }
   const events = createIdentityEvents(base.queue);
   const metrics =
     overrides.metrics ??

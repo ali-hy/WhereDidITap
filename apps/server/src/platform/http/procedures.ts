@@ -69,4 +69,6 @@ export const PUBLIC_PROCEDURES: ReadonlySet<string> = new Set([
   "auth.methods",
   "auth.signIn",
   "auth.refresh",
+  // Identity S-4.
+  "auth.verifyTwoStep",
 ]);

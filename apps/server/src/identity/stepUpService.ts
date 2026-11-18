@@ -1,15 +1,17 @@
 // F-55: `me.confirm`, the step-up that sets a session's confirmation time.
 import type { Temporal } from "@budmon/shared";
+import { withTransaction } from "../platform/db/transaction.js";
 import { ValidationFailedError } from "../platform/errors/platformErrors.js";
 import type { Principal } from "../platform/http/context.js";
 import { CONFIRM_VALIDITY } from "./constants.js";
 import * as credentialsRepo from "./credentialsRepo.js";
-import { InvalidCredentialsError } from "./identityErrors.js";
+import { InvalidCredentialsError, TwoStepCodeInvalidError } from "./identityErrors.js";
 import type { IdentityDeps } from "./identityModule.js";
 import { hitLimits } from "./limits.js";
 import { confirmationFactor } from "./requireConfirmed.js";
 import type { ReqInfo } from "./sessionService.js";
 import * as sessionsRepo from "./sessionsRepo.js";
+import { checkSecondFactor, requireOneFactor } from "./twoStepService.js";
 
 export interface ConfirmInput {
   password: string | null;
@@ -22,7 +24,7 @@ const issue = (field: string, code: string, message: string): ValidationFailedEr
 
 const notAccepted = (field: string) => issue(field, "factor_not_accepted", "Factor not accepted");
 
-/** Confirms the caller with the factor their account uses; only the password factor so far. */
+/** Confirms the caller with the factor their account uses. */
 export async function confirmIdentity(
   deps: IdentityDeps,
   principal: Principal,
@@ -38,8 +40,23 @@ export async function confirmIdentity(
     if (input.code === null && input.recoveryCode === null) {
       throw issue("code", "required", "Required");
     }
-    // The code factors arrive with F-62 in S-4.
-    throw new Error("me.confirm with a two-step code is built in S-4");
+    requireOneFactor(input);
+    const accepted = await withTransaction(
+      deps.database,
+      async (tx) => {
+        const check = await checkSecondFactor(deps, tx, principal.userId, input, req);
+        if (!check.ok) return false;
+        await sessionsRepo.setConfirmed(
+          tx,
+          principal.sessionId,
+          new Date(deps.clock.now().epochMilliseconds),
+        );
+        return true;
+      },
+      { tracker: req.tracker },
+    );
+    if (!accepted) throw new TwoStepCodeInvalidError();
+    return { confirmedUntil: deps.clock.now().add(CONFIRM_VALIDITY) };
   }
 
   if (input.code !== null) throw notAccepted("code");

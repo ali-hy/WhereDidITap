@@ -14,7 +14,11 @@ const retryAfter = z.object({ retryAfterSeconds: z.number().int().min(1) });
 export const IDENTITY_ERRORS = {
   INVALID_CREDENTIALS: { status: 401, message: "Invalid credentials" },
   ACCOUNT_CLOSED: { status: 403, message: "Account closed" },
-  TWO_STEP_CHALLENGE_EXPIRED: { status: 401, message: "Two-step challenge expired" },
+  TWO_STEP_CHALLENGE_EXPIRED: {
+    status: 401,
+    message: "Two-step challenge expired",
+    data: z.object({ reason: z.enum(["too_many_attempts", "expired"]) }),
+  },
   TWO_STEP_CODE_INVALID: {
     status: 400,
     message: "Invalid two-step code",

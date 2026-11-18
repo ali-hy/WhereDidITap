@@ -57,6 +57,14 @@ export const SessionItemSchema = z.object({
 
 const ok = z.object({ ok: z.literal(true) });
 
+export const TwoStepSetupSchema = z.object({
+  secret: z.string(),
+  otpauthUri: z.string(),
+  expiresAt: InstantWire,
+});
+
+export const RecoveryCodesSchema = z.object({ recoveryCodes: z.array(z.string()).length(10) });
+
 export const identityContract = {
   auth: {
     methods: base
@@ -73,6 +81,26 @@ export const identityContract = {
         z.object({
           email: EmailInput,
           password: PasswordInput,
+          tokenDelivery: TokenDelivery,
+          ...DeviceFields,
+        }),
+      )
+      .output(SignInResult),
+    verifyTwoStep: base
+      .route({ method: "POST", path: "/auth/two-step/verify" })
+      .errors(
+        pick(
+          "TWO_STEP_CHALLENGE_EXPIRED",
+          "TWO_STEP_CODE_INVALID",
+          "ACCOUNT_CLOSED",
+          "GOOGLE_ACCOUNT_IN_USE",
+        ),
+      )
+      .input(
+        z.object({
+          challengeToken: TokenInput.optional(),
+          code: CodeInput.optional(),
+          recoveryCode: RecoveryCodeInput.optional(),
           tokenDelivery: TokenDelivery,
           ...DeviceFields,
         }),
@@ -98,6 +126,48 @@ export const identityContract = {
         }),
       )
       .output(z.object({ confirmedUntil: InstantWire })),
+    twoStepSetup: base
+      .route({ method: "POST", path: "/me/two-step/setup" })
+      .errors(pick("CONFIRMATION_REQUIRED", "TWO_STEP_ALREADY_ENABLED"))
+      .input(z.object({}))
+      .output(TwoStepSetupSchema),
+    twoStepEnable: base
+      .route({ method: "POST", path: "/me/two-step/enable" })
+      .errors(
+        pick(
+          "CONFIRMATION_REQUIRED",
+          "TWO_STEP_SETUP_EXPIRED",
+          "TWO_STEP_ALREADY_ENABLED",
+          "TWO_STEP_CODE_INVALID",
+        ),
+      )
+      .input(z.object({ code: CodeInput }))
+      .output(RecoveryCodesSchema),
+    acknowledgeRecoveryCodes: base
+      .route({ method: "POST", path: "/me/two-step/acknowledge-codes" })
+      .errors(pick("TWO_STEP_NOT_ENABLED"))
+      .input(z.object({}))
+      .output(ok),
+    twoStepDisable: base
+      .route({ method: "POST", path: "/me/two-step/disable" })
+      .errors(pick("TWO_STEP_NOT_ENABLED", "TWO_STEP_CODE_INVALID"))
+      .input(z.object({ code: CodeInput.optional(), recoveryCode: RecoveryCodeInput.optional() }))
+      .output(ok),
+    regenerateRecoveryCodes: base
+      .route({ method: "POST", path: "/me/two-step/recovery-codes" })
+      .errors(pick("CONFIRMATION_REQUIRED", "TWO_STEP_NOT_ENABLED"))
+      .input(z.object({}))
+      .output(RecoveryCodesSchema),
+    twoStepReplaceStart: base
+      .route({ method: "POST", path: "/me/two-step/replace/start" })
+      .errors(pick("CONFIRMATION_REQUIRED", "TWO_STEP_NOT_ENABLED"))
+      .input(z.object({}))
+      .output(TwoStepSetupSchema),
+    twoStepReplaceConfirm: base
+      .route({ method: "POST", path: "/me/two-step/replace/confirm" })
+      .errors(pick("TWO_STEP_NOT_ENABLED", "TWO_STEP_SETUP_EXPIRED", "TWO_STEP_CODE_INVALID"))
+      .input(z.object({ code: CodeInput }))
+      .output(ok),
     listSessions: base
       .route({ method: "GET", path: "/me/sessions" })
       .output(z.object({ items: z.array(SessionItemSchema) })),

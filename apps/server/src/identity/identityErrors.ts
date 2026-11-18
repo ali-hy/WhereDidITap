@@ -16,9 +16,11 @@ export class AccountClosedError extends BudmonError {
   }
 }
 
-export class TwoStepChallengeExpiredError extends BudmonError {
-  constructor() {
-    super("TWO_STEP_CHALLENGE_EXPIRED", 401, "Two-step challenge expired");
+export class TwoStepChallengeExpiredError extends BudmonError<{
+  reason: "too_many_attempts" | "expired";
+}> {
+  constructor(reason: "too_many_attempts" | "expired" = "expired") {
+    super("TWO_STEP_CHALLENGE_EXPIRED", 401, "Two-step challenge expired", { reason });
   }
 }
 

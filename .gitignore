@@ -11,6 +11,7 @@ playwright-report/
 test-results/
 # Android
 .gradle/
+.kotlin/
 local.properties
 # Local tooling clones (bats, S-15)
 .tools/
