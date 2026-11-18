@@ -1,8 +1,8 @@
 // Turning two-step on and managing it: me.twoStepSetup (F-63), me.twoStepEnable (F-64),
 // me.acknowledgeRecoveryCodes (F-65), me.twoStepDisable (F-66), me.regenerateRecoveryCodes
 // (F-67), me.twoStepReplaceStart and me.twoStepReplaceConfirm (F-68), through the real HTTP layer
-// (identity LLD §4.5, §5.3, §6). TP-4.5, TP-4.6, TP-4.10 to TP-4.13, plus extra cases ending in
-// "x".
+// (identity LLD §4.5, §5.3, §6). TP-4.5, TP-4.6, TP-4.10 to TP-4.13, TP-4.38 (disable), plus extra
+// cases ending in "x".
 // Codes come from test/support/totp.ts (RFC 6238, independent of F-60); the clock is fixed at T0.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { Temporal } from "@budmon/shared";
@@ -25,10 +25,12 @@ import {
   apiSecretsOf,
   bearer,
   emailJobs,
+  limiterHits,
   recoveryCodeRows,
   recoveryRingOf,
   SECRET_BYTES,
   securityEvents,
+  TOO_MANY_FACTORS,
   totpContext,
   twoStepRow,
   twoStepUser,
@@ -118,11 +120,14 @@ interface SetupWire {
   expiresAt: string;
 }
 
-/** Checks a setup-shaped response for `email` and returns the secret's bytes. */
+/**
+ * Checks a setup-shaped response for `email` and returns the secret's bytes.
+ * The secret is grouped in 4s with single spaces (A-99); the URI carries it without spaces.
+ */
 function expectSetup(body: SetupWire, email: string, expiresAt: Temporal.Instant): Buffer {
-  const ungrouped = body.secret.replace(/\s+/g, "");
+  expect(body.secret).toMatch(/^([A-Z2-7]{4} )*[A-Z2-7]{1,4}$/);
+  const ungrouped = body.secret.replaceAll(" ", "");
   expect(ungrouped).toMatch(/^[A-Z2-7]{32}$/);
-  expect(body.secret.split(/\s+/)).toEqual(ungrouped.match(/.{4}/g));
   expect(body.otpauthUri).toBe(
     `otpauth://totp/wDit:${encodeURIComponent(email)}?secret=${ungrouped}&issuer=wDit&algorithm=SHA1&digits=6&period=30`,
   );
@@ -153,6 +158,12 @@ const verify = (challengeToken: string, code: string) =>
     tokenDelivery: "body",
   });
 
+const sessionCount = async (userId: string): Promise<number> =>
+  Number(
+    (await h.executeSql("SELECT count(*)::int AS n FROM sessions WHERE user_id = $1", [userId]))
+      .rows[0]?.["n"],
+  );
+
 const sessionRow = async (sessionId: string) =>
   (await h.executeSql("SELECT revoked_at, revoke_reason FROM sessions WHERE id = $1", [sessionId]))
     .rows[0];
@@ -175,7 +186,7 @@ describe("TP-4.5: me.twoStepSetup", () => {
     expect(await twoStepRow(h, user.id)).toBeNull();
   });
 
-  it("TP-4.5: with step-up → the secret grouped in fours, the otpauth URI and expiresAt now + 15 min; a pending row whose envelope holds that secret", async () => {
+  it("TP-4.5: with step-up → the secret in groups of 4 separated by single spaces, the otpauth URI with the same characters unspaced and expiresAt now + 15 min; a pending row whose envelope holds that secret", async () => {
     const { user, session } = await passwordUser(NOW);
 
     const res = await post("/me/two-step/setup", {}, session);
@@ -385,8 +396,9 @@ describe("TP-4.10: me.twoStepDisable", () => {
     expect((await twoStepRow(h, user.id))?.state).toBe("enabled");
   });
 
-  it("TP-4.10x: both a code and a recovery code → 400 VALIDATION_FAILED; still enabled", async () => {
+  it("TP-4.38: both a code and a recovery code → 400 VALIDATION_FAILED too_many_factors (path []); no limiter hit; still enabled with every recovery code unused", async () => {
     const { user, codes, session } = await twoStepSignedIn(HOUR_AGO);
+    const hitsBefore = await limiterHits(h);
 
     const res = await post(
       "/me/two-step/disable",
@@ -395,8 +407,23 @@ describe("TP-4.10: me.twoStepDisable", () => {
     );
 
     expect(res.status).toBe(400);
-    expect(errorOf(res).code).toBe("VALIDATION_FAILED");
+    expect(errorOf(res)).toEqual(TOO_MANY_FACTORS);
+    expect(await limiterHits(h)).toEqual(hitsBefore);
     expect((await twoStepRow(h, user.id))?.state).toBe("enabled");
+    expect((await recoveryCodeRows(h, user.id)).filter((r) => r.used)).toEqual([]);
+  });
+
+  it("TP-4.38x: both factors for a user without two-step → too_many_factors (the factor count is checked before TWO_STEP_NOT_ENABLED)", async () => {
+    const { session } = await passwordUser(NOW);
+
+    const res = await post(
+      "/me/two-step/disable",
+      { code: "123456", recoveryCode: "7KQ2-M3XD-4TRA" },
+      session,
+    );
+
+    expect(res.status).toBe(400);
+    expect(errorOf(res)).toEqual(TOO_MANY_FACTORS);
   });
 
   it("TP-4.10: a wrong code → 400 TWO_STEP_CODE_INVALID; still enabled", async () => {
@@ -588,9 +615,37 @@ describe("TP-4.13: replacing the authenticator", () => {
     expect(withS2.json()).toMatchObject({ status: "signed_in" });
   });
 
-  it("TP-4.13: confirm 15 min + 1 ms after start (S2's code for then) → 410 TWO_STEP_SETUP_EXPIRED; S1 stays", async () => {
+  it("TP-4.13: then signing in with the S2 code that confirmed, in the same step → 400 TWO_STEP_CODE_INVALID { attemptsLeft: 4 } (replay); no new session", async () => {
+    const { user, session, s2 } = await started();
+    const confirmingCode = codeAt(s2, NOW);
+    const confirmed = await post("/me/two-step/replace/confirm", { code: confirmingCode }, session);
+    expect(confirmed.status).toBe(200);
+    const sessionsBefore = await sessionCount(user.id);
+
+    const res = await verify(await signInChallenge(user.email), confirmingCode);
+
+    expect(res.status).toBe(400);
+    expect(errorOf(res)).toEqual({ ...CODE_INVALID, data: { attemptsLeft: 4 } });
+    expect(await sessionCount(user.id)).toBe(sessionsBefore);
+  });
+
+  it("TP-4.13x: the pending code is checked with lastUsedStep null: after S1's step s is used at sign-in, S2's code for s − 1 confirms, and last_used_step becomes s − 1", async () => {
+    const { user, session, s2 } = await started();
+    const signedIn = await verify(await signInChallenge(user.email), codeAt(SECRET_BYTES, NOW));
+    expect(signedIn.status).toBe(200);
+    expect((await twoStepRow(h, user.id))?.lastUsedStep).toBe(stepAt(NOW));
+
+    const res = await post("/me/two-step/replace/confirm", { code: codeAt(s2, NOW, -1) }, session);
+
+    expect(res.status).toBe(200);
+    expect(res.json()).toEqual({ ok: true });
+    expect((await twoStepRow(h, user.id))?.lastUsedStep).toBe(stepAt(NOW) - 1);
+  });
+
+  it("TP-4.13: confirm 15 min + 1 ms after start (S2's code for then) → 410 TWO_STEP_SETUP_EXPIRED; S1 stays; no limiter hit", async () => {
     const { user, session, s2 } = await started();
     api.clock.set(NOW.add({ minutes: 15, milliseconds: 1 }));
+    const hitsBefore = await limiterHits(h);
 
     const res = await post(
       "/me/two-step/replace/confirm",
@@ -600,8 +655,40 @@ describe("TP-4.13: replacing the authenticator", () => {
 
     expect(res.status).toBe(410);
     expect(errorOf(res)).toEqual(SETUP_EXPIRED);
+    expect(await limiterHits(h)).toEqual(hitsBefore);
     const row = await twoStepRow(h, user.id);
     expect(unseal(row?.secretEnvelope, user.id).equals(SECRET_BYTES)).toBe(true);
+  });
+
+  it("TP-4.13: confirm for a user without two-step → 409 TWO_STEP_NOT_ENABLED; the twostep.ip and TOTP limiter counts unchanged", async () => {
+    const { session } = await passwordUser(HOUR_AGO);
+    const hitsBefore = await limiterHits(h);
+
+    const res = await post("/me/two-step/replace/confirm", { code: "123456" }, session);
+
+    expect(res.status).toBe(409);
+    expect(errorOf(res)).toEqual(NOT_ENABLED);
+    expect(await limiterHits(h)).toEqual(hitsBefore);
+  });
+
+  it("TP-4.13x: confirm while two-step is only pending (setup started, not enabled) → 409 TWO_STEP_NOT_ENABLED; no limiter hit; still pending", async () => {
+    const { user, session } = await passwordUser(HOUR_AGO);
+    await pendingSecretFactory(h, apiSecretsOf(api), {
+      userId: user.id,
+      expiresAt: NOW.add({ minutes: 15 }),
+    });
+    const hitsBefore = await limiterHits(h);
+
+    const res = await post(
+      "/me/two-step/replace/confirm",
+      { code: codeAt(SECRET_BYTES, NOW) },
+      session,
+    );
+
+    expect(res.status).toBe(409);
+    expect(errorOf(res)).toEqual(NOT_ENABLED);
+    expect(await limiterHits(h)).toEqual(hitsBefore);
+    expect((await twoStepRow(h, user.id))?.state).toBe("pending");
   });
 
   it("TP-4.13x: start without step-up → 403 CONFIRMATION_REQUIRED { factor: two_step }; nothing pending", async () => {
@@ -623,8 +710,9 @@ describe("TP-4.13: replacing the authenticator", () => {
     expect(errorOf(res)).toEqual(NOT_ENABLED);
   });
 
-  it("TP-4.13x: confirm with no replacement started → 410 TWO_STEP_SETUP_EXPIRED", async () => {
+  it("TP-4.13x: confirm with no replacement started → 410 TWO_STEP_SETUP_EXPIRED; no limiter hit", async () => {
     const { session } = await twoStepSignedIn(HOUR_AGO);
+    const hitsBefore = await limiterHits(h);
 
     const res = await post(
       "/me/two-step/replace/confirm",
@@ -634,5 +722,6 @@ describe("TP-4.13: replacing the authenticator", () => {
 
     expect(res.status).toBe(410);
     expect(errorOf(res)).toEqual(SETUP_EXPIRED);
+    expect(await limiterHits(h)).toEqual(hitsBefore);
   });
 });

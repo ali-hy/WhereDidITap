@@ -7,6 +7,9 @@
 // - bearer(token): an Authorization header for `call`.
 // - securityEvents(h, userId), emailJobs(api, kind): what F-20 recorded and enqueued.
 // - twoStepRow(h, userId), recoveryCodeRows(h, userId): the stored two-step state.
+// - limiterHits(h, limiters): the hits counted per F-29 limiter; FACTOR_LIMITERS lists the ones a
+//   factor check can hit.
+// - TOO_MANY_FACTORS: the exact VALIDATION_FAILED for two factors at once (A-99).
 import type { Temporal } from "@budmon/shared";
 import type { ApiSecretsCipher } from "../../src/platform/crypto/apiSecrets.js";
 import type { DbHandle } from "../../src/platform/db/types.js";
@@ -143,3 +146,39 @@ export const totpContext = (userId: string) => ({
   rowId: userId,
   purpose: "totp",
 });
+
+/** The F-29 limiters a factor check (F-55, F-62, F-64, F-68) can hit. */
+export const FACTOR_LIMITERS = [
+  "twostep.ip",
+  "twostep.totp-user",
+  "twostep.totp-user-day",
+  "confirm.ip",
+  "confirm.user",
+] as const;
+
+/** Hits counted per limiter (F-29 names prefix the platform's bucket keys). */
+export async function limiterHits(
+  h: DbHandle,
+  limiters: readonly string[] = FACTOR_LIMITERS,
+): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  for (const limiter of limiters) {
+    const { rows } = await h.executeSql(
+      "SELECT coalesce(sum(hits), 0)::int AS n FROM rate_limit_counters WHERE bucket_key LIKE $1",
+      [`${limiter}:%`],
+    );
+    out[limiter] = Number(rows[0]?.["n"]);
+  }
+  return out;
+}
+
+/** VALIDATION_FAILED for more than one factor (identity LLD §6, A-99): one issue on path []. */
+export const TOO_MANY_FACTORS = {
+  defined: true,
+  code: "VALIDATION_FAILED",
+  status: 400,
+  message: "Validation failed",
+  data: {
+    issues: [{ path: [], code: "too_many_factors", message: "Give exactly one factor" }],
+  },
+};

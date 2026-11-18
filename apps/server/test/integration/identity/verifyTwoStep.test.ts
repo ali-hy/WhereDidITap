@@ -1,6 +1,6 @@
 // auth.verifyTwoStep (F-52 through F-62) through the real HTTP layer (identity LLD §4.4, §4.5,
-// §5.2, §6, D-8). TP-4.7, TP-4.8, TP-4.9, TP-4.36, and TP-3.31 (moved from S-3, A-72), plus extra
-// cases ending in "x".
+// §5.2, §6, D-8). TP-4.7, TP-4.8, TP-4.9, TP-4.36, TP-4.38 (verifyTwoStep), and TP-3.31 (moved
+// from S-3, A-72), plus extra cases ending in "x".
 // Codes come from test/support/totp.ts (RFC 6238, independent of F-60); the clock is fixed at T0,
 // so step s = stepAt(T0) and codes for s − 1 to s + 1 are valid.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
@@ -23,9 +23,11 @@ import { codeAt, stepAt, wrongCode } from "../../support/totp.js";
 import {
   bearer,
   emailJobs,
+  limiterHits,
   recoveryCodeRows,
   SECRET_BYTES,
   securityEvents,
+  TOO_MANY_FACTORS,
   twoStepRow,
   twoStepUser,
 } from "../../support/twoStep.js";
@@ -52,12 +54,15 @@ beforeEach(async () => {
   api.clock.set(T0);
 });
 
-const CHALLENGE_EXPIRED = {
+const challengeExpired = (reason: "expired" | "too_many_attempts") => ({
   defined: true,
   code: "TWO_STEP_CHALLENGE_EXPIRED",
   status: 401,
   message: "Two-step challenge expired",
-};
+  data: { reason },
+});
+/** Every TWO_STEP_CHALLENGE_EXPIRED except the one from the 5th wrong factor (A-99). */
+const CHALLENGE_EXPIRED = challengeExpired("expired");
 const CODE_INVALID = {
   defined: true,
   code: "TWO_STEP_CODE_INVALID",
@@ -214,7 +219,7 @@ describe("TP-4.7: verifying a two-step challenge", () => {
     expect(await sessionsOf(user.id)).toHaveLength(1);
   });
 
-  it("TP-4.7: 5 wrong codes → attemptsLeft 4, 3, 2, 1, then TWO_STEP_CHALLENGE_EXPIRED with two_step_failed_sign_in and one two_step_failed email; a 6th (even the right code) → TWO_STEP_CHALLENGE_EXPIRED", async () => {
+  it("TP-4.7: 5 wrong codes → attemptsLeft 4, 3, 2, 1, then TWO_STEP_CHALLENGE_EXPIRED { reason: too_many_attempts } with two_step_failed_sign_in and one two_step_failed email; a 6th (even the right code) → TWO_STEP_CHALLENGE_EXPIRED { reason: expired }", async () => {
     const { user } = await twoStepUser(api, { now: NOW });
     const challenge = await challengeFor(user.email);
     const wrong = wrongCode(SECRET_BYTES, NOW);
@@ -229,7 +234,7 @@ describe("TP-4.7: verifying a two-step challenge", () => {
       [4, 3, 2, 1].map((attemptsLeft) => ({ ...CODE_INVALID, data: { attemptsLeft } })),
     );
     expect(fifth.status).toBe(401);
-    expect(errorOf(fifth)).toEqual(CHALLENGE_EXPIRED);
+    expect(errorOf(fifth)).toEqual(challengeExpired("too_many_attempts"));
     expect(sixth.status).toBe(401);
     expect(errorOf(sixth)).toEqual(CHALLENGE_EXPIRED);
     expect(await kinds(user.id)).toEqual(["two_step_failed_sign_in"]);
@@ -243,7 +248,7 @@ describe("TP-4.7: verifying a two-step challenge", () => {
     expect(await sessionsOf(user.id)).toEqual([]);
   });
 
-  it("TP-4.7: the challenge 5 min + 1 ms after it was issued, with the right code → TWO_STEP_CHALLENGE_EXPIRED; no session", async () => {
+  it("TP-4.7: the challenge 5 min + 1 ms after it was issued, with the right code → TWO_STEP_CHALLENGE_EXPIRED { reason: expired }; no session", async () => {
     const { user } = await twoStepUser(api, { now: NOW });
     const challenge = await challengeFor(user.email);
     api.clock.set(NOW.add({ minutes: 5, milliseconds: 1 }));
@@ -276,7 +281,7 @@ describe("TP-4.7: verifying a two-step challenge", () => {
     expect(res.json()).toMatchObject({ status: "signed_in" });
   });
 
-  it('TP-4.7: a cookie challenge verified with tokenDelivery "body" (the right code) → TWO_STEP_CHALLENGE_EXPIRED; no session', async () => {
+  it('TP-4.7: a cookie challenge verified with tokenDelivery "body" (the right code) → TWO_STEP_CHALLENGE_EXPIRED { reason: expired }; no session', async () => {
     const { user } = await twoStepUser(api, { now: NOW });
     const challenge = await challengeFor(user.email, "cookie");
 
@@ -340,23 +345,37 @@ describe("TP-4.7: verifying a two-step challenge", () => {
     });
     expect((await challengeRows(user.id))[0]?.["attempts"]).toBe(0);
   });
+});
 
-  it("TP-4.7x: both code and recoveryCode → 400 VALIDATION_FAILED on path code; no session", async () => {
+describe("TP-4.38: two factors at once (A-99)", () => {
+  it("TP-4.38: verifyTwoStep with both code and recoveryCode → 400 VALIDATION_FAILED too_many_factors (path []); no limiter hit; the challenge's attempts unchanged; no session", async () => {
     const { user, codes } = await twoStepUser(api, { now: NOW });
     const challenge = await challengeFor(user.email);
+    const hitsBefore = await limiterHits(h);
 
-    const res = await call(api.app, "POST", "/auth/two-step/verify", {
-      challengeToken: challenge,
+    const res = await verifyBody(challenge, {
       code: codeAt(SECRET_BYTES, NOW),
-      recoveryCode: codes[0],
-      tokenDelivery: "body",
+      recoveryCode: codes[0] ?? "",
     });
 
     expect(res.status).toBe(400);
-    const error = errorOf(res) as { code: string; data?: { issues?: { path: unknown }[] } };
-    expect(error.code).toBe("VALIDATION_FAILED");
-    expect(error.data?.issues?.[0]?.path).toEqual(["code"]);
+    expect(errorOf(res)).toEqual(TOO_MANY_FACTORS);
+    expect(await limiterHits(h)).toEqual(hitsBefore);
+    const [row] = await challengeRows(user.id);
+    expect(row?.["attempts"]).toBe(0);
+    expect(row?.["consumed_at"]).toBeNull();
     expect(await sessionsOf(user.id)).toEqual([]);
+    expect((await recoveryCodeRows(h, user.id)).filter((r) => r.used)).toEqual([]);
+  });
+
+  it("TP-4.38x: both factors are refused before the challenge is read: an unknown challenge with both → too_many_factors, not TWO_STEP_CHALLENGE_EXPIRED", async () => {
+    const res = await verifyBody(`bmc_${"A".repeat(43)}`, {
+      code: "123456",
+      recoveryCode: "7KQ2-M3XD-4TRA",
+    });
+
+    expect(res.status).toBe(400);
+    expect(errorOf(res)).toEqual(TOO_MANY_FACTORS);
   });
 });
 

@@ -1,7 +1,4 @@
-// F-61 recovery codes (identity LLD §4.5). TP-4.4, plus extra cases ending in "x".
-// TP-4.4's normalisation inputs ("7kq2 m9xd-4tra" → "7KQ2M9XD4TRA") contain a "9", which F-61's
-// ^[A-Z2-7]{12}$ refuses; those exact inputs wait for the planner, and TP-4.4x covers the rule
-// with base32 characters only.
+// F-61 recovery codes (identity LLD §4.5). TP-4.4 (its literals per A-99), plus extra cases ending in "x".
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
@@ -81,13 +78,22 @@ describe("TP-4.4: generateRecoveryCodes", () => {
   });
 });
 
+describe("TP-4.4: normaliseRecoveryCode, the test plan's literals (A-99)", () => {
+  it('TP-4.4: "7kq2 m3xd-4tra" → "7KQ2M3XD4TRA"', () => {
+    expect(normaliseRecoveryCode("7kq2 m3xd-4tra")).toBe("7KQ2M3XD4TRA");
+  });
+
+  it('TP-4.4: "7KQ2M3XD4TRA0" → null', () => {
+    expect(normaliseRecoveryCode("7KQ2M3XD4TRA0")).toBeNull();
+  });
+});
+
 describe("TP-4.4x: formatRecoveryCode and normaliseRecoveryCode", () => {
   it('TP-4.4x: formatRecoveryCode("7KQ2M3XD4TRA") is "7KQ2-M3XD-4TRA"', () => {
     expect(formatRecoveryCode("7KQ2M3XD4TRA")).toBe("7KQ2-M3XD-4TRA");
   });
 
   it.each([
-    ["7kq2 m3xd-4tra", "7KQ2M3XD4TRA"],
     ["7KQ2-M3XD-4TRA", "7KQ2M3XD4TRA"],
     ["  7kq2m3xd4tra ", "7KQ2M3XD4TRA"],
     ["7KQ2\tM3XD\n4TRA", "7KQ2M3XD4TRA"],

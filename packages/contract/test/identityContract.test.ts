@@ -154,7 +154,17 @@ describe("TP-0.25x (S-3, S-4): S-3's and S-4's procedures document the identity 
     ["/auth/sign-in", "post", ["INVALID_CREDENTIALS", "ACCOUNT_CLOSED"]],
     ["/auth/refresh", "post", ["REFRESH_INVALID"]],
     // S-4 (§5.2, §5.3): me.confirm gains the two-step factors
-    ["/auth/two-step/verify", "post", ["TWO_STEP_CHALLENGE_EXPIRED", "TWO_STEP_CODE_INVALID"]],
+    // A-99: verifyTwoStep also declares ACCOUNT_CLOSED and GOOGLE_ACCOUNT_IN_USE
+    [
+      "/auth/two-step/verify",
+      "post",
+      [
+        "TWO_STEP_CHALLENGE_EXPIRED",
+        "TWO_STEP_CODE_INVALID",
+        "ACCOUNT_CLOSED",
+        "GOOGLE_ACCOUNT_IN_USE",
+      ],
+    ],
     ["/me/confirm", "post", ["INVALID_CREDENTIALS", "TWO_STEP_CODE_INVALID"]],
     ["/me/two-step/setup", "post", ["CONFIRMATION_REQUIRED", "TWO_STEP_ALREADY_ENABLED"]],
     [
@@ -319,7 +329,7 @@ describe("TP-0.25x: §5.1's shared schemas", () => {
 const CATALOG: [string, number, string, unknown][] = [
   ["INVALID_CREDENTIALS", 401, "Invalid credentials", undefined],
   ["ACCOUNT_CLOSED", 403, "Account closed", undefined],
-  ["TWO_STEP_CHALLENGE_EXPIRED", 401, "Two-step challenge expired", undefined],
+  ["TWO_STEP_CHALLENGE_EXPIRED", 401, "Two-step challenge expired", { reason: "expired" }],
   ["TWO_STEP_CODE_INVALID", 400, "Invalid two-step code", { attemptsLeft: 2 }],
   ["REFRESH_INVALID", 401, "Refresh token invalid", undefined],
   ["CONFIRMATION_REQUIRED", 403, "Confirmation required", { factor: "password" }],
@@ -422,6 +432,13 @@ describe("TP-0.42x: IDENTITY_ERRORS is §6's catalog", () => {
       true,
     );
     expect(used?.safeParse({ recent: true }).success).toBe(false);
+  });
+
+  it("TP-4.7x: TWO_STEP_CHALLENGE_EXPIRED's reason is too_many_attempts or expired only (A-99)", () => {
+    const data = errors["TWO_STEP_CHALLENGE_EXPIRED"]?.data;
+    for (const reason of ["too_many_attempts", "expired"])
+      expect(data?.safeParse({ reason }).success).toBe(true);
+    expect(data?.safeParse({ reason: "timeout" }).success).toBe(false);
   });
 
   it("TP-0.42x: CONFIRMATION_REQUIRED's factor is two_step, password or google only", () => {

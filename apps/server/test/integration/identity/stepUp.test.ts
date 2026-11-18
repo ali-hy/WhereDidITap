@@ -1,7 +1,7 @@
 // Step-up: me.confirm with a password, and (S-4, A-80) with a two-step code or recovery code
 // through F-62 (F-55), through the real HTTP layer, and F-28's helpers (requireConfirmedTx,
 // requireConfirmed, confirmationFactor) against a real database (identity LLD §4.1, §4.4, §4.5,
-// §5.3, §6). TP-3.21, TP-3.22, TP-3.29, plus extra cases ending in "x".
+// §5.3, §6). TP-3.21, TP-3.22, TP-3.29, TP-4.38 (me.confirm), plus extra cases ending in "x".
 // TP-3.22 and TP-3.29 are typed U in the LLD; F-28 reads the session and credentials through the
 // repos on a DbHandle (nothing injectable), so they run here on a real database.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
@@ -28,7 +28,13 @@ import { buildIdentityApi, T0, type IdentityApi } from "../../support/identity.j
 import { call, errorOf } from "../../support/identityHttp.js";
 import { resetBetweenTests } from "../../support/testDatabase.js";
 import { codeAt, stepAt, wrongCode } from "../../support/totp.js";
-import { SECRET_BYTES, twoStepRow, twoStepUser } from "../../support/twoStep.js";
+import {
+  limiterHits,
+  SECRET_BYTES,
+  TOO_MANY_FACTORS,
+  twoStepRow,
+  twoStepUser,
+} from "../../support/twoStep.js";
 
 let api: IdentityApi;
 let deps: IdentityDeps;
@@ -316,8 +322,9 @@ describe("TP-3.21x (S-4, A-80): me.confirm with a two-step code or a recovery co
     });
   });
 
-  it("TP-3.21x: both a code and a recovery code (exactly one input is allowed) → 400 VALIDATION_FAILED; confirmed_at unchanged", async () => {
+  it("TP-4.38: both a code and a recovery code → 400 VALIDATION_FAILED too_many_factors (path []); no limiter hit; confirmed_at unchanged; no recovery code used", async () => {
     const { codes, session } = await twoStepSession();
+    const hitsBefore = await limiterHits(h);
 
     const res = await confirm(session.accessToken, {
       code: codeAt(SECRET_BYTES, NOW),
@@ -325,8 +332,25 @@ describe("TP-3.21x (S-4, A-80): me.confirm with a two-step code or a recovery co
     });
 
     expect(res.status).toBe(400);
-    expect(errorOf(res).code).toBe("VALIDATION_FAILED");
+    expect(errorOf(res)).toEqual(TOO_MANY_FACTORS);
+    expect(await limiterHits(h)).toEqual(hitsBefore);
     expect(await confirmedAt(session.sessionId)).toBe(NOW.subtract({ hours: 1 }).epochMilliseconds);
+    expect((await me(session.accessToken)).json()).toMatchObject({
+      twoStep: { recoveryCodesLeft: 10 },
+    });
+  });
+
+  it("TP-4.38x: a password user sending a password and a code → 400 VALIDATION_FAILED too_many_factors (path []); no limiter hit; confirmed_at unchanged", async () => {
+    const before = NOW.subtract({ hours: 1 });
+    const { session } = await signedIn("password", before);
+    const hitsBefore = await limiterHits(h);
+
+    const res = await confirm(session.accessToken, { password: FACTORY_PASSWORD, code: "123456" });
+
+    expect(res.status).toBe(400);
+    expect(errorOf(res)).toEqual(TOO_MANY_FACTORS);
+    expect(await limiterHits(h)).toEqual(hitsBefore);
+    expect(await confirmedAt(session.sessionId)).toBe(before.epochMilliseconds);
   });
 });
 

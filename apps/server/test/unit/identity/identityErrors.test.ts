@@ -9,7 +9,6 @@ import * as E from "../../../src/identity/identityErrors.js";
 const WITHOUT_DATA: [string, string][] = [
   ["InvalidCredentialsError", "INVALID_CREDENTIALS"],
   ["AccountClosedError", "ACCOUNT_CLOSED"],
-  ["TwoStepChallengeExpiredError", "TWO_STEP_CHALLENGE_EXPIRED"],
   ["RefreshInvalidError", "REFRESH_INVALID"],
   ["PasswordReusedError", "PASSWORD_REUSED"],
   ["PasswordRequiredError", "PASSWORD_REQUIRED"],
@@ -40,6 +39,7 @@ const WITHOUT_DATA: [string, string][] = [
 ];
 
 const WITH_DATA = [
+  "TwoStepChallengeExpiredError", // data { reason } (A-99)
   "TwoStepCodeInvalidError",
   "ConfirmationRequiredError",
   "PasswordTooWeakError",
