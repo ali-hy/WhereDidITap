@@ -1,7 +1,7 @@
 ---
 module: platform
 doc: lld-brief
-summarises: lld.md v1.49
+summarises: lld.md v1.50
 ---
 
 # Platform: LLD brief
