@@ -88,8 +88,14 @@ export function TwoStepSection(): JSX.Element {
   };
 
   return (
-    <section class="mt-6" aria-busy={status.isPending ? "true" : undefined}>
-      <h2 class="text-lg font-semibold text-fg">{t(m.twostepTitle)}</h2>
+    <section
+      class="mt-6"
+      aria-labelledby="security-two-step-title"
+      aria-busy={status.isPending ? "true" : undefined}
+    >
+      <h2 id="security-two-step-title" class="text-lg font-semibold text-fg">
+        {t(m.twostepTitle)}
+      </h2>
       <Switch>
         <Match when={status.isPending}>
           <div class="mt-4">

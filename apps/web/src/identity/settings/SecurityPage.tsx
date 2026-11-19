@@ -105,8 +105,13 @@ export function SecurityPage(): JSX.Element {
         {t(m.settingsSecurity)}
       </h1>
       <TwoStepSection />
-      <section class="mt-6" aria-busy={sessions.isPending ? "true" : undefined}>
+      <section
+        class="mt-6"
+        aria-labelledby="security-sessions-title"
+        aria-busy={sessions.isPending ? "true" : undefined}
+      >
         <h2
+          id="security-sessions-title"
           ref={(el) => {
             heading = el;
           }}
