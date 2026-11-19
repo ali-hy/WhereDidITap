@@ -163,7 +163,7 @@ export function TwoStepSetupPage(): JSX.Element {
             </p>
             <div data-button-row>
               <Button variant="secondary" onClick={() => void start()}>
-                {t(messages.errorFallbackRetry)}
+                {t(m.twostepSetupStartAgain)}
               </Button>
             </div>
           </Match>

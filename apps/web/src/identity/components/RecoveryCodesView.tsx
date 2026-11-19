@@ -3,6 +3,7 @@ import { createSignal, For, Show, type JSX } from "solid-js";
 import { useI18n } from "../../i18n/useI18n.js";
 import { Button } from "../../ui/Button.js";
 import { showToast } from "../../ui/Toaster.js";
+import { FormErrorSummary } from "../../ui/forms.js";
 import { identityMessages as m } from "../messages.js";
 
 const FILE_NAME = "budmon-recovery-codes.txt";
@@ -11,6 +12,8 @@ export interface RecoveryCodesViewProps {
   codes: readonly string[];
   /** Text above the codes. */
   notice?: string;
+  /** A failure of Done, shown above the buttons. */
+  summary?: { text: string }[];
   busy: boolean;
   /** Runs when Done is pressed (after the box is ticked). */
   onDone: () => void;
@@ -55,6 +58,7 @@ export function RecoveryCodesView(props: RecoveryCodesViewProps): JSX.Element {
           )}
         </For>
       </ul>
+      <FormErrorSummary messages={props.summary ?? []} />
       <div class="flex flex-wrap gap-2" data-button-row>
         <Button variant="secondary" onClick={() => void copyAll()}>
           {t(m.twostepCodesCopy)}

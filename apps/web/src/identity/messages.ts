@@ -569,6 +569,10 @@ export const identityMessages = defineMessages({
     id: "twostep.setup.expired",
     defaultMessage: "Setup timed out. Start again.",
   },
+  twostepSetupStartAgain: {
+    id: "twostep.setup.startAgain",
+    defaultMessage: "Start again",
+  },
   twostepSetupCopy: {
     id: "twostep.setup.copy",
     defaultMessage: "Copy",

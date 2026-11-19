@@ -198,6 +198,7 @@
     <string name="twostep_setup_submit">Verify and turn on</string>
     <string name="twostep_setup_clock_hint">That code didn\'t work. Check that your phone\'s time is set automatically.</string>
     <string name="twostep_setup_expired">Setup timed out. Start again.</string>
+    <string name="twostep_setup_start_again">Start again</string>
     <string name="twostep_setup_copy">Copy</string>
     <string name="twostep_codes_title">Save your recovery codes</string>
     <string name="twostep_codes_body">If you lose your phone, each of these codes lets you sign in once. Keep them somewhere safe, like a password manager.</string>

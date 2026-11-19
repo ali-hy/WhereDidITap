@@ -162,6 +162,7 @@
   "twostep.setup.copy": "Copy",
   "twostep.setup.expired": "Setup timed out. Start again.",
   "twostep.setup.scan": "Scan this code",
+  "twostep.setup.startAgain": "Start again",
   "twostep.setup.step": "Step {n} of 2",
   "twostep.setup.steps": "1. Open your authenticator app (for example Google Authenticator, Microsoft Authenticator, 1Password). 2. Add an account and scan the code. 3. Enter the 6-digit code it shows.",
   "twostep.setup.submit": "Verify and turn on",

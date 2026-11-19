@@ -301,7 +301,7 @@ fun TwoStepSetupScreen(
                     state.formError?.let { uiString(it) } ?: stringResource(R.string.twostep_setup_expired),
                     modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                 )
-                AppButton(stringResource(R.string.error_fallback_retry), onStartAgain)
+                AppButton(stringResource(R.string.twostep_setup_start_again), onStartAgain)
             }
 
             SetupStep.Scan -> {

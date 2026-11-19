@@ -36,6 +36,7 @@ export function TwoStepSection(): JSX.Element {
   const [offBusy, setOffBusy] = createSignal(false);
   const [codes, setCodes] = createSignal<readonly string[] | null>(null);
   const [codesBusy, setCodesBusy] = createSignal(false);
+  const [codesError, setCodesError] = createSignal<{ text: string }[]>([]);
   const [newCodesBusy, setNewCodesBusy] = createSignal(false);
 
   const fail = (e: unknown): void => {
@@ -55,8 +56,17 @@ export function TwoStepSection(): JSX.Element {
       if (app.kind === "defined" && app.key === "TWO_STEP_CODE_INVALID") {
         return t(m.twostepCodeWrong);
       }
-      setOffOpen(false);
-      fail(e);
+      if (app.kind === "defined" && app.key === "TWO_STEP_NOT_ENABLED") {
+        setOffOpen(false);
+        await status.refetch();
+        return;
+      }
+      const { descriptor, values } = identityErrorMessage(app, "mutation");
+      const text = t(descriptor, values);
+      // The limit counts authenticator codes only; a recovery code still works.
+      return app.kind === "defined" && app.key === "RATE_LIMITED" && value.code !== undefined
+        ? `${text} ${t(m.twostepLimitRecovery)}`
+        : text;
     } finally {
       setOffBusy(false);
     }
@@ -66,7 +76,10 @@ export function TwoStepSection(): JSX.Element {
     setNewCodesBusy(true);
     try {
       const result = await withConfirmation(() => api.me.regenerateRecoveryCodes({}));
-      if (result !== undefined) setCodes(result.recoveryCodes);
+      if (result !== undefined) {
+        setCodesError([]);
+        setCodes(result.recoveryCodes);
+      }
     } catch (e) {
       fail(e);
     } finally {
@@ -76,12 +89,14 @@ export function TwoStepSection(): JSX.Element {
 
   const codesDone = async (): Promise<void> => {
     setCodesBusy(true);
+    setCodesError([]);
     try {
       await api.me.acknowledgeRecoveryCodes({});
       setCodes(null);
       await status.refetch();
     } catch (e) {
-      fail(e);
+      const { descriptor, values } = identityErrorMessage(toAppError(e), "mutation");
+      setCodesError([{ text: t(descriptor, values) }]);
     } finally {
       setCodesBusy(false);
     }
@@ -213,6 +228,7 @@ export function TwoStepSection(): JSX.Element {
         onOpenChange={(open) => {
           if (!open) {
             setCodes(null);
+            setCodesError([]);
             void status.refetch();
           }
         }}
@@ -228,6 +244,7 @@ export function TwoStepSection(): JSX.Element {
               <RecoveryCodesView
                 codes={codes() ?? []}
                 notice={t(m.twostepNewCodesDone)}
+                summary={codesError()}
                 busy={codesBusy()}
                 onDone={() => void codesDone()}
               />
