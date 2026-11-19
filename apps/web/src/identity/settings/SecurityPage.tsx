@@ -1,4 +1,5 @@
-// F-164: Sign-in & security. S-3 has the sessions section (J-10); later slices add the rest.
+// F-164: Sign-in & security: the two-step section (S-4) and the sessions section (J-10); later
+// slices add the rest.
 import { createQuery, useQueryClient } from "@tanstack/solid-query";
 import { createEffect, createSignal, For, Match, Show, Switch, type JSX } from "solid-js";
 import { useApi } from "../../api/ApiProvider.js";
@@ -11,6 +12,7 @@ import { showToast } from "../../ui/Toaster.js";
 import { setDocumentTitle } from "../../ui/a11y.js";
 import { identityErrorMessage } from "../errorMessages.js";
 import { identityMessages as m } from "../messages.js";
+import { TwoStepSection } from "./TwoStepSection.js";
 
 const MINUTE = 60_000;
 const UNITS: readonly [Intl.RelativeTimeFormatUnit, number][] = [
@@ -102,6 +104,7 @@ export function SecurityPage(): JSX.Element {
       <h1 tabindex="-1" class="text-2xl font-semibold text-fg">
         {t(m.settingsSecurity)}
       </h1>
+      <TwoStepSection />
       <section class="mt-6" aria-busy={sessions.isPending ? "true" : undefined}>
         <h2
           ref={(el) => {

@@ -450,4 +450,194 @@ export const identityMessages = defineMessages({
     id: "confirm.password",
     defaultMessage: "Password",
   },
+  twostepTitle: {
+    id: "twostep.title",
+    defaultMessage: "Two-step verification",
+  },
+  twostepStatusOn: {
+    id: "twostep.status.on",
+    defaultMessage: "On",
+  },
+  twostepStatusOff: {
+    id: "twostep.status.off",
+    defaultMessage: "Off",
+  },
+  twostepTurnOn: {
+    id: "twostep.turnOn",
+    defaultMessage: "Turn on",
+  },
+  twostepPrompt: {
+    id: "twostep.prompt",
+    defaultMessage: "Enter the 6-digit code from your authenticator app.",
+  },
+  twostepCode: {
+    id: "twostep.code",
+    defaultMessage: "Code",
+  },
+  twostepRecovery: {
+    id: "twostep.recovery",
+    defaultMessage: "Recovery code",
+  },
+  twostepUseRecovery: {
+    id: "twostep.useRecovery",
+    defaultMessage: "Use a recovery code instead",
+  },
+  twostepUseCode: {
+    id: "twostep.useCode",
+    defaultMessage: "Use a code from your app",
+  },
+  twostepVerify: {
+    id: "twostep.verify",
+    defaultMessage: "Verify",
+  },
+  twostepBack: {
+    id: "twostep.back",
+    defaultMessage: "Back to sign in",
+  },
+  twostepCodeInvalid: {
+    id: "twostep.code.invalid",
+    defaultMessage: "Enter the 6 digits from your app.",
+  },
+  twostepRecoveryInvalid: {
+    id: "twostep.recovery.invalid",
+    defaultMessage: "Enter a code like 7KQ2-M3XD-4TRA.",
+  },
+  twostepCodeWrong: {
+    id: "twostep.code.wrong",
+    defaultMessage: "That code didn't work. Check your app and try again.",
+  },
+  twostepTooMany: {
+    id: "twostep.tooMany",
+    defaultMessage: "Too many attempts. Sign in again.",
+  },
+  twostepTimeout: {
+    id: "twostep.timeout",
+    defaultMessage: "This sign-in timed out. Sign in again.",
+  },
+  twostepRecoveryLeft: {
+    id: "twostep.recoveryLeft",
+    defaultMessage:
+      "{n, plural, one {You used a recovery code. # code left.} other {You used a recovery code. # codes left.}}",
+  },
+  twostepCreateNew: {
+    id: "twostep.createNew",
+    defaultMessage: "Create new codes",
+  },
+  twostepLostHelp: {
+    id: "twostep.lostHelp",
+    defaultMessage: "Lost access to your authenticator?",
+  },
+  twostepLostHelpBody: {
+    id: "twostep.lostHelpBody",
+    defaultMessage:
+      "Use one of your recovery codes. If you don't have them, contact the administrator, who can turn two-step verification off for you.",
+  },
+  twostepLimitRecovery: {
+    id: "twostep.limitRecovery",
+    defaultMessage: "You can still use a recovery code.",
+  },
+  twostepSetupTitle: {
+    id: "twostep.setup.title",
+    defaultMessage: "Turn on two-step verification",
+  },
+  twostepSetupStep: {
+    id: "twostep.setup.step",
+    defaultMessage: "Step {n} of 2",
+  },
+  twostepSetupScan: {
+    id: "twostep.setup.scan",
+    defaultMessage: "Scan this code",
+  },
+  twostepSetupCantScan: {
+    id: "twostep.setup.cantScan",
+    defaultMessage: "Can't scan? Enter this key instead:",
+  },
+  twostepSetupSteps: {
+    id: "twostep.setup.steps",
+    defaultMessage:
+      "1. Open your authenticator app (for example Google Authenticator, Microsoft Authenticator, 1Password). 2. Add an account and scan the code. 3. Enter the 6-digit code it shows.",
+  },
+  twostepSetupSubmit: {
+    id: "twostep.setup.submit",
+    defaultMessage: "Verify and turn on",
+  },
+  twostepSetupClockHint: {
+    id: "twostep.setup.clockHint",
+    defaultMessage: "That code didn't work. Check that your phone's time is set automatically.",
+  },
+  twostepSetupExpired: {
+    id: "twostep.setup.expired",
+    defaultMessage: "Setup timed out. Start again.",
+  },
+  twostepSetupCopy: {
+    id: "twostep.setup.copy",
+    defaultMessage: "Copy",
+  },
+  twostepCodesTitle: {
+    id: "twostep.codes.title",
+    defaultMessage: "Save your recovery codes",
+  },
+  twostepCodesBody: {
+    id: "twostep.codes.body",
+    defaultMessage:
+      "If you lose your phone, each of these codes lets you sign in once. Keep them somewhere safe, like a password manager.",
+  },
+  twostepCodesCopy: {
+    id: "twostep.codes.copy",
+    defaultMessage: "Copy all",
+  },
+  twostepCodesDownload: {
+    id: "twostep.codes.download",
+    defaultMessage: "Download",
+  },
+  twostepCodesAck: {
+    id: "twostep.codes.ack",
+    defaultMessage: "I've saved my recovery codes",
+  },
+  twostepCodesDone: {
+    id: "twostep.codes.done",
+    defaultMessage: "Done",
+  },
+  twostepCodesUnsaved: {
+    id: "twostep.codes.unsaved",
+    defaultMessage: "You may not have saved your recovery codes.",
+  },
+  twostepOn: {
+    id: "twostep.on",
+    defaultMessage:
+      "Two-step verification is on. Your other devices have been signed out and will ask for a code next time.",
+  },
+  twostepOffConfirm: {
+    id: "twostep.offConfirm",
+    defaultMessage:
+      "Turn off two-step verification? Your account will be protected by your password only.",
+  },
+  twostepOff: {
+    id: "twostep.off",
+    defaultMessage: "Turn off",
+  },
+  twostepOffDone: {
+    id: "twostep.offDone",
+    defaultMessage: "Two-step verification is off.",
+  },
+  twostepReplace: {
+    id: "twostep.replace",
+    defaultMessage: "Replace authenticator app",
+  },
+  twostepReplaced: {
+    id: "twostep.replaced",
+    defaultMessage: "Your authenticator app was replaced.",
+  },
+  twostepNewCodesDone: {
+    id: "twostep.newCodesDone",
+    defaultMessage: "Your old codes no longer work.",
+  },
+  twostepQrAlt: {
+    id: "twostep.qrAlt",
+    defaultMessage: "QR code for your authenticator app. Use the key below if you can't scan.",
+  },
+  twostepCopied: {
+    id: "twostep.copied",
+    defaultMessage: "Copied.",
+  },
 });

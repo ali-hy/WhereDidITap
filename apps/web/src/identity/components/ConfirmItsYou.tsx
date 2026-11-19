@@ -1,7 +1,7 @@
-// F-166: the step-up dialog and `withConfirmation`. S-3 has the password factor; the code and
-// Google factors arrive with their slices.
+// F-166: the step-up dialog and `withConfirmation`. The password and two-step code factors are
+// here; the Google factor arrives with S-6.
 import { Dialog } from "@kobalte/core/dialog";
-import { createSignal, type JSX } from "solid-js";
+import { createSignal, Show, type JSX } from "solid-js";
 import { useApi } from "../../api/ApiProvider.js";
 import { toAppError } from "../../api/errors.js";
 import { useI18n } from "../../i18n/useI18n.js";
@@ -10,18 +10,21 @@ import { PasswordField } from "../../ui/PasswordField.js";
 import { RateLimitNotice, createRateLimitGate } from "../../ui/RateLimitNotice.js";
 import { FormErrorSummary } from "../../ui/forms.js";
 import { identityErrorMessage } from "../errorMessages.js";
+import { TwoStepForm, type TwoStepResult, type TwoStepValue } from "./TwoStepForm.js";
 import { identityMessages as m } from "../messages.js";
 
-type Pending = { resolve: (confirmed: boolean) => void };
+type Factor = "password" | "two_step";
+type Pending = { factor: Factor; resolve: (confirmed: boolean) => void };
 const [pending, setPending] = createSignal<Pending | null>(null);
 
 /** The dialog that is open now, as a promise of whether the person confirmed. */
 let open: Promise<boolean> | null = null;
 
 /** Opens the dialog, or joins the one already open; resolves with whether the person confirmed. */
-function ask(): Promise<boolean> {
+function ask(factor: Factor): Promise<boolean> {
   open ??= new Promise<boolean>((resolve) => {
     setPending({
+      factor,
       resolve: (confirmed) => {
         open = null;
         resolve(confirmed);
@@ -43,9 +46,9 @@ export async function withConfirmation<T>(run: () => Promise<T>): Promise<T | un
     const error = toAppError(e);
     if (error.kind !== "defined" || error.key !== "CONFIRMATION_REQUIRED") throw e;
     const factor = (error.data as { factor?: unknown } | undefined)?.factor;
-    // The other factors have their own dialogs in S-4 and S-6.
-    if (factor !== "password") throw e;
-    if (!(await ask())) return undefined;
+    // The Google factor has its dialog in S-6.
+    if (factor !== "password" && factor !== "two_step") throw e;
+    if (!(await ask(factor))) return undefined;
     return await run();
   }
 }
@@ -66,6 +69,32 @@ export function ConfirmItsYouDialog(): JSX.Element {
     setPassword("");
     setError(undefined);
     setSummary([]);
+  };
+
+  const submitCode = async (value: TwoStepValue): Promise<TwoStepResult> => {
+    if (busy()) return;
+    setSummary([]);
+    if (value.code !== undefined && gate.blockedFor() > 0) return;
+    setBusy(true);
+    try {
+      await api.me.confirm(value);
+      finish(true);
+    } catch (err) {
+      const app = toAppError(err);
+      if (app.kind === "defined" && app.key === "TWO_STEP_CODE_INVALID") {
+        return t(m.twostepCodeWrong);
+      }
+      if (app.kind === "defined" && app.key === "RATE_LIMITED") {
+        const seconds = (app.data as { retryAfterSeconds?: unknown } | undefined)
+          ?.retryAfterSeconds;
+        gate.block(typeof seconds === "number" ? seconds : undefined);
+        return;
+      }
+      const { descriptor, values } = identityErrorMessage(app, "read");
+      setSummary([{ text: t(descriptor, values) }]);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const submit = async (e: SubmitEvent): Promise<void> => {
@@ -110,40 +139,64 @@ export function ConfirmItsYouDialog(): JSX.Element {
         <Dialog.Overlay class="fixed inset-0 bg-fg/40" />
         <div class="fixed inset-0 z-10 flex items-center justify-center p-4">
           <Dialog.Content class="w-full max-w-[26.25rem] rounded-card border border-line bg-surface-raised p-6 shadow-overlay">
-            <form class="flex flex-col gap-4" noValidate onSubmit={(e) => void submit(e)}>
+            <div class="flex flex-col gap-4">
               <Dialog.Title class="text-2xl font-semibold text-fg">
                 {t(m.confirmTitle)}
               </Dialog.Title>
               <FormErrorSummary messages={summary()} />
               <RateLimitNotice secondsLeft={gate.blockedFor()} />
-              <PasswordField
-                id="confirm-password"
-                label={t(m.confirmPassword)}
-                autocomplete="current-password"
-                value={password()}
-                readonly={busy()}
-                onInput={setPassword}
-                error={error()}
-              />
-              <div class="flex gap-2" data-button-row>
-                <Button
-                  variant="primary"
-                  type="submit"
+              <Show
+                when={pending()?.factor === "two_step"}
+                fallback={
+                  <form class="flex flex-col gap-4" noValidate onSubmit={(e) => void submit(e)}>
+                    <PasswordField
+                      id="confirm-password"
+                      label={t(m.confirmPassword)}
+                      autocomplete="current-password"
+                      value={password()}
+                      readonly={busy()}
+                      onInput={setPassword}
+                      error={error()}
+                    />
+                    <div class="flex gap-2" data-button-row>
+                      <Button
+                        variant="primary"
+                        type="submit"
+                        busy={busy()}
+                        disabled={gate.blockedFor() > 0}
+                      >
+                        {t(m.confirmSubmit)}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        onClick={() => {
+                          finish(false);
+                        }}
+                      >
+                        {t(m.confirmCancel)}
+                      </Button>
+                    </div>
+                  </form>
+                }
+              >
+                <TwoStepForm
+                  onSubmit={submitCode}
+                  allowRecovery
                   busy={busy()}
-                  disabled={gate.blockedFor() > 0}
-                >
-                  {t(m.confirmSubmit)}
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    finish(false);
-                  }}
-                >
-                  {t(m.confirmCancel)}
-                </Button>
-              </div>
-            </form>
+                  submitLabel={m.confirmSubmit}
+                  actions={
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        finish(false);
+                      }}
+                    >
+                      {t(m.confirmCancel)}
+                    </Button>
+                  }
+                />
+              </Show>
+            </div>
           </Dialog.Content>
         </div>
       </Dialog.Portal>

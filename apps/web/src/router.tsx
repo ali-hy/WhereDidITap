@@ -15,6 +15,8 @@ import { HomeFirstRun } from "./identity/components/HomeFirstRun.js";
 import { InvitePage } from "./identity/pages/InvitePage.js";
 import { PrivacyNoticePage } from "./identity/pages/PrivacyNoticePage.js";
 import { SignInPage } from "./identity/pages/SignInPage.js";
+import { TwoStepPage } from "./identity/pages/TwoStepPage.js";
+import { TwoStepSetupPage } from "./identity/settings/TwoStepSetupPage.js";
 import { SecurityPage } from "./identity/settings/SecurityPage.js";
 import { SettingsHome } from "./identity/settings/SettingsHome.js";
 import { SettingsLayout } from "./identity/settings/SettingsLayout.js";
@@ -128,16 +130,30 @@ export async function createAppRouter(opts: { session: SessionStore }) {
     path: "/security",
     component: SecurityPage,
   });
+  const twoStepSetupRoute = createRoute({
+    getParentRoute: () => settingsRoute,
+    path: "/security/two-step",
+    validateSearch: (search: Record<string, unknown>): { mode?: "replace" } =>
+      search.mode === "replace" ? { mode: "replace" } : {},
+    component: TwoStepSetupPage,
+  });
   const signInRoute = createRoute({
     getParentRoute: () => signedOut,
     path: "/sign-in",
     validateSearch: (search: Record<string, unknown>): { next?: string; reason?: string } => ({
       ...(typeof search.next === "string" ? { next: safeNext(search.next) } : {}),
-      ...(typeof search.reason === "string" && /^[a-z]{1,16}$/.test(search.reason)
+      ...(typeof search.reason === "string" && /^[a-z_]{1,32}$/.test(search.reason)
         ? { reason: search.reason }
         : {}),
     }),
     component: SignInPage,
+  });
+  const twoStepRoute = createRoute({
+    getParentRoute: () => signedOut,
+    path: "/sign-in/two-step",
+    validateSearch: (search: Record<string, unknown>): { next?: string } =>
+      typeof search.next === "string" ? { next: safeNext(search.next) } : {},
+    component: TwoStepPage,
   });
   const inviteRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -153,9 +169,9 @@ export async function createAppRouter(opts: { session: SessionStore }) {
   const children: AnyRoute[] = [
     signedIn.addChildren([
       indexRoute,
-      settingsRoute.addChildren([settingsHomeRoute, securityRoute]),
+      settingsRoute.addChildren([settingsHomeRoute, securityRoute, twoStepSetupRoute]),
     ]),
-    signedOut.addChildren([signInRoute]),
+    signedOut.addChildren([signInRoute, twoStepRoute]),
     inviteRoute,
     privacyRoute,
   ];

@@ -97,7 +97,12 @@ export function SignInPage(): JSX.Element {
       });
       rememberEmail(email().trim());
       if (result.status === "two_step_required") {
-        await navigate({ href: `/sign-in/two-step?next=${encodeURIComponent(next())}` });
+        await navigate({
+          href:
+            next() === "/"
+              ? "/sign-in/two-step"
+              : `/sign-in/two-step?next=${encodeURIComponent(next())}`,
+        });
         return;
       }
       await session.markSignedIn();
@@ -127,6 +132,16 @@ export function SignInPage(): JSX.Element {
         <Show when={search().reason === "ended"}>
           <p role="status" class="text-fg">
             {t(m.signinSessionEnded)}
+          </p>
+        </Show>
+        <Show when={search().reason === "two_step_too_many"}>
+          <p role="status" class="text-fg">
+            {t(m.twostepTooMany)}
+          </p>
+        </Show>
+        <Show when={search().reason === "two_step_timeout"}>
+          <p role="status" class="text-fg">
+            {t(m.twostepTimeout)}
           </p>
         </Show>
         <Show when={search().reason === "reuse"}>
