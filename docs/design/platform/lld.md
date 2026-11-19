@@ -2,7 +2,7 @@
 module: platform
 doc: lld
 status: approved # draft | in-review | approved
-version: 1.50
+version: 1.51
 hld_version: 1.3.1
 author: planner
 approved_by: the user (project owner), delegated auto-approval
@@ -215,6 +215,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | 1.48    | 2026-11-17 | Implementation-time amendment A-534 (identity S-3 code review): `readOnly` and `contentType` on the Android fields; no filtering of `onValueChange`. Approval stands. |
 | 1.49    | 2026-11-17 | Implementation-time amendment A-535 (identity S-3 QA): Sentry's manifest auto-init off; TP-13.20 checks the merged manifest. Approval stands. |
 | 1.50    | 2026-11-18 | Implementation-time amendment A-536: `.kotlin/` ignored by git and skipped by the TestKit fixture copy. Approval stands. |
+| 1.51    | 2026-11-20 | Implementation-time amendment A-538 (identity S-4 build, via identity A-102): `AppTextField`'s `fieldModifier`. (A-537 is reserved for the separate secret-setting fix.) |
 
 ## Amendments
 
@@ -754,6 +755,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | A-534 | Identity S-3 code review round 2 G-1 (a), (b): the Android fields gained parameters outside A-528's signatures, and `AppTextField` drops an `onValueChange` equal to the current value | **(a) Recorded:** `AppTextField(…, readOnly: Boolean = false, contentType: ContentType? = null)` and `AppPasswordField(…, readOnly: Boolean = false, contentType: ContentType? = null)`, after A-528's parameters. `readOnly` is A-533's rule on Android (focusable, value kept, not disabled; the password toggle still works); `contentType` (`androidx.compose.ui.autofill.ContentType`) is set as the field's `contentType` semantics for autofill, nothing when `null`. **(b) Reversed:** the shared field passes every `onValueChange` through unchanged; filtering equal values can hide IME composition and selection updates from callers. Tests that render a field with fake lambdas keep the value in their own `mutableStateOf`. | A-528, A-533; identity TP-3.57 | none | planner decision |
 | A-535 | Identity S-3 QA Q-S3-5 (high): the debug app crashes at launch with no DSN: `SentryInitProvider` auto-initialises Sentry from the merged manifest (`DSN is required`), although F-250 turns Sentry on only with a DSN; Robolectric never runs the real manifest's providers, so CI missed it | **Turn off Sentry's auto-init in the manifest** (`io.sentry.auto-init` = `false`); F-250's `PlatformStartup.run` stays the one initialisation, only with a non-empty `BuildConfig.SENTRY_DSN`. **Test:** TP-13.20 reads the merged manifest of an `assembleDebug` through TestKit. An instrumented launch test would need an emulator in CI, which the platform doesn't run; QA's emulator launch (identity S-3) covers the real start. | F-250; TP-13.20 | none | planner decision |
 | A-536 | Kotlin 2.x Gradle builds create `apps/android/.kotlin/` (compiler session data), which shows as untracked because the root `.gitignore` doesn't cover it; identity S-3 round-4 review N-1: TestKit's fixture copy also copies it | **Both in one amendment, since they're the same build-output directory:** the root `.gitignore` gains `.kotlin/` (any depth) in its Android block, after `.gradle/`; A-348's temporary copy of `apps/android` skips `.kotlin/` like `build/`, `.gradle/` and `local.properties` (the set `skip` in `BuildPropertiesTest.kt`). No behaviour change. | file plan (`.gitignore`), §10.1 Android, A-348 | none | planner decision |
+| A-538 | Identity S-4 build (Android 0d5cf32, via identity A-102): the two-step screens must focus the code field, but `AppTextField`'s `modifier` goes to the outer `Column` (label, field, hint, error), so a `FocusRequester` there doesn't reach the text field | **Recorded:** `AppTextField(…, fieldModifier: Modifier = Modifier)`, the last parameter, after A-528's and A-534's. It is applied to the inner `OutlinedTextField` after the size modifiers and before its semantics; `modifier` still sizes and places the whole field. Callers use it for `focusRequester`; it defaults to `Modifier`, so existing callers are unchanged. `AppPasswordField` doesn't gain it. | A-528, A-534 | none | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
