@@ -10,6 +10,7 @@
 // - signInByApi(request, email): auth.signIn with body delivery → the session's tokens.
 // - accountMenuButton(page), signOutFromMenu(page): F-162's account menu (A-76).
 // - TestAuthenticator: §10.1's RFC 6238 helper for a two-step user (S-4).
+// - twoStepSection(page): F-164's labelled two-step section on Sign-in & security (S-4, A-100).
 // - enableTwoStep(page, opts): turns two-step on from Sign-in & security's Turn on (S-4).
 // - unconfirmSessions(request, email): §10.1's step-up test route (S-4).
 import { createHmac, randomInt, randomUUID } from "node:crypto";
@@ -305,10 +306,17 @@ export const isPost = (path: string) => (r: { url(): string; request(): { method
   new URL(r.url()).pathname === path && r.request().method() === "POST";
 
 /**
+ * F-164's two-step section on Sign-in & security: the `<section aria-labelledby>` region named by
+ * its h2 "Two-step verification" (A-100).
+ */
+export const twoStepSection = (page: Page): Locator =>
+  page.locator("main").getByRole("region", { name: catalogText("Two-step verification") });
+
+/**
  * Turns two-step on for the signed-in user in `page` (F-164, F-165): opens Sign-in & security,
- * presses Turn on (→ the setup page), reads the key it shows, enters a code and waits for the ten
- * recovery codes. With `acknowledge`, ticks the checkbox and presses Done (back on Sign-in &
- * security). The session must not need step-up.
+ * presses the two-step section's Turn on (→ the setup page), reads the key it shows, enters a code
+ * and waits for the ten recovery codes. With `acknowledge`, ticks the checkbox and presses Done
+ * (back on Sign-in & security). The session must not need step-up.
  */
 export async function enableTwoStep(
   page: Page,
@@ -317,8 +325,7 @@ export async function enableTwoStep(
   await page.goto("/settings/security");
   await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
   const setup = page.waitForResponse(isPost("/api/v1/me/two-step/setup"));
-  await page
-    .locator("main")
+  await twoStepSection(page)
     .getByRole("button", { name: catalogText("Turn on") })
     .click();
   await expect(page).toHaveURL(/\/settings\/security\/two-step$/);

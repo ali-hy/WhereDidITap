@@ -1,5 +1,5 @@
 // S-4 two-step verification in the browser (identity LLD §8.1, F-156, F-164, F-165, F-166; HLD J-5,
-// J-7, J-15; A-99): TP-4.30 to TP-4.33, TP-4.39, plus extra cases ending in "x".
+// J-7, J-15; A-99, A-100): TP-4.30 to TP-4.33, TP-4.39, plus extra cases ending in "x".
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 //
 // Each test signs up its own user and turns two-step on from Sign-in & security's Turn on (§10.1);
@@ -22,6 +22,7 @@ import {
   test,
   TestAuthenticator,
   toastWith,
+  twoStepSection,
   uniqueEmail,
   unconfirmSessions,
   WEB_CLIENT,
@@ -68,12 +69,6 @@ const codeField = (page: Page) => page.locator("main").getByLabel(catalogText("C
 /** F-166's dialog (its title "Confirm it's you"). */
 const confirmDialog = (page: Page) =>
   page.getByRole("dialog").filter({ has: page.getByText(catalogText(CONFIRM_ITS_YOU)) });
-/** F-164's two-step section on Sign-in & security: the nearest section around its h2. */
-const twoStepSection = (page: Page) =>
-  page
-    .locator("main")
-    .getByRole("heading", { level: 2, name: catalogText("Two-step verification") })
-    .locator("xpath=ancestor::section[1]");
 
 const json = (status: number, body: unknown) => ({
   status,
@@ -195,7 +190,7 @@ test.describe("TP-4.30: sign-in with two-step (F-156; §8.1 'Two-step wrong code
 });
 
 test.describe("TP-4.31: step-up with a two-step code (F-166's two_step factor)", () => {
-  test("TP-4.31, TP-4.39 (e): after unconfirm, Create new codes asks for a code; Confirm sends it and, without another click, a dialog shows the ten new codes with 'Your old codes no longer work.' as text in it, not a toast", async ({
+  test("TP-4.31, TP-4.39 (e): after unconfirm, Create new codes asks for a code; Confirm sends it and, without another click, a dialog shows the ten new codes with 'Your old codes no longer work.' as text in it, not a toast; ticking the box and Done calls me.acknowledgeRecoveryCodes and closes the dialog", async ({
     page,
     request,
   }) => {
@@ -248,6 +243,27 @@ test.describe("TP-4.31: step-up with a two-step code (F-166's two_step factor)",
     expect(new URL(page.url()).pathname).toBe("/settings/security");
     // The dialog's text is the only one outside the live regions: no toast.
     await expect(toastWith(page, looseText(NEW_CODES_DONE))).toHaveCount(1);
+
+    // A-100 (2): Done (enabled once ticked) acknowledges, then closes the dialog.
+    const acks: number[] = [];
+    page.on("response", (r) => {
+      if (isPost("/api/v1/me/two-step/acknowledge-codes")(r)) acks.push(r.status());
+    });
+    const done = codesDialog.getByRole("button", { name: catalogText("Done") });
+    await expect(done).toBeDisabled();
+    await codesDialog
+      .getByRole("checkbox", { name: catalogText("I've saved my recovery codes") })
+      .check();
+    await expect(done).toBeEnabled();
+    const ack = page.waitForResponse(isPost("/api/v1/me/two-step/acknowledge-codes"));
+    await done.click();
+
+    const ackAnswer = await ack;
+    expect(ackAnswer.status(), await ackAnswer.text()).toBe(200);
+    expect(await ackAnswer.json()).toEqual({ ok: true });
+    await expect(codesDialog).toHaveCount(0);
+    expect(acks).toEqual([200]);
+    expect(here(page)).toBe("/settings/security");
   });
 
   test("TP-4.31x: Escape cancels the step-up: the dialog closes and no new codes are created", async ({
@@ -423,7 +439,7 @@ test.describe("TP-4.33: turning two-step off (F-164)", () => {
   });
 });
 
-test.describe("TP-4.39: two-step focus, end messages and S-10's two-step section (A-99)", () => {
+test.describe("TP-4.39: two-step focus, end messages and S-10's two-step section (A-99, A-100)", () => {
   test("TP-4.39 (a): arriving on /sign-in/two-step, the h1 'Two-step verification' is announced and focus ends on the code field", async ({
     page,
     request,
@@ -504,7 +520,7 @@ test.describe("TP-4.39: two-step focus, end messages and S-10's two-step section
     await expect(page.locator("main").getByText(looseText(TOO_MANY))).toHaveCount(0);
   });
 
-  test("TP-4.39 (d): S-10's two-step section: without two-step, the h2 'Two-step verification' with 'Off' and Turn on; after turning it on, 'On' with Turn off", async ({
+  test("TP-4.39 (d): S-10's two-step section is the <section> labelled by its h2 'Two-step verification': without two-step, 'Off' and Turn on; after turning it on, 'On' with Turn off", async ({
     page,
     request,
   }) => {
@@ -512,6 +528,18 @@ test.describe("TP-4.39: two-step focus, end messages and S-10's two-step section
     await page.goto("/settings/security");
     await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
     const section = twoStepSection(page);
+
+    // A-100 (4): <section aria-labelledby="<its h2 id>"> wrapping that h2.
+    await expect(section).toHaveCount(1);
+    expect(await section.evaluate((el) => el.tagName)).toBe("SECTION");
+    const heading = section.getByRole("heading", {
+      level: 2,
+      name: catalogText("Two-step verification"),
+    });
+    await expect(heading).toHaveCount(1);
+    const headingId = await heading.getAttribute("id");
+    expect(headingId).toBeTruthy();
+    await expect(section).toHaveAttribute("aria-labelledby", headingId ?? "");
 
     await expect(section).toBeVisible();
     await expect(section.getByText(catalogText("Off"))).toBeVisible();
@@ -526,5 +554,38 @@ test.describe("TP-4.39: two-step focus, end messages and S-10's two-step section
     await expect(section.getByText(catalogText("Off"))).toHaveCount(0);
     await expect(section.getByRole("button", { name: catalogText("Turn off") })).toBeVisible();
     await expect(section.getByRole("button", { name: catalogText("Turn on") })).toHaveCount(0);
+  });
+
+  test("TP-4.39 (f): without two-step and with the step-up expired, Turn on goes to /settings/security/two-step, where Confirm it's you opens on the page's mount; Cancel goes back to /settings/security", async ({
+    page,
+    request,
+  }) => {
+    const { email } = await signedUpUser(page, request, "Cancel Setup Person");
+    await unconfirmSessions(request, email);
+    await page.goto("/settings/security");
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
+    const setup: number[] = [];
+    page.on("response", (r) => {
+      if (isPost("/api/v1/me/two-step/setup")(r)) setup.push(r.status());
+    });
+
+    // A-100 (3): Turn on only navigates; the setup page's mount asks for the step-up.
+    await twoStepSection(page)
+      .getByRole("button", { name: catalogText("Turn on") })
+      .click();
+
+    const dialog = confirmDialog(page);
+    await expect(dialog).toBeVisible();
+    // Read once (not retried): already on the setup page when the dialog shows.
+    expect(page.url()).toMatch(/\/settings\/security\/two-step$/);
+    expect(setup).toEqual([403]);
+
+    await dialog.getByRole("button", { name: catalogText("Cancel") }).click();
+
+    await expect(page).toHaveURL(/\/settings\/security$/);
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
+    await expect(dialog).toHaveCount(0);
+    // F-166: a cancel doesn't retry run().
+    expect(setup).toEqual([403]);
   });
 });

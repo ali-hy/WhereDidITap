@@ -23,6 +23,7 @@ import {
   submitSignIn,
   test,
   TestAuthenticator,
+  twoStepSection,
   unconfirmSessions,
   uniqueEmail,
   type Page,
@@ -509,8 +510,13 @@ test.describe("TP-3.53: S-4's screens: S-2, S-11 and S-16 (HLD §4.4; A-75)", ()
     });
     const setup = page.waitForResponse(isPost("/api/v1/me/two-step/setup"));
 
-    // Opened by URL (as after a reload): this case checks S-11's own states.
-    await page.goto("/settings/security/two-step");
+    // Reached through Turn on (A-100): the setup page's mount calls me.twoStepSetup.
+    await page.goto("/settings/security");
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
+    await twoStepSection(page)
+      .getByRole("button", { name: catalogText("Turn on") })
+      .click();
+    await expect(page).toHaveURL(/\/settings\/security\/two-step$/);
 
     const main = page.locator("main");
     const qr = main.getByRole("img", { name: catalogText(QR_ALT) });
@@ -567,11 +573,16 @@ test.describe("TP-3.53: S-4's screens: S-2, S-11 and S-16 (HLD §4.4; A-75)", ()
       if (isPost("/api/v1/me/two-step/setup")(r)) setup.push(r.status());
     });
 
-    // Opened by URL (as after a reload): this case checks S-11's own states.
-    await page.goto("/settings/security/two-step");
+    // Reached through Turn on (A-100): the step-up opens on the setup page's mount.
+    await page.goto("/settings/security");
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
+    await twoStepSection(page)
+      .getByRole("button", { name: catalogText("Turn on") })
+      .click();
 
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
+    await expect(page).toHaveURL(/\/settings\/security\/two-step$/);
     await expect(dialog.getByText(catalogText("Confirm it's you"))).toBeVisible();
     const password = dialog.getByLabel(catalogText("Password"));
     await expect(password).toHaveValue("");
