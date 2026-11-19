@@ -1,7 +1,7 @@
 // F-214's S-4 entry point (identity LLD §8.2's S-4 signatures, A-100): HomeFirstRunScreen's account
 // menu with Sign-in & security, and SecurityScreen's two-step section. TP-4.40, plus TP-4.40x.
-// Screens get fake lambdas that count their calls. `me` is ME with Me's two-step fields
-// (twoStepEnabled, codesAcknowledged), the §8.2 `me.twoStep.*` values.
+// Screens get fake lambdas that count their calls. `me` is ME with Me's flat two-step fields
+// (twoStepEnabled, codesAcknowledged; A-103 (2)).
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.identity.ui
 

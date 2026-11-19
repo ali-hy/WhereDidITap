@@ -1,4 +1,6 @@
-// F-215 TwoStepSetupRoute (identity LLD §8.2's S-4 signatures, A-99, A-100). TP-4.34, plus TP-4.34x.
+// F-215 TwoStepSetupRoute and TwoStepSetupScreen (identity LLD §8.2's S-4 signatures, A-99, A-100,
+// A-102). TP-4.34, plus TP-4.34x. The Expired and Scan steps (A-102) render the stateless screen with
+// counting lambdas.
 // The route runs a real TwoStepSetupViewModel over a MockK AuthRepository and the real
 // ConfirmationCoordinator. It is rendered directly: SecurityScreen's Turn on only navigates to
 // settings/two_step?mode=setup (A-100, no navigation seam), and that route starts the view model
@@ -31,6 +33,7 @@ import com.budmon.app.identity.AuthRepository
 import com.budmon.app.identity.ConfirmationCoordinator
 import com.budmon.app.identity.SetupStep
 import com.budmon.app.identity.TwoStepSecret
+import com.budmon.app.identity.TwoStepSetupState
 import com.budmon.app.identity.TwoStepSetupViewModel
 import com.budmon.app.ui.theme.AppTheme
 import com.budmon.app.ui.theme.ThemeSetting
@@ -150,5 +153,92 @@ class TwoStepSetupRouteTest {
 
         coVerify(exactly = 1) { repository.twoStepReplaceStart() }
         coVerify(exactly = 0) { repository.twoStepSetup() }
+    }
+
+    // ---- TwoStepSetupScreen's steps (A-102) ----
+
+    private class Counter {
+        var calls = 0
+        val call: () -> Unit = { calls += 1 }
+    }
+
+    private class Lambdas {
+        val submit = Counter()
+        val openInApp = Counter()
+        val copyKey = Counter()
+        val startAgain = Counter()
+        fun calls() = listOf(submit.calls, openInApp.calls, copyKey.calls, startAgain.calls)
+    }
+
+    private fun state(step: SetupStep) = TwoStepSetupState(
+        step = step,
+        secret = secret,
+        code = "",
+        error = null,
+        formError = null,
+        busy = false,
+        codes = emptyList(),
+        acknowledged = false,
+    )
+
+    private fun showScreen(step: SetupStep, lambdas: Lambdas) {
+        compose.setContent {
+            AppTheme(ThemeSetting.LIGHT) {
+                TwoStepSetupScreen(
+                    state = state(step),
+                    onCodeChange = {},
+                    onSubmit = lambdas.submit.call,
+                    onOpenInApp = lambdas.openInApp.call,
+                    onCopyKey = lambdas.copyKey.call,
+                    onStartAgain = lambdas.startAgain.call,
+                )
+            }
+        }
+        compose.waitForIdle()
+    }
+
+    @Test
+    fun `TP-4_34 TwoStepSetupScreen Expired - Setup timed out, Start again calling onStartAgain only (A-102)`() {
+        val lambdas = Lambdas()
+        showScreen(SetupStep.Expired, lambdas)
+
+        compose.onNodeWithText(text(R.string.twostep_setup_expired)).assertExists()
+        compose.onNode(hasText(text(R.string.twostep_setup_start_again)) and hasClickAction()).inView().performClick()
+
+        assertEquals(listOf(0, 0, 0, 1), lambdas.calls())
+    }
+
+    @Test
+    fun `TP-4_34x TwoStepSetupScreen Expired - no Try again button (A-102)`() {
+        showScreen(SetupStep.Expired, Lambdas())
+
+        compose.onNode(hasText(text(R.string.error_fallback_retry)) and hasClickAction()).assertDoesNotExist()
+    }
+
+    @Test
+    fun `TP-4_34 TwoStepSetupScreen Scan - a Copy button (A-102)`() {
+        showScreen(SetupStep.Scan, Lambdas())
+
+        compose.onNode(hasText(text(R.string.twostep_setup_copy)) and hasClickAction()).inView().assertExists()
+    }
+
+    @Test
+    fun `TP-4_34x TwoStepSetupScreen Scan - Copy calls onCopyKey only`() {
+        val lambdas = Lambdas()
+        showScreen(SetupStep.Scan, lambdas)
+
+        compose.onNode(hasText(text(R.string.twostep_setup_copy)) and hasClickAction()).inView().performClick()
+
+        assertEquals(listOf(0, 0, 1, 0), lambdas.calls())
+    }
+
+    @Test
+    fun `TP-4_34x the setup strings have the texts of §8_1 (A-102)`() {
+        val expected = mapOf<Int, String>(
+            R.string.twostep_setup_expired to "Setup timed out. Start again.",
+            R.string.twostep_setup_start_again to "Start again",
+            R.string.twostep_setup_copy to "Copy",
+        )
+        for ((id, value) in expected) assertEquals(value, text(id))
     }
 }

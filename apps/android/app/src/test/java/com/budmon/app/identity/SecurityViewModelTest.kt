@@ -1,5 +1,6 @@
 // F-214 SecurityViewModel (identity LLD §8.2's S-4 signatures, A-100, A-101, A-102). TP-4.41 rows
-// (a) to (e), plus TP-4.41x. Row (f), SessionViewModel.onMeUpdated, is in SessionViewModelTest.
+// (a) to (e), TP-4.44 (A-103), plus TP-4.41x. `state` is read as a plain property (A-103 (1)).
+// Row (f), SessionViewModel.onMeUpdated, is in SessionViewModelTest.
 // Setup per TP-4.41: a MockK AuthRepository; the real ConfirmationCoordinator around it; a recording
 // onMeUpdated; Dispatchers.setMain(StandardTestDispatcher) so viewModelScope runs on virtual time.
 // Errors use Operation.Mutation (A-102).
@@ -72,7 +73,7 @@ class SecurityViewModelTest {
     private fun failure(key: String, status: Int, data: kotlinx.serialization.json.JsonObject? = null) =
         ApiException(ApiError.Defined(key, status, data))
 
-    private val SecurityViewModel.turnOff: TurnOffFormState? get() = state.value.turnOff
+    private val SecurityViewModel.turnOff: TurnOffFormState? get() = state.turnOff
 
     /** Opens the Turn off dialog, types [value] (after switching to a recovery code if asked) and submits. */
     private fun TestScope.turnOffWith(vm: SecurityViewModel, value: String, recovery: Boolean = false) {
@@ -89,7 +90,7 @@ class SecurityViewModelTest {
     private fun TestScope.showNewCodes(vm: SecurityViewModel) {
         vm.createNewCodes()
         advanceUntilIdle()
-        assertEquals(codes, vm.state.value.newCodes)
+        assertEquals(codes, vm.state.newCodes)
     }
 
     // ---- (a) Turn off: client rules, normalised values, success ----
@@ -125,7 +126,7 @@ class SecurityViewModelTest {
             coVerify(exactly = 1) { repository.twoStepDisable("123456", null) }
             coVerify(exactly = 1) { repository.twoStepDisable(any(), any()) }
             assertNull(vm.turnOff)
-            assertEquals(UiText(R.string.twostep_off_done), vm.state.value.message)
+            assertEquals(UiText(R.string.twostep_off_done), vm.state.message)
             coVerify(exactly = 1) { repository.getMe() }
             assertEquals(listOf(meAfter), updates)
         }
@@ -139,7 +140,7 @@ class SecurityViewModelTest {
         coVerify(exactly = 1) { repository.twoStepDisable(null, "7KQ2M3XD4TRA") }
         coVerify(exactly = 1) { repository.twoStepDisable(any(), any()) }
         assertNull(vm.turnOff)
-        assertEquals(UiText(R.string.twostep_off_done), vm.state.value.message)
+        assertEquals(UiText(R.string.twostep_off_done), vm.state.message)
         assertEquals(listOf(meAfter), updates)
     }
 
@@ -167,7 +168,7 @@ class SecurityViewModelTest {
         assertEquals(R.string.twostep_code_wrong, form!!.error)
         assertEquals("", form.value)
         assertEquals(false, form.busy)
-        assertNull(vm.state.value.message)
+        assertNull(vm.state.message)
         assertTrue(updates.isEmpty())
     }
 
@@ -186,6 +187,21 @@ class SecurityViewModelTest {
     }
 
     @Test
+    fun `TP-4_44 submitTurnOff RATE_LIMITED in recovery mode - formError the platform's rate-limit text, showRecoveryHint false (A-103)`() =
+        runTest {
+            val limited = ApiError.Defined("RATE_LIMITED", 429, buildJsonObject { put("retryAfterSeconds", 120) })
+            coEvery { repository.twoStepDisable(null, "7KQ2M3XD4TRA") } throws ApiException(limited)
+            val vm = viewModel()
+
+            turnOffWith(vm, "7KQ2-M3XD-4TRA", recovery = true)
+
+            val form = vm.turnOff!!
+            assertEquals(ErrorMessages.forError(limited, Operation.Read), form.formError)
+            assertFalse(form.showRecoveryHint)
+            assertEquals(false, form.busy)
+        }
+
+    @Test
     fun `TP-4_41 (b) TWO_STEP_NOT_ENABLED - turnOff null, getMe called, onMeUpdated(me), message null`() = runTest {
         coEvery { repository.twoStepDisable("123456", null) } throws failure("TWO_STEP_NOT_ENABLED", 409)
         val vm = viewModel()
@@ -195,7 +211,7 @@ class SecurityViewModelTest {
         assertNull(vm.turnOff)
         coVerify(exactly = 1) { repository.getMe() }
         assertEquals(listOf(meAfter), updates)
-        assertNull(vm.state.value.message)
+        assertNull(vm.state.message)
     }
 
     @Test
@@ -284,9 +300,9 @@ class SecurityViewModelTest {
         vm.createNewCodes()
         advanceUntilIdle()
 
-        assertEquals(codes, vm.state.value.newCodes)
-        assertEquals(false, vm.state.value.acknowledged)
-        assertEquals(false, vm.state.value.busy)
+        assertEquals(codes, vm.state.newCodes)
+        assertEquals(false, vm.state.acknowledged)
+        assertEquals(false, vm.state.busy)
         coVerify(exactly = 1) { repository.regenerateRecoveryCodes() }
     }
 
@@ -302,9 +318,9 @@ class SecurityViewModelTest {
         coordinator.cancel()
         advanceUntilIdle()
 
-        assertNull(vm.state.value.newCodes)
-        assertNull(vm.state.value.message)
-        assertEquals(false, vm.state.value.busy)
+        assertNull(vm.state.newCodes)
+        assertNull(vm.state.message)
+        assertEquals(false, vm.state.busy)
         coVerify(exactly = 1) { repository.regenerateRecoveryCodes() }
     }
 
@@ -317,9 +333,9 @@ class SecurityViewModelTest {
         vm.createNewCodes(onMeUpdated)
         advanceUntilIdle()
 
-        assertEquals(IdentityErrorMessages.forError(internal, Operation.Mutation), vm.state.value.message)
-        assertNull(vm.state.value.newCodes)
-        assertEquals(false, vm.state.value.busy)
+        assertEquals(IdentityErrorMessages.forError(internal, Operation.Mutation), vm.state.message)
+        assertNull(vm.state.newCodes)
+        assertEquals(false, vm.state.busy)
         coVerify(exactly = 0) { repository.getMe() }
         assertTrue("no refresh for other errors", updates.isEmpty())
     }
@@ -334,8 +350,8 @@ class SecurityViewModelTest {
             vm.createNewCodes(onMeUpdated)
             advanceUntilIdle()
 
-            assertEquals(IdentityErrorMessages.forError(notEnabled, Operation.Mutation), vm.state.value.message)
-            assertNull(vm.state.value.newCodes)
+            assertEquals(IdentityErrorMessages.forError(notEnabled, Operation.Mutation), vm.state.message)
+            assertNull(vm.state.newCodes)
             coVerify(exactly = 1) { repository.getMe() }
             assertEquals(listOf(meAfter), updates)
         }
@@ -350,12 +366,12 @@ class SecurityViewModelTest {
 
         vm.createNewCodes()
         runCurrent()
-        assertTrue("busy while the request runs", vm.state.value.busy)
+        assertTrue("busy while the request runs", vm.state.busy)
         vm.createNewCodes()
         advanceUntilIdle()
 
         coVerify(exactly = 1) { repository.regenerateRecoveryCodes() }
-        assertEquals(codes, vm.state.value.newCodes)
+        assertEquals(codes, vm.state.newCodes)
     }
 
     // ---- (d) finishNewCodes, leaveNewCodes ----
@@ -369,7 +385,7 @@ class SecurityViewModelTest {
         advanceUntilIdle()
 
         coVerify(exactly = 0) { repository.acknowledgeRecoveryCodes() }
-        assertEquals(codes, vm.state.value.newCodes)
+        assertEquals(codes, vm.state.newCodes)
         assertTrue(updates.isEmpty())
     }
 
@@ -379,16 +395,16 @@ class SecurityViewModelTest {
             val vm = viewModel()
             showNewCodes(vm)
             vm.onAcknowledgedChange(true)
-            assertTrue(vm.state.value.acknowledged)
+            assertTrue(vm.state.acknowledged)
 
             vm.finishNewCodes(onMeUpdated)
             advanceUntilIdle()
 
             coVerify(exactly = 1) { repository.acknowledgeRecoveryCodes() }
-            assertNull(vm.state.value.newCodes)
-            assertEquals(false, vm.state.value.acknowledged)
+            assertNull(vm.state.newCodes)
+            assertEquals(false, vm.state.acknowledged)
             assertEquals(listOf(meAfter), updates)
-            assertNull(vm.state.value.message)
+            assertNull(vm.state.message)
         }
 
     @Test
@@ -401,10 +417,10 @@ class SecurityViewModelTest {
         vm.finishNewCodes(onMeUpdated)
         advanceUntilIdle()
 
-        assertEquals(codes, vm.state.value.newCodes)
+        assertEquals(codes, vm.state.newCodes)
         // Network reads error_unavailable for every operation (F-253).
-        assertEquals(UiText(R.string.error_unavailable), vm.state.value.message)
-        assertEquals(false, vm.state.value.busy)
+        assertEquals(UiText(R.string.error_unavailable), vm.state.message)
+        assertEquals(false, vm.state.busy)
         assertTrue(updates.isEmpty())
     }
 
@@ -416,7 +432,7 @@ class SecurityViewModelTest {
         vm.leaveNewCodes()
         advanceUntilIdle()
 
-        assertNull(vm.state.value.newCodes)
+        assertNull(vm.state.newCodes)
         coVerify(exactly = 0) { repository.acknowledgeRecoveryCodes() }
     }
 
@@ -429,7 +445,7 @@ class SecurityViewModelTest {
 
         vm.finishNewCodes(onMeUpdated)
         runCurrent()
-        assertTrue("busy while the request runs", vm.state.value.busy)
+        assertTrue("busy while the request runs", vm.state.busy)
         vm.finishNewCodes(onMeUpdated)
         advanceUntilIdle()
 
@@ -448,7 +464,7 @@ class SecurityViewModelTest {
         advanceUntilIdle()
 
         assertTrue(updates.isEmpty())
-        assertNull(vm.state.value.message)
+        assertNull(vm.state.message)
     }
 
     @Test
@@ -465,11 +481,11 @@ class SecurityViewModelTest {
     fun `TP-4_41x messageShown after a turn-off - message null`() = runTest {
         val vm = viewModel()
         turnOffWith(vm, "123456")
-        assertEquals(UiText(R.string.twostep_off_done), vm.state.value.message)
+        assertEquals(UiText(R.string.twostep_off_done), vm.state.message)
 
         vm.messageShown()
 
-        assertNull(vm.state.value.message)
-        assertFalse(vm.state.value.busy)
+        assertNull(vm.state.message)
+        assertFalse(vm.state.busy)
     }
 }
