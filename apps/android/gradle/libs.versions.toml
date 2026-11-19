@@ -21,6 +21,7 @@ okhttp = "5.5.0"
 retrofit = "3.0.0"
 retrofitKotlinxConverter = "1.0.0"
 sentry = "8.59.0"
+zxing = "3.5.3"
 openapiGenerator = "7.14.0"
 ktlintGradle = "13.1.0"
 ktlint = "1.8.0"
@@ -72,6 +73,7 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 sentry-android = { module = "io.sentry:sentry-android", version.ref = "sentry" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 lint-api = { module = "com.android.tools.lint:lint-api", version.ref = "lint" }
 lint-checks = { module = "com.android.tools.lint:lint-checks", version.ref = "lint" }
 lint-tests = { module = "com.android.tools.lint:lint-tests", version.ref = "lint" }

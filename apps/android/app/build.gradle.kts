@@ -262,6 +262,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.sentry.android)
+    implementation(libs.zxing.core)
 
     lintChecks(project(":lint-rules"))
 

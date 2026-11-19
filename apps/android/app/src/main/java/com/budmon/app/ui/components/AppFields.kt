@@ -65,6 +65,7 @@ fun AppTextField(
     contentType: ContentType? = null,
     trailing: (@Composable () -> Unit)? = null,
     visualTransformation: VisualTransformation = VisualTransformation.None,
+    fieldModifier: Modifier = Modifier,
 ) {
     Column(modifier) {
         Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface)
@@ -75,6 +76,7 @@ fun AppTextField(
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = FieldMinHeight)
+                .then(fieldModifier)
                 .semantics {
                     contentDescription = label
                     if (contentType != null) this.contentType = contentType

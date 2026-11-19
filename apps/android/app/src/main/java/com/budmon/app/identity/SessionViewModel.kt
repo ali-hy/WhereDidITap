@@ -186,6 +186,11 @@ internal constructor(
         }
     }
 
+    /** A fresher `me` (after a settings change); ignored unless signed in. */
+    fun onMeUpdated(me: Me) {
+        if (mutableState.value is SessionUiState.SignedIn) mutableState.value = SessionUiState.SignedIn(me)
+    }
+
     private companion object {
         const val FIRST_DELAY_MS = 15_000L
         const val MAX_DELAY_MS = 300_000L

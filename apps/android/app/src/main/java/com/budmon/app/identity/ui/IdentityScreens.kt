@@ -82,6 +82,7 @@ import com.budmon.app.identity.SignOutState
 import com.budmon.app.identity.SignOutViewModel
 import com.budmon.app.identity.SignUpOptions
 import com.budmon.app.identity.SignedOutReason
+import com.budmon.app.identity.TwoStepChallenge
 import com.budmon.app.ui.components.AppButton
 import com.budmon.app.ui.components.AppButtonVariant
 import com.budmon.app.ui.components.AppPasswordField
@@ -97,7 +98,7 @@ import java.util.Locale
 import java.util.TimeZone
 
 @Composable
-private fun uiString(text: UiText): String =
+internal fun uiString(text: UiText): String =
     if (text.quantity != null) {
         pluralStringResource(text.resId, text.quantity!!, *text.args.toTypedArray())
     } else {
@@ -105,12 +106,12 @@ private fun uiString(text: UiText): String =
     }
 
 @Composable
-private fun Heading(text: String) {
+internal fun Heading(text: String) {
     Text(text, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
 }
 
 @Composable
-private fun Page(
+internal fun Page(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
@@ -125,7 +126,7 @@ private fun Page(
 
 /** Wraps an email or name so it reads left to right inside a sentence of any direction. */
 @Composable
-private fun isolated(value: String): String = BidiFormatter.getInstance().unicodeWrap(value)
+internal fun isolated(value: String): String = BidiFormatter.getInstance().unicodeWrap(value)
 
 private fun formatDate(at: Instant?): String =
     if (at == null) {
@@ -574,6 +575,7 @@ fun HomeFirstRunScreen(
     me: Me,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
+    onSecurity: () -> Unit = {},
 ) {
     Box(modifier.fillMaxSize()) {
         var menuOpen by remember { mutableStateOf(false) }
@@ -583,6 +585,13 @@ fun HomeFirstRunScreen(
                 Text(initialsOf(me.displayName), style = MaterialTheme.typography.labelLarge)
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.menu_security)) },
+                    onClick = {
+                        menuOpen = false
+                        onSecurity()
+                    },
+                )
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.menu_sign_out)) },
                     onClick = {
@@ -630,8 +639,9 @@ fun HomeRoute(
     isOnline: Boolean,
     viewModel: SignOutViewModel,
     onSignedOut: () -> Unit,
+    onSecurity: () -> Unit = {},
 ) {
-    HomeFirstRunScreen(me, onSignOut = { viewModel.requestSignOut(onSignedOut) })
+    HomeFirstRunScreen(me, onSignOut = { viewModel.requestSignOut(onSignedOut) }, onSecurity = onSecurity)
     when (val state = viewModel.state) {
         SignOutState.Idle -> {}
 
@@ -721,6 +731,7 @@ fun SignInRoute(
     onSignedIn: (Me) -> Unit,
     onHaveLink: () -> Unit,
     onPrivacy: () -> Unit,
+    onTwoStep: (TwoStepChallenge) -> Unit = {},
 ) {
     val form = viewModel.form
     SignInScreen(
@@ -729,7 +740,7 @@ fun SignInRoute(
         form = form,
         onEmailChange = viewModel::onEmailChange,
         onPasswordChange = viewModel::onPasswordChange,
-        onSubmit = { viewModel.submit(isOnline, savePassword, onSignedIn) },
+        onSubmit = { viewModel.submit(isOnline, savePassword, onSignedIn, onTwoStep) },
         onHaveLink = onHaveLink,
         onPrivacy = onPrivacy,
     )
@@ -737,7 +748,7 @@ fun SignInRoute(
         OutboxOwnerDialog(
             count,
             busy = form.ownerBusy,
-            onDelete = { viewModel.discardOtherUsersEntries(savePassword, onSignedIn) },
+            onDelete = { viewModel.discardOtherUsersEntries(savePassword, onSignedIn, onTwoStep) },
             onCancel = viewModel::keepOtherUsersEntries,
         )
     }

@@ -1,4 +1,4 @@
-// F-208 (S-3): the sign-in form's state and the password sign-in.
+// F-208 (S-3): the sign-in form's state and the password sign-in; S-4 hands a second step on.
 package com.budmon.app.identity
 
 import androidx.annotation.StringRes
@@ -62,6 +62,7 @@ class SignInViewModel
             isOnline: Boolean,
             savePassword: suspend (String, String) -> Unit,
             onSignedIn: (Me) -> Unit,
+            onTwoStep: (TwoStepChallenge) -> Unit,
         ) {
             if (form.busy) return
             val email = form.email.trim()
@@ -84,7 +85,8 @@ class SignInViewModel
                 try {
                     when (val outcome = repository.signIn(email, password)) {
                         is SignInOutcome.Ready -> decide(outcome.pending, guard.complete(outcome.pending), savePassword, onSignedIn)
-                        is SignInOutcome.TwoStepRequired -> form = form.copy(formError = UiText(R.string.error_generic_read))
+                        is SignInOutcome.TwoStepRequired ->
+                            onTwoStep(TwoStepChallenge(outcome.challengeToken, outcome.expiresAt, email, password))
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -131,6 +133,12 @@ class SignInViewModel
             onSignedIn(signedIn.me)
         }
 
+        /** Back from the two-step screen with the sign-in over. */
+        fun showTwoStepEnded(reason: TwoStepEndReason) {
+            val message = if (reason == TwoStepEndReason.TooManyAttempts) R.string.twostep_too_many else R.string.twostep_timeout
+            form = form.copy(formError = UiText(message))
+        }
+
         private fun readError(e: Exception): UiText =
             IdentityErrorMessages.forError((e as? ApiException)?.error ?: ApiError.Unknown, Operation.Read)
 
@@ -138,6 +146,7 @@ class SignInViewModel
         fun discardOtherUsersEntries(
             savePassword: suspend (String, String) -> Unit,
             onSignedIn: (Me) -> Unit,
+            onTwoStep: (TwoStepChallenge) -> Unit,
         ) {
             val held = pending ?: return
             if (form.ownerBusy != null) return

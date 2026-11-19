@@ -27,23 +27,33 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import androidx.navigation.navigation
 import com.budmon.app.core.update.UpdateState
+import com.budmon.app.identity.ConfirmationCoordinator
 import com.budmon.app.identity.InviteViewModel
+import com.budmon.app.identity.SecurityViewModel
 import com.budmon.app.identity.SessionUiState
 import com.budmon.app.identity.SessionViewModel
 import com.budmon.app.identity.SignInViewModel
 import com.budmon.app.identity.SignOutViewModel
 import com.budmon.app.identity.SignedOutReason
+import com.budmon.app.identity.TwoStepSetupViewModel
+import com.budmon.app.identity.TwoStepViewModel
+import com.budmon.app.identity.ui.ConfirmItsYouHost
 import com.budmon.app.identity.ui.HomeRoute
 import com.budmon.app.identity.ui.InvitationLinkRoute
 import com.budmon.app.identity.ui.InviteFlowRoute
 import com.budmon.app.identity.ui.SessionLoadingScreen
+import com.budmon.app.identity.ui.SecurityRoute
 import com.budmon.app.identity.ui.SessionNotLoaded
 import com.budmon.app.identity.ui.SignInRoute
+import com.budmon.app.identity.ui.TwoStepRoute
+import com.budmon.app.identity.ui.TwoStepSetupRoute
 import com.budmon.app.ui.platform.OfflineBanner
 import com.budmon.app.ui.platform.PlatformStatusViewModel
 import com.budmon.app.ui.platform.SyncIndicator
@@ -68,6 +78,8 @@ class MainActivity : ComponentActivity() {
     @Inject @field:Named("apiBaseUrl") lateinit var apiBaseUrl: HttpUrl
 
     @Inject lateinit var themeSettings: ThemeSettingStore
+
+    @Inject lateinit var confirmation: ConfirmationCoordinator
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -134,6 +146,7 @@ class MainActivity : ComponentActivity() {
                                                                 isOnline = status.isOnline,
                                                                 viewModel = hiltViewModel<SignOutViewModel>(),
                                                                 onSignedOut = sessionModel::onSignedOut,
+                                                                onSecurity = { nav.navigate(ROUTE_SECURITY) },
                                                             )
                                                         } else {
                                                             val retrying by sessionModel.probing.collectAsStateWithLifecycle()
@@ -146,8 +159,36 @@ class MainActivity : ComponentActivity() {
                                                         }
                                                     }
                                                 }
+                                                composable(ROUTE_SECURITY) {
+                                                    val me = current.me
+                                                    if (me != null) {
+                                                        SecurityRoute(
+                                                            me = me,
+                                                            viewModel = hiltViewModel<SecurityViewModel>(),
+                                                            onMeUpdated = sessionModel::onMeUpdated,
+                                                            onTurnOn = { nav.navigate("$ROUTE_TWO_STEP_SETUP?mode=setup") },
+                                                            onReplace = { nav.navigate("$ROUTE_TWO_STEP_SETUP?mode=replace") },
+                                                            onBack = { nav.popBackStack() },
+                                                        )
+                                                    } else {
+                                                        val retrying by sessionModel.probing.collectAsStateWithLifecycle()
+                                                        SessionNotLoaded(status.isOnline, current.lastError, retrying, sessionModel::retry)
+                                                    }
+                                                }
+                                                composable(
+                                                    "$ROUTE_TWO_STEP_SETUP?mode={mode}",
+                                                    arguments = listOf(navArgument("mode") { type = NavType.StringType; defaultValue = "setup" }),
+                                                ) { entry ->
+                                                    TwoStepSetupRoute(
+                                                        viewModel = hiltViewModel<TwoStepSetupViewModel>(),
+                                                        replace = entry.arguments?.getString("mode") == "replace",
+                                                        onDone = { nav.popBackStack() },
+                                                    )
+                                                }
                                             }
                                         }
+                                        // The step-up sheet, over whichever signed-in screen asked.
+                                        ConfirmItsYouHost(confirmation)
                                     }
                                 }
                             }
@@ -167,7 +208,9 @@ class MainActivity : ComponentActivity() {
         val nav = rememberNavController()
         NavHost(nav, startDestination = ROUTE_SIGNED_OUT) {
             navigation(startDestination = ROUTE_SIGN_IN, route = ROUTE_SIGNED_OUT) {
-                composable(ROUTE_SIGN_IN) {
+                composable(ROUTE_SIGN_IN) { entry ->
+                    // The challenge goes to a graph-scoped view model, never into the route.
+                    val twoStep: TwoStepViewModel = hiltViewModel(remember(entry) { nav.getBackStackEntry(ROUTE_SIGNED_OUT) })
                     SignInRoute(
                         viewModel = hiltViewModel<SignInViewModel>(),
                         reason = reason,
@@ -176,6 +219,24 @@ class MainActivity : ComponentActivity() {
                         onSignedIn = sessionModel::onSignedIn,
                         onHaveLink = { nav.navigate(ROUTE_INVITATION_LINK) },
                         onPrivacy = { openPrivacy() },
+                        onTwoStep = {
+                            twoStep.start(it)
+                            nav.navigate(ROUTE_TWO_STEP)
+                        },
+                    )
+                }
+                composable(ROUTE_TWO_STEP) { entry ->
+                    val twoStep: TwoStepViewModel = hiltViewModel(remember(entry) { nav.getBackStackEntry(ROUTE_SIGNED_OUT) })
+                    val signIn: SignInViewModel = hiltViewModel(remember(entry) { nav.getBackStackEntry(ROUTE_SIGN_IN) })
+                    TwoStepRoute(
+                        viewModel = twoStep,
+                        savePassword = ::savePassword,
+                        onSignedIn = sessionModel::onSignedIn,
+                        onEnded = { reason ->
+                            nav.popBackStack(ROUTE_SIGN_IN, inclusive = false)
+                            signIn.showTwoStepEnded(reason)
+                        },
+                        onBack = { nav.popBackStack() },
                     )
                 }
                 composable(ROUTE_INVITATION_LINK) { entry ->
@@ -237,6 +298,9 @@ class MainActivity : ComponentActivity() {
         const val ROUTE_INVITE = "invite"
         const val ROUTE_SIGNED_IN = "signed_in"
         const val ROUTE_HOME = "home"
+        const val ROUTE_TWO_STEP = "two_step"
+        const val ROUTE_SECURITY = "settings/security"
+        const val ROUTE_TWO_STEP_SETUP = "settings/two_step"
     }
 
     /** The privacy notice on the API's origin, in a Custom Tab. */

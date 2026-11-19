@@ -1,5 +1,5 @@
 // F-204: suspend wrappers for me.get, auth.signUpOptions, invitations.preview and accept (S-1),
-// and sign-in and sign-out (S-3).
+// sign-in and sign-out (S-3), and two-step verification (S-4).
 package com.budmon.app.identity
 
 import android.os.Build
@@ -22,6 +22,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
@@ -50,6 +51,29 @@ data class Me(
     val baseCurrency: String,
     val status: String,
     val isOwner: Boolean,
+    val twoStepEnabled: Boolean = false,
+    val recoveryCodesLeft: Int = 0,
+    val codesAcknowledged: Boolean = true,
+)
+
+/** What the two-step screen needs from the first factor; [password] lets it offer to save it. */
+data class TwoStepChallenge(
+    val token: String,
+    val expiresAt: Instant,
+    val email: String,
+    val password: String?,
+)
+
+/** A TOTP secret to enrol: grouped for typing, plus the `otpauth://` URI for the QR code. */
+data class TwoStepSecret(
+    val secret: String,
+    val otpauthUri: String,
+    val expiresAt: Instant,
+)
+
+data class TwoStepVerified(
+    val pending: PendingSignIn,
+    val recoveryCodesLeft: Int?,
 )
 
 /** A sign-in the server accepted, held until the outbox owner check lets it be stored (A-69). */
@@ -148,6 +172,7 @@ constructor(
         val request = Request.Builder().url(url("me")).get()
         if (accessToken != null) request.header("Authorization", "Bearer $accessToken").tag(ExplicitAuth::class.java, ExplicitAuth)
         val o = call(request.build())
+        val twoStep = o["twoStep"] as? JsonObject
         return Me(
             id = o.str("id"),
             email = o.str("email"),
@@ -157,6 +182,9 @@ constructor(
             baseCurrency = o.str("baseCurrency"),
             status = o.str("status"),
             isOwner = o.flag("isOwner"),
+            twoStepEnabled = twoStep?.flag("enabled") ?: false,
+            recoveryCodesLeft = (twoStep?.get("recoveryCodesLeft") as? JsonPrimitive)?.intOrNull ?: 0,
+            codesAcknowledged = twoStep?.get("codesAcknowledged")?.let { (it as? JsonPrimitive)?.booleanOrNull } ?: true,
         )
     }
 
@@ -263,6 +291,84 @@ constructor(
 
             else -> throw ApiException(ApiError.Unknown)
         }
+    }
+
+    /** Completes a sign-in with the second factor; nothing is stored until [commitSignIn]. */
+    suspend fun verifyTwoStep(
+        challenge: TwoStepChallenge,
+        code: String?,
+        recoveryCode: String?,
+    ): TwoStepVerified {
+        val body =
+            buildJsonObject {
+                put("challengeToken", challenge.token)
+                if (code != null) put("code", code)
+                if (recoveryCode != null) put("recoveryCode", recoveryCode)
+                put("tokenDelivery", "body")
+                put("deviceModel", Build.MODEL.take(MODEL_MAX))
+                tokenStore.deviceTokenFor(challenge.email)?.let { put("deviceToken", it) }
+            }
+        val result = call(post("auth/two-step/verify", body))
+        val tokens = result["tokens"] as? JsonObject ?: throw ApiException(ApiError.Unknown)
+        val left = (result["recoveryCodesLeft"] as? JsonPrimitive)?.intOrNull
+        return TwoStepVerified(pendingFrom(tokens), left)
+    }
+
+    /** `me.confirm` with one factor; returns when the confirmation lasts until. */
+    suspend fun confirm(
+        password: String? = null,
+        code: String? = null,
+        recoveryCode: String? = null,
+    ): Instant {
+        val body =
+            buildJsonObject {
+                if (password != null) put("password", password)
+                if (code != null) put("code", code)
+                if (recoveryCode != null) put("recoveryCode", recoveryCode)
+            }
+        return parseInstant(call(post("me/confirm", body)).str("confirmedUntil"))
+    }
+
+    private fun parseInstant(text: String): Instant =
+        try {
+            Instant.parse(text)
+        } catch (_: java.time.format.DateTimeParseException) {
+            throw ApiException(ApiError.Unknown)
+        }
+
+    private fun JsonObject.toSecret() =
+        TwoStepSecret(str("secret"), str("otpauthUri"), parseInstant(str("expiresAt")))
+
+    private suspend fun postEmpty(path: String): JsonObject = call(post(path, JsonObject(emptyMap())))
+
+    suspend fun twoStepSetup(): TwoStepSecret = postEmpty("me/two-step/setup").toSecret()
+
+    /** Turns two-step on; returns the ten recovery codes, shown once. */
+    suspend fun twoStepEnable(code: String): List<String> =
+        call(post("me/two-step/enable", buildJsonObject { put("code", code) }))["recoveryCodes"]?.strings() ?: emptyList()
+
+    suspend fun acknowledgeRecoveryCodes() {
+        postEmpty("me/two-step/acknowledge-codes")
+    }
+
+    suspend fun twoStepDisable(
+        code: String?,
+        recoveryCode: String?,
+    ) {
+        val body =
+            buildJsonObject {
+                if (code != null) put("code", code)
+                if (recoveryCode != null) put("recoveryCode", recoveryCode)
+            }
+        call(post("me/two-step/disable", body))
+    }
+
+    suspend fun regenerateRecoveryCodes(): List<String> = postEmpty("me/two-step/recovery-codes")["recoveryCodes"]?.strings() ?: emptyList()
+
+    suspend fun twoStepReplaceStart(): TwoStepSecret = postEmpty("me/two-step/replace/start").toSecret()
+
+    suspend fun twoStepReplaceConfirm(code: String) {
+        call(post("me/two-step/replace/confirm", buildJsonObject { put("code", code) }))
     }
 
     /** Stores the session, the device token and the email, once the owner check allowed it. */
