@@ -1,6 +1,6 @@
 // S-3's Android screens (identity LLD §8.2's S-3 signatures and strings, A-70, A-71): SignInScreen,
-// OutboxOwnerDialog, SignOutDialog and HomeFirstRunScreen's account menu. TP-3.57's screen rows,
-// plus TP-3.57x. Screens get fake lambdas that count their calls; a host that types into a field
+// OutboxOwnerDialog, SignOutDialog and HomeFirstRunScreen's account menu (with S-4's onSecurity,
+// A-100). TP-3.57's screen rows, plus TP-3.57x. Screens get fake lambdas that count their calls; a host that types into a field
 // keeps `form` in its own mutableStateOf (P-A-534).
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.identity.ui
@@ -245,13 +245,16 @@ class SignInSignOutScreensTest {
     @Test
     fun `TP-3_57 HomeFirstRunScreen - the Account button opens a menu whose Sign out calls onSignOut`() {
         val signOut = Counter()
-        show { HomeFirstRunScreen(me = ME, onSignOut = signOut.call) }
+        val security = Counter()
+        // S-4 (A-100): the signature gains onSecurity; SecurityScreenTest covers that item.
+        show { HomeFirstRunScreen(me = ME, onSecurity = security.call, onSignOut = signOut.call) }
 
         compose.onNodeWithText(text(R.string.menu_sign_out)).assertDoesNotExist()
         compose.onNodeWithContentDescription(text(R.string.menu_account)).assertIsDisplayed().performClick()
         compose.onNodeWithText(text(R.string.menu_sign_out)).assertIsDisplayed().performClick()
 
         assertEquals(1, signOut.calls)
+        assertEquals(0, security.calls)
     }
 
     // ---- strings (§8.2's S-3 Android strings) ----

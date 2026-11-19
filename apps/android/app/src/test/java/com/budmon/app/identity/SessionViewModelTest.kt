@@ -1,5 +1,6 @@
-// F-207 SessionViewModel (identity LLD §4.15, A-37, A-68). TP-3.49 rows (a) to (i), and S-3's
-// rows (k) to (m); row (j) is SessionNotLoadedTest. Plus extra cases TP-3.49x.
+// F-207 SessionViewModel (identity LLD §4.15, A-37, A-68, A-101). TP-3.49 rows (a) to (i), and S-3's
+// rows (k) to (m); row (j) is SessionNotLoadedTest. Plus extra cases TP-3.49x. S-4: TP-4.41 row (f),
+// onMeUpdated, plus TP-4.41x.
 //
 // Setup per TP-3.49: the real TokenStore over an in-memory key (resetAll() first; "clear()" is
 // checked as read() == null); Clock.fixed; a MockK ConnectivityMonitor over a MutableStateFlow; a real
@@ -418,5 +419,64 @@ class SessionViewModelTest {
         runCurrent()
 
         assertEquals(SessionUiState.SignedOut(SignedOutReason.None), vm.state.value)
+    }
+
+    // ---- S-4: onMeUpdated (A-101) ----
+
+    private val updated = ME.copy(twoStepEnabled = true, recoveryCodesLeft = 10, codesAcknowledged = false)
+
+    @Test
+    fun `TP-4_41 (f) onMeUpdated in SignedIn(null, Network) - SignedIn(me) with lastError null`() = runTest {
+        store.save(storedSession(now.plusSeconds(3600)))
+        script.add(fails(ApiError.Network))
+        val vm = viewModel(scripted)
+        assertEquals(SessionUiState.SignedIn(null, ApiError.Network), vm.settled())
+
+        vm.onMeUpdated(updated)
+        runCurrent()
+
+        assertEquals(SessionUiState.SignedIn(updated, lastError = null), vm.state.value)
+    }
+
+    @Test
+    fun `TP-4_41 (f) onMeUpdated in SignedOut - SignedOut unchanged`() = runTest {
+        server.start()
+        val vm = viewModel(realRepository())
+        assertEquals(SessionUiState.SignedOut(SignedOutReason.None), vm.settled())
+
+        vm.onMeUpdated(updated)
+        runCurrent()
+
+        assertEquals(SessionUiState.SignedOut(SignedOutReason.None), vm.state.value)
+    }
+
+    @Test
+    fun `TP-4_41x onMeUpdated in SignedIn(me) - SignedIn(the new me)`() = runTest {
+        server.enqueue(MockResponse().setHeader("Content-Type", "application/json").setBody(meJson()))
+        server.start()
+        store.save(storedSession(now.plusSeconds(3600)))
+        val vm = viewModel(realRepository())
+        assertEquals(SessionUiState.SignedIn(ME), vm.settled())
+
+        vm.onMeUpdated(updated)
+        runCurrent()
+
+        assertEquals(SessionUiState.SignedIn(updated), vm.state.value)
+    }
+
+    @Test
+    fun `TP-4_41x onMeUpdated in SignedIn(null, Network) - the backoff timer stops (no probe after)`() = runTest {
+        store.save(storedSession(now.plusSeconds(3600)))
+        script.add(fails(ApiError.Network))
+        val vm = viewModel(scripted)
+        assertEquals(SessionUiState.SignedIn(null, ApiError.Network), vm.settled())
+        runCurrent()
+
+        vm.onMeUpdated(updated)
+        runCurrent()
+        idleFor(10 * 60 * 1_000)
+
+        assertEquals(SessionUiState.SignedIn(updated), vm.state.value)
+        assertEquals("no probe once the state left SignedIn(null)", 1, probes)
     }
 }

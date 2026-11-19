@@ -1,5 +1,6 @@
-// F-209 TwoStepViewModel (identity LLD §8.2's S-4 signatures, A-69, A-86, A-99). TP-4.35's
-// TwoStepViewModel rows, plus TP-4.35x. The screens are ui/TwoStepScreensTest.
+// F-209 TwoStepViewModel (identity LLD §8.2's S-4 signatures, A-69, A-86, A-99, A-100). TP-4.35's
+// TwoStepViewModel rows (with A-100's normalised values, rate limit, busy and catch-all), plus
+// TP-4.35x. The screens are ui/TwoStepScreensTest.
 // Setup per TP-4.35: a MockK AuthRepository; the real OutboxOwnerGuard over a MockK OutboxDao
 // (`entries`, empty unless a test fills it), a relaxed MockK TokenStore (`owner`) and a relaxed MockK
 // OutboxRepository; Dispatchers.setMain(StandardTestDispatcher) so viewModelScope runs on virtual
@@ -11,6 +12,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import com.budmon.app.R
+import com.budmon.app.core.error.ErrorMessages
+import com.budmon.app.core.error.Operation
 import com.budmon.app.core.network.ApiError
 import com.budmon.app.core.outbox.OutboxDao
 import com.budmon.app.core.outbox.OutboxRepository
@@ -20,11 +23,13 @@ import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.serialization.json.buildJsonObject
@@ -213,17 +218,6 @@ class TwoStepViewModelTest {
     }
 
     @Test
-    fun `TP-4_35x 6 digits with a space - passes the client rule, one code request, no error`() = runTest {
-        coEvery { repository.verifyTwoStep(challenge, any(), null) } returns TwoStepVerified(pending, null)
-        val vm = viewModel()
-
-        send(vm, "123 456")
-
-        coVerify(exactly = 1) { repository.verifyTwoStep(challenge, any(), null) }
-        assertNull(vm.form.error)
-    }
-
-    @Test
     fun `TP-4_35x a recovery code with a 9 - error twostep_recovery_invalid, no request (A-99)`() = runTest {
         val vm = viewModel()
         vm.toggleRecovery()
@@ -246,16 +240,95 @@ class TwoStepViewModelTest {
     }
 
     @Test
-    fun `TP-4_35x a recovery code with dashes - passes the client rule, one recovery request, no error`() = runTest {
-        coEvery { repository.verifyTwoStep(challenge, null, any()) } returns TwoStepVerified(pending, 9)
+    fun `TP-4_35x 7KQ2-M3XD-4TRA - verifyTwoStep(challenge, null, 7KQ2M3XD4TRA), no error (A-100)`() = runTest {
+        coEvery { repository.verifyTwoStep(challenge, null, "7KQ2M3XD4TRA") } returns TwoStepVerified(pending, 9)
         val vm = viewModel()
         vm.toggleRecovery()
 
         send(vm, "7KQ2-M3XD-4TRA")
 
-        coVerify(exactly = 1) { repository.verifyTwoStep(challenge, null, any()) }
+        coVerify(exactly = 1) { repository.verifyTwoStep(challenge, null, "7KQ2M3XD4TRA") }
         assertNull(vm.form.error)
     }
+
+    // ---- TP-4.35, A-100: normalised values, rate limit, busy, catch-all ----
+
+    @Test
+    fun `TP-4_35 123 456 - sent as verifyTwoStep(challenge, 123456, null) (A-100)`() = runTest {
+        coEvery { repository.verifyTwoStep(challenge, "123456", null) } returns TwoStepVerified(pending, null)
+        val vm = viewModel()
+
+        send(vm, "123 456")
+
+        coVerify(exactly = 1) { repository.verifyTwoStep(challenge, "123456", null) }
+        coVerify(exactly = 1) { repository.verifyTwoStep(any(), any(), any()) }
+        assertNull(vm.form.error)
+        assertEquals(listOf("commit", "save $EMAIL $PASSWORD", "signedIn ${ME.id}"), log)
+    }
+
+    @Test
+    fun `TP-4_35 7kq2-m3xd 4tra - sent as verifyTwoStep(challenge, null, 7KQ2M3XD4TRA) (A-100)`() = runTest {
+        coEvery { repository.verifyTwoStep(challenge, null, "7KQ2M3XD4TRA") } returns TwoStepVerified(pending, 9)
+        val vm = viewModel()
+        vm.toggleRecovery()
+
+        send(vm, "7kq2-m3xd 4tra")
+
+        coVerify(exactly = 1) { repository.verifyTwoStep(challenge, null, "7KQ2M3XD4TRA") }
+        coVerify(exactly = 1) { repository.verifyTwoStep(any(), any(), any()) }
+        assertNull(vm.form.error)
+    }
+
+    @Test
+    fun `TP-4_35 RATE_LIMITED on a code - formError the platform's rate-limit text, showRecoveryHint true, busy false (A-100)`() =
+        runTest {
+            val limited = ApiError.Defined("RATE_LIMITED", 429, buildJsonObject { put("retryAfterSeconds", 120) })
+            coEvery { repository.verifyTwoStep(challenge, "111111", null) } throws ApiException(limited)
+            val vm = viewModel()
+            assertFalse("no hint before", vm.form.showRecoveryHint)
+
+            send(vm, "111111")
+
+            assertEquals(ErrorMessages.forError(limited, Operation.Read), vm.form.formError)
+            assertTrue(vm.form.showRecoveryHint)
+            assertEquals(false, vm.form.busy)
+            assertEquals(emptyList<String>(), log)
+            assertEquals(emptyList<TwoStepEndReason>(), ended)
+        }
+
+    @Test
+    fun `TP-4_35 a second submit while busy - one verifyTwoStep call (A-100)`() = runTest {
+        coEvery { repository.verifyTwoStep(challenge, "123456", null) } coAnswers {
+            delay(1_000)
+            TwoStepVerified(pending, null)
+        }
+        val vm = viewModel()
+        vm.onValueChange("123456")
+        vm.submit(savePassword, onSignedIn, onEnded)
+        runCurrent()
+        assertTrue("busy while the request runs", vm.form.busy)
+
+        vm.submit(savePassword, onSignedIn, onEnded)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { repository.verifyTwoStep(any(), any(), any()) }
+        assertEquals(listOf("commit", "save $EMAIL $PASSWORD", "signedIn ${ME.id}"), log)
+    }
+
+    @Test
+    fun `TP-4_35 verifyTwoStep throwing IllegalStateException - formError ApiError Unknown's text, busy false (A-86, A-100)`() =
+        runTest {
+            coEvery { repository.verifyTwoStep(challenge, "123456", null) } throws IllegalStateException("unexpected")
+            val vm = viewModel()
+
+            send(vm, "123456")
+
+            // Operation.Read, as SignInViewModel's catch-all (A-86): this is the sign-in's second step.
+            assertEquals(IdentityErrorMessages.forError(ApiError.Unknown, Operation.Read), vm.form.formError)
+            assertEquals(false, vm.form.busy)
+            assertEquals(emptyList<String>(), log)
+            assertEquals(emptyList<TwoStepEndReason>(), ended)
+        }
 
     // ---- additions: start, savePassword, the owner dialog (A-69, A-86) ----
 

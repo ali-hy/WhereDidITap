@@ -1,8 +1,8 @@
-// F-215 TwoStepSetupRoute (identity LLD §8.2's S-4 signatures, A-99). TP-4.34, plus TP-4.34x.
+// F-215 TwoStepSetupRoute (identity LLD §8.2's S-4 signatures, A-99, A-100). TP-4.34, plus TP-4.34x.
 // The route runs a real TwoStepSetupViewModel over a MockK AuthRepository and the real
-// ConfirmationCoordinator. It is rendered directly: F-214's entry point (the Security screen) isn't
-// built before S-8/S-10. The test calls viewModel.start(false) itself, as the LLD doesn't say whether
-// the route starts it.
+// ConfirmationCoordinator. It is rendered directly: SecurityScreen's Turn on only navigates to
+// settings/two_step?mode=setup (A-100, no navigation seam), and that route starts the view model
+// itself ("asks for the step-up on start", §8.2), so the tests never call start().
 // "No handler" is Robolectric's checkActivities(true): startActivity then throws
 // ActivityNotFoundException for an intent nothing resolves.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
@@ -15,22 +15,27 @@ import android.net.Uri
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.budmon.app.R
 import com.budmon.app.identity.AuthRepository
 import com.budmon.app.identity.ConfirmationCoordinator
+import com.budmon.app.identity.SetupStep
 import com.budmon.app.identity.TwoStepSecret
 import com.budmon.app.identity.TwoStepSetupViewModel
 import com.budmon.app.ui.theme.AppTheme
 import com.budmon.app.ui.theme.ThemeSetting
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -55,25 +60,44 @@ class TwoStepSetupRouteTest {
         otpauthUri = otpauth,
         expiresAt = Instant.parse("2026-11-15T10:10:00Z"),
     )
-    private val repository = mockk<AuthRepository> { coEvery { twoStepSetup() } returns secret }
+    private val repository = mockk<AuthRepository> {
+        coEvery { twoStepSetup() } returns secret
+        coEvery { twoStepReplaceStart() } returns secret
+    }
 
     private fun secureFlagSet(): Boolean =
         compose.activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0
 
-    /** Shows the route for setup (not replace), with the secret loaded, while [shown] is true. */
-    private fun showSetup(shown: androidx.compose.runtime.MutableState<Boolean> = mutableStateOf(true)) {
+    /** Shows the route (setup unless [replace]) while [shown] is true, and waits for the secret. */
+    private fun showSetup(
+        shown: androidx.compose.runtime.MutableState<Boolean> = mutableStateOf(true),
+        replace: Boolean = false,
+    ) {
         val vm = TwoStepSetupViewModel(repository, ConfirmationCoordinator(repository))
-        compose.runOnUiThread { vm.start(false) }
         compose.setContent {
             AppTheme(ThemeSetting.LIGHT) {
-                if (shown.value) TwoStepSetupRoute(viewModel = vm, replace = false, onDone = {})
+                if (shown.value) TwoStepSetupRoute(viewModel = vm, replace = replace, onDone = {})
             }
+        }
+        compose.waitUntil(5_000) {
+            compose.waitForIdle()
+            vm.state.step == SetupStep.Scan
         }
         compose.waitUntilAtLeastOneExists(hasText(text(R.string.twostep_open_app)) and hasClickAction(), timeoutMillis = 5_000)
     }
 
+    /** Scrolls the node into view when its screen scrolls (a tap lands only inside the window). */
+    private fun SemanticsNodeInteraction.inView(): SemanticsNodeInteraction {
+        var parent = fetchSemanticsNode().parent
+        while (parent != null) {
+            if (parent.config.contains(SemanticsActions.ScrollBy)) return performScrollTo()
+            parent = parent.parent
+        }
+        return this
+    }
+
     private fun openInApp() =
-        compose.onNode(hasText(text(R.string.twostep_open_app)) and hasClickAction()).performClick()
+        compose.onNode(hasText(text(R.string.twostep_open_app)) and hasClickAction()).inView().performClick()
 
     @Test
     fun `TP-4_34 setup with no authenticator app - FLAG_SECURE on the window, Open in authenticator app shows twostep_no_app`() {
@@ -110,5 +134,21 @@ class TwoStepSetupRouteTest {
         compose.waitForIdle()
 
         assertEquals(false, secureFlagSet())
+    }
+
+    @Test
+    fun `TP-4_34x the route for setup starts itself - twoStepSetup once, never twoStepReplaceStart`() {
+        showSetup()
+
+        coVerify(exactly = 1) { repository.twoStepSetup() }
+        coVerify(exactly = 0) { repository.twoStepReplaceStart() }
+    }
+
+    @Test
+    fun `TP-4_34x the route for replace starts itself - twoStepReplaceStart once, never twoStepSetup`() {
+        showSetup(replace = true)
+
+        coVerify(exactly = 1) { repository.twoStepReplaceStart() }
+        coVerify(exactly = 0) { repository.twoStepSetup() }
     }
 }

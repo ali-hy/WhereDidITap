@@ -1,9 +1,10 @@
-// S-4's Android screens (identity LLD §8.2's S-4 signatures and strings, A-99): TwoStepScreen and
-// TwoStepRoute (F-209), ConfirmItsYouSheet (F-216). TP-4.35's screen rows, plus TP-4.35x.
+// S-4's Android screens (identity LLD §8.2's S-4 signatures and strings, A-99, A-100): TwoStepScreen
+// and TwoStepRoute (F-209), ConfirmItsYouSheet and ConfirmItsYouHost (F-216). TP-4.35's screen rows,
+// plus TP-4.35x. ConfirmItsYouHost runs the real ConfirmationCoordinator, with withConfirmation
+// launched on the main thread.
 // Screens are rendered by hosts that keep `form` in a mutableStateOf updated by the lambdas
 // (P-A-534). TwoStepRoute runs a real TwoStepViewModel over a MockK AuthRepository and the real
 // OutboxOwnerGuard (MockK DAO, empty outbox), as TP-4.35 says.
-// Texts marked "pending owner" in §8.1/§8.2 (A-99) are tested as written there.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.identity.ui
 
@@ -20,6 +21,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.ViewRootForTest
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.test.SemanticsMatcher
@@ -35,6 +37,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -46,6 +49,7 @@ import com.budmon.app.identity.ApiException
 import com.budmon.app.identity.AuthRepository
 import com.budmon.app.identity.ConfirmFactor
 import com.budmon.app.identity.ConfirmFormState
+import com.budmon.app.identity.ConfirmationCoordinator
 import com.budmon.app.identity.OutboxOwnerGuard
 import com.budmon.app.identity.TwoStepChallenge
 import com.budmon.app.identity.TwoStepFormState
@@ -55,13 +59,20 @@ import com.budmon.app.ui.theme.ThemeSetting
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(AndroidJUnit4::class)
 class TwoStepScreensTest {
@@ -86,8 +97,21 @@ class TwoStepScreensTest {
         compose.setContent { AppTheme(ThemeSetting.LIGHT) { content() } }
     }
 
-    private fun twoStepForm(useRecovery: Boolean = false, value: String = "", error: Int? = null, formError: UiText? = null) =
-        TwoStepFormState(useRecovery = useRecovery, value = value, error = error, formError = formError, busy = false, ownerDialog = null)
+    private fun twoStepForm(
+        useRecovery: Boolean = false,
+        value: String = "",
+        error: Int? = null,
+        formError: UiText? = null,
+        showRecoveryHint: Boolean = false,
+    ) = TwoStepFormState(
+        useRecovery = useRecovery,
+        value = value,
+        error = error,
+        formError = formError,
+        busy = false,
+        ownerDialog = null,
+        showRecoveryHint = showRecoveryHint,
+    )
 
     private fun confirmForm(useRecovery: Boolean = false, value: String = "", error: Int? = null) =
         ConfirmFormState(useRecovery = useRecovery, value = value, error = error, formError = null, busy = false)
@@ -98,8 +122,18 @@ class TwoStepScreensTest {
 
     private val emptyText = SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString(""))
 
+    /** Scrolls the node into view when its screen scrolls (a tap lands only inside the window). */
+    private fun SemanticsNodeInteraction.inView(): SemanticsNodeInteraction {
+        var parent = fetchSemanticsNode().parent
+        while (parent != null) {
+            if (parent.config.contains(SemanticsActions.ScrollBy)) return performScrollTo()
+            parent = parent.parent
+        }
+        return this
+    }
+
     private fun button(labelId: Int): SemanticsNodeInteraction =
-        compose.onNode(hasText(text(labelId)) and hasClickAction())
+        compose.onNode(hasText(text(labelId)) and hasClickAction()).inView()
 
     // ---- TwoStepScreen (F-209) ----
 
@@ -188,6 +222,23 @@ class TwoStepScreensTest {
         showTwoStep(mutableStateOf(twoStepForm(formError = UiText(R.string.twostep_timeout))))
 
         compose.onNodeWithText(text(R.string.twostep_timeout)).assertExists()
+    }
+
+    @Test
+    fun `TP-4_35x TwoStepScreen rate-limited - formError, then twostep_limit_recovery as a second line below it (A-100)`() {
+        val limited = UiText(R.plurals.error_rate_limited, listOf(2), quantity = 2)
+        showTwoStep(mutableStateOf(twoStepForm(formError = limited, showRecoveryHint = true)))
+
+        val first = compose.onNodeWithText(context.resources.getQuantityString(R.plurals.error_rate_limited, 2, 2)).fetchSemanticsNode()
+        val second = compose.onNodeWithText(text(R.string.twostep_limit_recovery)).fetchSemanticsNode()
+        assertTrue("the hint is below the rate-limit text", second.boundsInRoot.top >= first.boundsInRoot.bottom)
+    }
+
+    @Test
+    fun `TP-4_35x TwoStepScreen without showRecoveryHint - no twostep_limit_recovery`() {
+        showTwoStep(mutableStateOf(twoStepForm(formError = UiText(R.string.twostep_timeout))))
+
+        compose.onNodeWithText(text(R.string.twostep_limit_recovery)).assertDoesNotExist()
     }
 
     // ---- TwoStepRoute (F-209) with the real view model ----
@@ -313,6 +364,54 @@ class TwoStepScreensTest {
         assertEquals(0, submit.calls)
     }
 
+    // ---- ConfirmItsYouHost (F-216) with the real coordinator ----
+
+    @Test
+    fun `TP-4_35 ConfirmItsYouHost - no sheet without a request, the sheet while request is non-null, Back cancels (withConfirmation returns null)`() {
+        val coordinator = ConfirmationCoordinator(mockk<AuthRepository>())
+        val calls = AtomicInteger(0)
+        var outcome: Result<String?>? = null
+        val scope = CoroutineScope(Dispatchers.Main.immediate)
+        show { ConfirmItsYouHost(coordinator) }
+        compose.onNodeWithText(text(R.string.confirm_title)).assertDoesNotExist()
+
+        compose.runOnUiThread {
+            scope.launch {
+                outcome = runCatching {
+                    coordinator.withConfirmation<String> {
+                        calls.incrementAndGet()
+                        throw ApiException(ApiError.Defined("CONFIRMATION_REQUIRED", 403, buildJsonObject { put("factor", "two_step") }))
+                    }
+                }
+            }
+        }
+        compose.waitUntil(5_000) {
+            compose.waitForIdle()
+            coordinator.request.value != null
+        }
+        compose.onNodeWithText(text(R.string.confirm_title)).assertIsDisplayed()
+        field(R.string.twostep_code).assertExists()
+
+        // Back goes to the sheet's window, as a real key press does.
+        val sheetRoot =
+            (compose.onNodeWithText(text(R.string.confirm_title)).fetchSemanticsNode().root as ViewRootForTest).view.rootView
+        compose.runOnUiThread {
+            sheetRoot.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK))
+            sheetRoot.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK))
+        }
+        compose.waitUntil(5_000) {
+            compose.waitForIdle()
+            outcome != null
+        }
+
+        assertNull(outcome!!.getOrThrow())
+        assertEquals("run() not called again", 1, calls.get())
+        assertNull(coordinator.request.value)
+        compose.waitForIdle()
+        compose.onNodeWithText(text(R.string.confirm_title)).assertDoesNotExist()
+        scope.cancel()
+    }
+
     // ---- strings (§8.1's texts, snake case per §8.2's S-4 block, A-99) ----
 
     @Test
@@ -327,19 +426,19 @@ class TwoStepScreensTest {
             R.string.twostep_verify to "Verify",
             R.string.twostep_back to "Back to sign in",
             R.string.twostep_code_invalid to "Enter the 6 digits from your app.",
-            // A-99: proposed, pending owner.
+            // A-99, confirmed by the owner 2026-11-20.
             R.string.twostep_recovery_invalid to "Enter a code like 7KQ2-M3XD-4TRA.",
             R.string.twostep_code_wrong to "That code didn't work. Check your app and try again.",
             R.string.twostep_too_many to "Too many attempts. Sign in again.",
             R.string.twostep_timeout to "This sign-in timed out. Sign in again.",
             R.string.twostep_limit_recovery to "You can still use a recovery code.",
             R.string.confirm_title to "Confirm it's you",
-            // A-99: proposed, pending owner (HLD J-15).
+            // A-99 (HLD J-15), confirmed by the owner 2026-11-20.
             R.string.confirm_submit to "Confirm",
             R.string.confirm_cancel to "Cancel",
             R.string.confirm_password to "Password",
             R.string.twostep_no_app to "No authenticator app found. Enter the key in your app instead.",
-            // A-99: proposed, pending owner (HLD J-7).
+            // A-99 (HLD J-7), confirmed by the owner 2026-11-20.
             R.string.twostep_open_app to "Open in authenticator app",
         )
         for ((id, value) in expected) assertEquals(value, text(id))

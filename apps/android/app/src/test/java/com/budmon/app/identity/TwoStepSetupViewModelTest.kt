@@ -114,7 +114,8 @@ class TwoStepSetupViewModelTest {
             vm.start(false)
             advanceUntilIdle()
             assertEquals(ConfirmFactor.Password, coordinator.request.value)
-            coordinator.submit(password = "violet staircase umbrella")
+            coordinator.onValueChange("violet staircase umbrella")
+            coordinator.submit()
             settle("step Scan") { vm.state.step == SetupStep.Scan }
 
             coVerify(exactly = 1) { repository.confirm("violet staircase umbrella", null, null) }
