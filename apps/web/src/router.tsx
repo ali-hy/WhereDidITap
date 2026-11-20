@@ -75,6 +75,34 @@ function RootLayout(): JSX.Element {
   );
 }
 
+const HEADING_WAIT_MS = 2000;
+
+/**
+ * A-542: focuses and announces the first `main h1` that differs from the one shown before the
+ * navigation. Checks on the next task, then each animation frame; after 2 s takes any `main h1`.
+ */
+function focusNewHeading(previous: Element | null): void {
+  const started = performance.now();
+  const attempt = (final: boolean): boolean => {
+    const h1 = document.querySelector<HTMLElement>("main h1");
+    if (h1 === null || (h1 === previous && !final)) return false;
+    h1.focus();
+    announce(h1.textContent);
+    return true;
+  };
+  const frame = (): void => {
+    if (attempt(false)) return;
+    if (performance.now() - started >= HEADING_WAIT_MS) {
+      attempt(true);
+      return;
+    }
+    requestAnimationFrame(frame);
+  };
+  setTimeout(() => {
+    if (!attempt(false)) requestAnimationFrame(frame);
+  }, 0);
+}
+
 export async function createAppRouter(opts: { session: SessionStore }) {
   // A-397: whether the last Try again failed. It lives here, above the error component, which the
   // router remounts after invalidate(); cleared on success and on a pathname change.
@@ -128,6 +156,8 @@ export async function createAppRouter(opts: { session: SessionStore }) {
   const securityRoute = createRoute({
     getParentRoute: () => settingsRoute,
     path: "/security",
+    validateSearch: (search: Record<string, unknown>): { newCodes?: 1 } =>
+      search.newCodes === 1 || search.newCodes === "1" ? { newCodes: 1 } : {},
     component: SecurityPage,
   });
   const twoStepSetupRoute = createRoute({
@@ -210,6 +240,10 @@ export async function createAppRouter(opts: { session: SessionStore }) {
   // A-333, A-402: after a client-side navigation to another pathname (never the first load, and
   // never for search, hash or invalidate()), focus the new page's h1 and announce its text.
   let pathname: string | undefined;
+  let headingBefore: Element | null = null;
+  router.subscribe("onBeforeNavigate", () => {
+    headingBefore = document.querySelector("main h1");
+  });
   router.subscribe("onResolved", (event) => {
     setRouterBooted(true);
     const next = event.toLocation.pathname;
@@ -217,12 +251,7 @@ export async function createAppRouter(opts: { session: SessionStore }) {
     pathname = next;
     if (previous === undefined || previous === next) return;
     setRetryFailed(false);
-    setTimeout(() => {
-      const h1 = document.querySelector<HTMLElement>("main h1");
-      if (h1 === null) return;
-      h1.focus();
-      announce(h1.textContent);
-    }, 0);
+    focusNewHeading(headingBefore);
   });
   return router;
 }

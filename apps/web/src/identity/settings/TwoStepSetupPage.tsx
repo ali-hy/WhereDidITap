@@ -20,6 +20,7 @@ import { identityMessages as m } from "../messages.js";
 interface SetupInfo {
   secret: string;
   otpauthUri: string;
+  expiresAt?: string;
 }
 
 type Phase =
@@ -80,6 +81,16 @@ export function TwoStepSetupPage(): JSX.Element {
 
   const confirm = async (value: TwoStepValue): Promise<TwoStepResult> => {
     const code = value.code ?? "";
+    // A setup that has already run out goes straight to "timed out", without a request.
+    const current = phase();
+    if (
+      current.kind === "scan" &&
+      current.info.expiresAt !== undefined &&
+      Date.now() >= Date.parse(current.info.expiresAt)
+    ) {
+      setPhase({ kind: "expired" });
+      return;
+    }
     setBusy(true);
     setSummary([]);
     try {
@@ -206,7 +217,17 @@ export function TwoStepSetupPage(): JSX.Element {
           </Match>
           <Match when={phase().kind === "codes"}>
             <p class="text-fg-muted">{step(2)}</p>
-            <h2 class="text-lg font-semibold text-fg">{t(m.twostepCodesTitle)}</h2>
+            <h2
+              tabindex="-1"
+              class="text-lg font-semibold text-fg"
+              ref={(el) => {
+                setTimeout(() => {
+                  el.focus();
+                }, 0);
+              }}
+            >
+              {t(m.twostepCodesTitle)}
+            </h2>
             <RecoveryCodesView
               codes={(phase() as { codes: readonly string[] }).codes}
               busy={busy()}

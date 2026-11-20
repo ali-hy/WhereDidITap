@@ -4,8 +4,8 @@
 import * as AlertDialog from "@kobalte/core/alert-dialog";
 import * as Dialog from "@kobalte/core/dialog";
 import { createQuery } from "@tanstack/solid-query";
-import { useNavigate } from "@tanstack/solid-router";
-import { createSignal, Match, Show, Switch, type JSX } from "solid-js";
+import { useNavigate, useSearch } from "@tanstack/solid-router";
+import { createSignal, Match, onMount, Show, Switch, type JSX } from "solid-js";
 import { useApi } from "../../api/ApiProvider.js";
 import { toAppError } from "../../api/errors.js";
 import { messages } from "../../i18n/messages.js";
@@ -28,6 +28,7 @@ export function TwoStepSection(): JSX.Element {
   const { t } = useI18n();
   const api = useApi();
   const navigate = useNavigate();
+  const search: () => { newCodes?: unknown } = useSearch({ strict: false });
   const status = createQuery(() => ({
     queryKey: ["security", "two-step"],
     queryFn: async () => (await api.me.get()).twoStep,
@@ -40,6 +41,16 @@ export function TwoStepSection(): JSX.Element {
   const [codesBusy, setCodesBusy] = createSignal(false);
   const [codesError, setCodesError] = createSignal<{ text: string }[]>([]);
   const [newCodesBusy, setNewCodesBusy] = createSignal(false);
+  // The button that opened a dialog; focus returns to it, or to the section's title if it's gone.
+  let opener: EventTarget | null = null;
+  const restoreFocus = (e: Event): void => {
+    e.preventDefault();
+    const target =
+      opener instanceof HTMLElement && opener.isConnected
+        ? opener
+        : document.getElementById("security-two-step-title");
+    target?.focus();
+  };
 
   const fail = (e: unknown): void => {
     const { descriptor, values } = identityErrorMessage(toAppError(e), "mutation");
@@ -50,9 +61,9 @@ export function TwoStepSection(): JSX.Element {
     setOffBusy(true);
     try {
       await api.me.twoStepDisable(value);
-      setOffOpen(false);
       showToast({ tone: "success", message: t(m.twostepOffDone) });
       await status.refetch();
+      setOffOpen(false);
     } catch (e) {
       const app = toAppError(e);
       if (app.kind === "defined" && app.key === "TWO_STEP_CODE_INVALID") {
@@ -89,6 +100,12 @@ export function TwoStepSection(): JSX.Element {
     }
   };
 
+  // Arriving with ?newCodes=1 (the sign-in prompt's action) creates the codes once.
+  onMount(() => {
+    if (search().newCodes !== 1) return;
+    void createNew().then(() => navigate({ to: "/settings/security", replace: true }));
+  });
+
   const codesDone = async (): Promise<void> => {
     setCodesBusy(true);
     setCodesError([]);
@@ -110,7 +127,7 @@ export function TwoStepSection(): JSX.Element {
       aria-labelledby="security-two-step-title"
       aria-busy={status.isPending ? "true" : undefined}
     >
-      <h2 id="security-two-step-title" class="text-lg font-semibold text-fg">
+      <h2 id="security-two-step-title" tabindex="-1" class="text-lg font-semibold text-fg">
         {t(m.twostepTitle)}
       </h2>
       <Switch>
@@ -140,6 +157,11 @@ export function TwoStepSection(): JSX.Element {
                   {t(data().enabled ? m.twostepStatusOn : m.twostepStatusOff)}
                 </span>
               </p>
+              <Show when={data().enabled}>
+                <p class="text-fg-muted">
+                  {t(m.twostepCodesLeft, { n: data().recoveryCodesLeft })}
+                </p>
+              </Show>
               <Show when={data().enabled && !data().codesAcknowledged}>
                 <p class="flex items-center gap-2 text-fg">
                   <Icon name="alert" class="size-5 shrink-0 text-warning" />
@@ -160,7 +182,8 @@ export function TwoStepSection(): JSX.Element {
                 >
                   <Button
                     variant="secondary"
-                    onClick={() => {
+                    onClick={(e) => {
+                      opener = e.currentTarget;
                       setOffOpen(true);
                     }}
                   >
@@ -180,7 +203,10 @@ export function TwoStepSection(): JSX.Element {
                   <Button
                     variant="secondary"
                     busy={newCodesBusy()}
-                    onClick={() => void createNew()}
+                    onClick={(e) => {
+                      opener = e.currentTarget;
+                      void createNew();
+                    }}
                   >
                     {t(m.twostepCreateNew)}
                   </Button>
@@ -202,7 +228,7 @@ export function TwoStepSection(): JSX.Element {
         <AlertDialog.Portal>
           <AlertDialog.Overlay class={OVERLAY} />
           <div class="fixed inset-0 z-10 flex items-center justify-center p-4">
-            <AlertDialog.Content class={CONTENT}>
+            <AlertDialog.Content class={CONTENT} onCloseAutoFocus={restoreFocus}>
               <div class="flex flex-col gap-4">
                 <AlertDialog.Title class="text-2xl font-semibold text-fg">
                   {t(m.twostepTitle)}
@@ -247,7 +273,10 @@ export function TwoStepSection(): JSX.Element {
         <Dialog.Portal>
           <Dialog.Overlay class={OVERLAY} />
           <div class="fixed inset-0 z-10 flex items-center justify-center p-4">
-            <Dialog.Content class={`${CONTENT} max-h-full overflow-y-auto`}>
+            <Dialog.Content
+              class={`${CONTENT} max-h-full overflow-y-auto`}
+              onCloseAutoFocus={restoreFocus}
+            >
               <Dialog.Title class="mb-4 text-2xl font-semibold text-fg">
                 {t(m.twostepCodesTitle)}
               </Dialog.Title>

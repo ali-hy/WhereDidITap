@@ -31,6 +31,7 @@ export function TwoStepPage(): JSX.Element {
   const gate = createRateLimitGate();
   const [busy, setBusy] = createSignal(false);
   const [limitedCode, setLimitedCode] = createSignal(false);
+  const [recoveryMode, setRecoveryMode] = createSignal(false);
   const [summary, setSummary] = createSignal<{ text: string }[]>([]);
 
   createEffect(() => {
@@ -62,13 +63,26 @@ export function TwoStepPage(): JSX.Element {
       const result = await api.auth.verifyTwoStep({ ...value, tokenDelivery: "cookie" });
       if (result.status !== "signed_in") return;
       await session.markSignedIn();
-      if (value.recoveryCode !== undefined && typeof result.recoveryCodesLeft === "number") {
+      await navigate({ href: next() });
+      const left = result.recoveryCodesLeft;
+      if (typeof left === "number") {
+        // J-5: with 3 or fewer left the toast stays, with an action to create new codes.
+        const low = left <= 3;
         showToast({
           tone: "info",
-          message: t(m.twostepRecoveryLeft, { n: result.recoveryCodesLeft }),
+          message: t(m.twostepRecoveryLeft, { n: left }),
+          ...(low
+            ? {
+                persistent: true,
+                action: {
+                  label: t(m.twostepCreateNew),
+                  onClick: () =>
+                    void navigate({ to: "/settings/security", search: { newCodes: 1 } }),
+                },
+              }
+            : {}),
         });
       }
-      await navigate({ href: next() });
     } catch (err) {
       const error = toAppError(err);
       if (error.kind === "defined" && error.key === "TWO_STEP_CODE_INVALID") {
@@ -106,11 +120,13 @@ export function TwoStepPage(): JSX.Element {
         </h1>
         <p class="text-fg">{t(m.twostepPrompt)}</p>
         <FormErrorSummary messages={summary()} />
-        <RateLimitNotice secondsLeft={gate.blockedFor()} />
-        <Show when={gate.blockedFor() > 0 && limitedCode()}>
-          <p class="text-fg">{t(m.twostepLimitRecovery)}</p>
+        <Show when={!recoveryMode()}>
+          <RateLimitNotice secondsLeft={gate.blockedFor()} />
+          <Show when={gate.blockedFor() > 0 && limitedCode()}>
+            <p class="text-fg">{t(m.twostepLimitRecovery)}</p>
+          </Show>
         </Show>
-        <TwoStepForm onSubmit={submit} allowRecovery busy={busy()} />
+        <TwoStepForm onSubmit={submit} allowRecovery busy={busy()} onModeChange={setRecoveryMode} />
         <details>
           <summary class="cursor-pointer text-accent-fg">{t(m.twostepLostHelp)}</summary>
           <p class="mt-2 text-fg-muted">{t(m.twostepLostHelpBody)}</p>

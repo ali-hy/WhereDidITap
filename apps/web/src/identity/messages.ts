@@ -446,6 +446,10 @@ export const identityMessages = defineMessages({
     id: "confirm.cancel",
     defaultMessage: "Cancel",
   },
+  confirmCode: {
+    id: "confirm.code",
+    defaultMessage: "Code from your authenticator app",
+  },
   confirmPassword: {
     id: "confirm.password",
     defaultMessage: "Password",
@@ -518,6 +522,10 @@ export const identityMessages = defineMessages({
     id: "twostep.recoveryLeft",
     defaultMessage:
       "{n, plural, one {You used a recovery code. # code left.} other {You used a recovery code. # codes left.}}",
+  },
+  twostepCodesLeft: {
+    id: "twostep.codesLeft",
+    defaultMessage: "{n, plural, one {# recovery code left} other {# recovery codes left}}",
   },
   twostepCreateNew: {
     id: "twostep.createNew",

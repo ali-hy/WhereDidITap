@@ -135,6 +135,7 @@ export function showToast(t: ToastOptions): string {
         toastId={props.toastId}
         priority={t.tone === "error" ? "high" : "low"}
         persistent
+        role="listitem"
         aria-live="off"
         data-tone={t.tone}
         class={`flex [max-inline-size:min(24rem,calc(100vw-2rem))] items-center gap-3 rounded-control rounded-s-none border border-s-4 border-line bg-surface-raised p-3 text-fg shadow-overlay ${tone.border}`}

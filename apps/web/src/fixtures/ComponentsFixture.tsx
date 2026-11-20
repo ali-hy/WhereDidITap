@@ -10,6 +10,7 @@ import { SignedOutColumn } from "../ui/SignedOutColumn.js";
 import { Skeleton } from "../ui/Skeleton.js";
 import { TextField } from "../ui/TextField.js";
 import { Wordmark } from "../ui/Wordmark.js";
+import { showToast } from "../ui/Toaster.js";
 import { useFixtureTitle } from "./title.js";
 
 const OPTIONS: ComboboxOption[] = [
@@ -147,6 +148,19 @@ export function ComponentsFixture(): JSX.Element {
         <p class="text-fg">
           An <a href="/">inline link</a> in a sentence.
         </p>
+        <a href="/__fixtures/slow-heading">Slow heading</a>
+      </Section>
+      <Section name="Toast">
+        <Button
+          variant="secondary"
+          onClick={() => {
+            showToast({ tone: "info", message: "Info toast", persistent: true });
+            showToast({ tone: "success", message: "Success toast", persistent: true });
+            showToast({ tone: "error", message: "Error toast", persistent: true });
+          }}
+        >
+          Show toasts
+        </Button>
       </Section>
       <Section name="SignedOutColumn">
         <SignedOutColumn>

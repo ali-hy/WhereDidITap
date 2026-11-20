@@ -26,6 +26,10 @@ export interface TwoStepFormProps {
   actions?: JSX.Element;
   /** Focus the field on mount. */
   autofocus?: boolean;
+  /** The code field's label; `twostep.code` by default. */
+  codeLabel?: MessageDescriptor;
+  /** Called when the person switches between the code and the recovery code. */
+  onModeChange?: (recovery: boolean) => void;
 }
 
 const FIELD_ID = "twostep-code";
@@ -56,6 +60,7 @@ export function TwoStepForm(props: TwoStepFormProps): JSX.Element {
 
   const switchTo = (toRecovery: boolean): void => {
     setRecovery(toRecovery);
+    props.onModeChange?.(toRecovery);
     setValue("");
     setError(undefined);
     queueMicrotask(focusField);
@@ -84,7 +89,7 @@ export function TwoStepForm(props: TwoStepFormProps): JSX.Element {
     <form class="flex flex-col gap-4" noValidate onSubmit={(e) => void submit(e)}>
       <CodeField
         id={FIELD_ID}
-        label={t(recovery() ? m.twostepRecovery : m.twostepCode)}
+        label={t(recovery() ? m.twostepRecovery : (props.codeLabel ?? m.twostepCode))}
         kind={recovery() ? "text" : "numeric"}
         value={value()}
         readonly={props.busy}

@@ -1,6 +1,7 @@
 {
   "app.documentTitle": "{page} – {appName}",
   "confirm.cancel": "Cancel",
+  "confirm.code": "Code from your authenticator app",
   "confirm.password": "Password",
   "confirm.submit": "Confirm",
   "confirm.title": "Confirm it's you",
@@ -140,6 +141,7 @@
   "twostep.codes.download": "Download",
   "twostep.codes.title": "Save your recovery codes",
   "twostep.codes.unsaved": "You may not have saved your recovery codes.",
+  "twostep.codesLeft": "{n, plural, one {# recovery code left} other {# recovery codes left}}",
   "twostep.copied": "Copied.",
   "twostep.createNew": "Create new codes",
   "twostep.limitRecovery": "You can still use a recovery code.",

@@ -20,8 +20,12 @@ const [pending, setPending] = createSignal<Pending | null>(null);
 /** The dialog that is open now, as a promise of whether the person confirmed. */
 let open: Promise<boolean> | null = null;
 
+/** What had focus when the dialog opened; it gets focus back on close. */
+let opener: Element | null = null;
+
 /** Opens the dialog, or joins the one already open; resolves with whether the person confirmed. */
 function ask(factor: Factor): Promise<boolean> {
+  if (open === null) opener = document.activeElement;
   open ??= new Promise<boolean>((resolve) => {
     setPending({
       factor,
@@ -138,7 +142,17 @@ export function ConfirmItsYouDialog(): JSX.Element {
       <Dialog.Portal>
         <Dialog.Overlay class="fixed inset-0 bg-fg/40" />
         <div class="fixed inset-0 z-10 flex items-center justify-center p-4">
-          <Dialog.Content class="w-full max-w-[26.25rem] rounded-card border border-line bg-surface-raised p-6 shadow-overlay">
+          <Dialog.Content
+            class="w-full max-w-[26.25rem] rounded-card border border-line bg-surface-raised p-6 shadow-overlay"
+            onCloseAutoFocus={(e) => {
+              e.preventDefault();
+              const target =
+                opener instanceof HTMLElement && opener.isConnected
+                  ? opener
+                  : document.querySelector<HTMLElement>("main h1");
+              target?.focus();
+            }}
+          >
             <div class="flex flex-col gap-4">
               <Dialog.Title class="text-2xl font-semibold text-fg">
                 {t(m.confirmTitle)}
@@ -184,6 +198,7 @@ export function ConfirmItsYouDialog(): JSX.Element {
                   onSubmit={submitCode}
                   allowRecovery
                   busy={busy()}
+                  codeLabel={m.confirmCode}
                   submitLabel={m.confirmSubmit}
                   actions={
                     <Button
