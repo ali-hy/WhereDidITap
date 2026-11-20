@@ -1,6 +1,8 @@
 // F-164: S-10's two-step section (J-7, J-21): status, turn on or off, new codes, a new phone.
-import { AlertDialog } from "@kobalte/core/alert-dialog";
-import { Dialog } from "@kobalte/core/dialog";
+// Namespace imports: the `{ Dialog }` objects share one root, so a bundle with both has the
+// last-assigned `.Content` on each.
+import * as AlertDialog from "@kobalte/core/alert-dialog";
+import * as Dialog from "@kobalte/core/dialog";
 import { createQuery } from "@tanstack/solid-query";
 import { useNavigate } from "@tanstack/solid-router";
 import { createSignal, Match, Show, Switch, type JSX } from "solid-js";
@@ -189,7 +191,7 @@ export function TwoStepSection(): JSX.Element {
         </Match>
       </Switch>
 
-      <AlertDialog open={offOpen()} onOpenChange={setOffOpen} modal>
+      <AlertDialog.Root open={offOpen()} onOpenChange={setOffOpen} modal>
         <AlertDialog.Portal>
           <AlertDialog.Overlay class={OVERLAY} />
           <div class="fixed inset-0 z-10 flex items-center justify-center p-4">
@@ -221,9 +223,9 @@ export function TwoStepSection(): JSX.Element {
             </AlertDialog.Content>
           </div>
         </AlertDialog.Portal>
-      </AlertDialog>
+      </AlertDialog.Root>
 
-      <Dialog
+      <Dialog.Root
         open={codes() !== null}
         onOpenChange={(open) => {
           if (!open) {
@@ -251,7 +253,7 @@ export function TwoStepSection(): JSX.Element {
             </Dialog.Content>
           </div>
         </Dialog.Portal>
-      </Dialog>
+      </Dialog.Root>
     </section>
   );
 }

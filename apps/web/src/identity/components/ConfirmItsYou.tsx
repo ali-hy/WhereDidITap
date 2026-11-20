@@ -1,6 +1,6 @@
 // F-166: the step-up dialog and `withConfirmation`. The password and two-step code factors are
 // here; the Google factor arrives with S-6.
-import { Dialog } from "@kobalte/core/dialog";
+import * as Dialog from "@kobalte/core/dialog";
 import { createSignal, Show, type JSX } from "solid-js";
 import { useApi } from "../../api/ApiProvider.js";
 import { toAppError } from "../../api/errors.js";
@@ -128,7 +128,7 @@ export function ConfirmItsYouDialog(): JSX.Element {
   };
 
   return (
-    <Dialog
+    <Dialog.Root
       open={pending() !== null}
       onOpenChange={(open) => {
         if (!open) finish(false);
@@ -200,6 +200,6 @@ export function ConfirmItsYouDialog(): JSX.Element {
           </Dialog.Content>
         </div>
       </Dialog.Portal>
-    </Dialog>
+    </Dialog.Root>
   );
 }
