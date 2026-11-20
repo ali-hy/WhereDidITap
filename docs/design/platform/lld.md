@@ -2,7 +2,7 @@
 module: platform
 doc: lld
 status: approved # draft | in-review | approved
-version: 1.51
+version: 1.52
 hld_version: 1.3.1
 author: planner
 approved_by: the user (project owner), delegated auto-approval
@@ -216,6 +216,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | 1.49    | 2026-11-17 | Implementation-time amendment A-535 (identity S-3 QA): Sentry's manifest auto-init off; TP-13.20 checks the merged manifest. Approval stands. |
 | 1.50    | 2026-11-18 | Implementation-time amendment A-536: `.kotlin/` ignored by git and skipped by the TestKit fixture copy. Approval stands. |
 | 1.51    | 2026-11-20 | Implementation-time amendment A-538 (identity S-4 build, via identity A-102): `AppTextField`'s `fieldModifier`. (A-537 is reserved for the separate secret-setting fix.) |
+| 1.52    | 2026-11-20 | Implementation-time amendment A-539 (identity S-4 e2e): F-222 `e2e:serve` starts the API's send-only pg-boss before the server and stops it on close. |
 
 ## Amendments
 
@@ -756,6 +757,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | A-535 | Identity S-3 QA Q-S3-5 (high): the debug app crashes at launch with no DSN: `SentryInitProvider` auto-initialises Sentry from the merged manifest (`DSN is required`), although F-250 turns Sentry on only with a DSN; Robolectric never runs the real manifest's providers, so CI missed it | **Turn off Sentry's auto-init in the manifest** (`io.sentry.auto-init` = `false`); F-250's `PlatformStartup.run` stays the one initialisation, only with a non-empty `BuildConfig.SENTRY_DSN`. **Test:** TP-13.20 reads the merged manifest of an `assembleDebug` through TestKit. An instrumented launch test would need an emulator in CI, which the platform doesn't run; QA's emulator launch (identity S-3) covers the real start. | F-250; TP-13.20 | none | planner decision |
 | A-536 | Kotlin 2.x Gradle builds create `apps/android/.kotlin/` (compiler session data), which shows as untracked because the root `.gitignore` doesn't cover it; identity S-3 round-4 review N-1: TestKit's fixture copy also copies it | **Both in one amendment, since they're the same build-output directory:** the root `.gitignore` gains `.kotlin/` (any depth) in its Android block, after `.gradle/`; A-348's temporary copy of `apps/android` skips `.kotlin/` like `build/`, `.gradle/` and `local.properties` (the set `skip` in `BuildPropertiesTest.kt`). No behaviour change. | file plan (`.gitignore`), §10.1 Android, A-348 | none | planner decision |
 | A-538 | Identity S-4 build (Android 0d5cf32, via identity A-102): the two-step screens must focus the code field, but `AppTextField`'s `modifier` goes to the outer `Column` (label, field, hint, error), so a `FocusRequester` there doesn't reach the text field | **Recorded:** `AppTextField(…, fieldModifier: Modifier = Modifier)`, the last parameter, after A-528's and A-534's. It is applied to the inner `OutlinedTextField` after the size modifiers and before its semantics; `modifier` still sizes and places the whole field. Callers use it for `focusRequester`; it defaults to `Modifier`, so existing callers are unchanged. `AppPasswordField` doesn't gain it. | A-528, A-534 | none | planner decision |
+| A-539 | Identity S-4 (test-architect, fixed in 03b5ba8): `e2eServe.ts` never started the API's send-only pg-boss, so any e2e flow that queues an email failed with a 500 | **F-222 step 2 starts it:** `await api.boss.start()` straight after `createApiContainer(...)` and before `createApiServer`, as `main/api.ts` does (F-90 step 4b, A-209); step 4's `api.close()` stops it. Not user-visible. | F-222 | none | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -3575,9 +3577,9 @@ All files are under `apps/web/src/`. §8.1 gives routes and screen behaviour.
 - **File:** `apps/server/scripts/e2eServe.ts` (not bundled), run by the `apps/server` package script `e2e:serve` (`tsx scripts/e2eServe.ts`); it isn't a root script, so §2.2.2 has no row.
 - **Behaviour:**
   1. Starts `POSTGRES_IMAGE` with Testcontainers (A-284's mirror prefix applies in CI), then `bootstrapCluster` and `runSchemaStep` (mode `push`) into a fresh database, then `runSeeders`. **Credentials (A-422):** Testcontainers publishes the container's port on every host interface (it can't bind to loopback only), so nothing uses a guessable credential: the superuser is `budmon_e2e_su` with `withPassword(randomBytes(24).toString("base64url"))`, and each login role in `LOGIN_ROLES` (`budmon_migrator` included) gets `randomBytes(18).toString("base64url")`, all generated per run, held in memory only and never printed or logged.
-  2. Starts the API (`createApiServer`) on `127.0.0.1:${E2E_API_PORT:-8787}` (A-395) and a worker with `WORKER_ROLES=general`, in-process, with `APP_ENV=test`, `OBJECT_STORE_KIND=fs` (a temp root and a generated `DEV_OBJECTS_SIGNING_KEY`, A-303), `FX_PROVIDER=fixed`, `KMS_PROVIDER=local` and no `SENTRY_DSN` or OTLP endpoint.
+  2. Starts the API on `127.0.0.1:${E2E_API_PORT:-8787}` (A-395): `createApiContainer(...)`, then `await api.boss.start()` (the send-only pg-boss, as F-90 step 4b, A-209; A-539), then `createApiServer`. It also starts a worker with `WORKER_ROLES=general`; both run in-process, with `APP_ENV=test`, `OBJECT_STORE_KIND=fs` (a temp root and a generated `DEV_OBJECTS_SIGNING_KEY`, A-303), `FX_PROVIDER=fixed`, `KMS_PROVIDER=local` and no `SENTRY_DSN` or OTLP endpoint.
   3. Builds the web app with `VITE_FIXTURES=1 VITE_PSEUDO_LOCALES=1 vite build --outDir <temp>`, then serves it with `vite preview --host 127.0.0.1 --port ${E2E_WEB_PORT:-4173} --strictPort --outDir <temp>`, whose `preview.proxy` sends `/api` and `/dev/objects` to the API port (A-395).
-  4. On `SIGTERM` or `SIGINT` it stops the preview, worker, API and container, and exits 0.
+  4. On `SIGTERM` or `SIGINT` it stops the preview, worker, API (`api.close()`, which also stops its pg-boss, A-539) and container, and exits 0.
   - **Module hook (A-509):** in step 1, once the temp directory and its `file` helper exist and before `config("worker", …)` is called, each entry of `e2eModules` (`apps/server/scripts/e2eModules.ts`, unbundled, empty in the platform) is called with `{ dir, file, webOrigin, apiOrigin }`; its `apiEnv`/`workerEnv` are merged over the environments step 1 builds (used by the seeding container and by step 2) (a key F-222 sets itself can't be overridden; F-222 sets no `TRUSTED_PROXY`, `GOOGLE_SIGNIN_*` or other identity variable), its `apiOverrides`/`workerOverrides` are spread into the container builders (the seeding container gets the worker's), and its `afterSeed(worker)` runs on the seeding container after `runSeeders`, before it's closed. Exact rules in A-509.
 - **Errors:** any start-up failure (including a module hook's throw) prints `e2e:serve failed: <errorClass>` (F-26) and exits 1.
 
