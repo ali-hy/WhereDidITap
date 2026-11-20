@@ -3,9 +3,9 @@
 //   - TP-15.3: pg_hba.conf, probed from throwaway clients (the Postgres image's psql) on the right
 //     network and address. Only `postgres` is up; the roles get throwaway passwords as budmon_admin,
 //     so a rejected case fails at pg_hba.conf, never at the password.
-//   - TP-15.28 (I): `budmon-local secret set` with real sudo after F-191; the ownership rows
-//     (F-178's layout table) are applied here with sudo, as apply_secret_ownership would, since its
-//     calling convention isn't specified.
+//   - TP-15.28 (I): `budmon-local secret set` with real sudo after F-191, over its existing files
+//     (A-537); the ownership rows (F-178's layout table) are applied here with sudo, as
+//     apply_secret_ownership would, since its calling convention isn't specified.
 //   - TP-15.34 (I): listen_addresses in the stack, and in the image started alone (A-418).
 //   - TP-15.22 (I1, I2): a real install of a throwaway tag (a temporary origin whose default branch
 //     is master), then restores of a seeded dump, a truncated dump and one failing half-way.
@@ -433,58 +433,77 @@ describe.skipIf(!INFRA_INT)("TP-15.28 (I): secret set with real sudo (F-178)", (
     if (home !== "") sh("sudo", ["rm", "-rf", home]);
   });
 
-  it("TP-15.28 (I): printf v | secret set main/api/CURSOR_KEY: owner 10001, mode 0400; readable as 10001, denied as 10002", () => {
-    const set = sh(path.join(LOCAL, "budmon-local"), ["secret", "set", "main/api/CURSOR_KEY"], {
+  const setSecret = (args: readonly string[], input: string) =>
+    sh(path.join(LOCAL, "budmon-local"), ["secret", "set", ...args], {
       env: { BUDMON_HOME: home },
-      input: "v",
+      input,
     });
+  const ownerMode = (file: string) => sh("sudo", ["stat", "-c", "%u %a", file]).stdout.trim();
+  /** `cat /s/CURSOR_KEY` in the server image as `user`, with secrets/main/api mounted read-only. */
+  const readCursorKey = (user: string) =>
+    sh("docker", [
+      "run",
+      "--rm",
+      "--user",
+      user,
+      "-v",
+      `${path.join(home, "secrets/main/api")}:/s:ro`,
+      "--entrypoint",
+      "cat",
+      `budmon/server:${TEST_TAG}`,
+      "/s/CURSOR_KEY",
+    ]);
+
+  it("TP-15.28 (I): printf v | secret set main/api/CURSOR_KEY over F-191's file: owner 10001, mode 0400; reads exactly v as 10001, denied as 10002", () => {
+    const file = path.join(home, "secrets/main/api/CURSOR_KEY");
+    expect(ownerMode(file), "F-191's CURSOR_KEY exists before the write").toBe("10001 400");
+
+    const set = setSecret(["main/api/CURSOR_KEY"], "v");
     expect(set.status, `${set.stdout}${set.stderr}`).toBe(0);
+    expect(set.stdout).toContain("written main/api/CURSOR_KEY");
     expect(`${set.stdout}${set.stderr}`).not.toMatch(/(^|\s)v(\s|$)/);
 
-    const file = path.join(home, "secrets/main/api/CURSOR_KEY");
-    const stat = sh("sudo", ["stat", "-c", "%u %a", file]);
-    expect(stat.stdout.trim()).toBe("10001 400");
-
-    const dir = path.join(home, "secrets/main/api");
-    const read = (user: string) =>
-      sh("docker", [
-        "run",
-        "--rm",
-        "--user",
-        user,
-        "-v",
-        `${dir}:/s:ro`,
-        "--entrypoint",
-        "cat",
-        `budmon/server:${TEST_TAG}`,
-        "/s/CURSOR_KEY",
-      ]);
-    const owner = read("10001");
+    expect(ownerMode(file)).toBe("10001 400");
+    const owner = readCursorKey("10001");
     expect(owner.status, owner.stderr).toBe(0);
     expect(owner.stdout).toBe("v");
-    const other = read("10002");
+    const other = readCursorKey("10002");
     expect(other.status).not.toBe(0);
     expect(other.stderr).toMatch(/Permission denied/);
   }, 300_000);
 
-  it("TP-15.28 (I) (A-487): secret set main/worker-general/SMTP_PASSWORD --empty after it held p: 0 bytes, owner 10002, mode 0400", () => {
-    const rel = "main/worker-general/SMTP_PASSWORD";
-    const first = sh(path.join(LOCAL, "budmon-local"), ["secret", "set", rel], {
-      env: { BUDMON_HOME: home },
-      input: "p",
-    });
+  it("TP-15.28 (I) (A-537): a second secret set main/api/CURSOR_KEY replaces the first: w, owner 10001, mode 0400", () => {
+    const file = path.join(home, "secrets/main/api/CURSOR_KEY");
+    const first = setSecret(["main/api/CURSOR_KEY"], "v");
     expect(first.status, `${first.stdout}${first.stderr}`).toBe(0);
-    const file = path.join(home, "secrets", rel);
-    expect(sh("sudo", ["stat", "-c", "%s", file]).stdout.trim()).toBe("1");
 
-    const empty = sh(path.join(LOCAL, "budmon-local"), ["secret", "set", rel, "--empty"], {
-      env: { BUDMON_HOME: home },
-      input: "",
-    });
+    const second = setSecret(["main/api/CURSOR_KEY"], "w");
+    expect(second.status, `${second.stdout}${second.stderr}`).toBe(0);
+    expect(second.stdout).toContain("written main/api/CURSOR_KEY");
+
+    expect(ownerMode(file)).toBe("10001 400");
+    const owner = readCursorKey("10001");
+    expect(owner.status, owner.stderr).toBe(0);
+    expect(owner.stdout).toBe("w");
+  }, 300_000);
+
+  it("TP-15.28 (I) (A-487): secret set main/worker-general/SMTP_PASSWORD p over F-191's empty file, then --empty: 0 bytes, owner 10002, mode 0400", () => {
+    const rel = "main/worker-general/SMTP_PASSWORD";
+    const file = path.join(home, "secrets", rel);
+    const sizeOwnerMode = () => sh("sudo", ["stat", "-c", "%s %u %a", file]).stdout.trim();
+    expect(sizeOwnerMode(), "F-191's empty SMTP_PASSWORD exists before the write").toBe(
+      "0 10002 400",
+    );
+
+    const first = setSecret([rel], "p");
+    expect(first.status, `${first.stdout}${first.stderr}`).toBe(0);
+    expect(sizeOwnerMode()).toBe("1 10002 400");
+
+    const empty = setSecret([rel, "--empty"], "");
     expect(empty.status, `${empty.stdout}${empty.stderr}`).toBe(0);
     expect(empty.stdout).toContain(`written ${rel} (empty: no SMTP authentication)`);
 
-    expect(sh("sudo", ["stat", "-c", "%s %u %a", file]).stdout.trim()).toBe("0 10002 400");
+    expect(sizeOwnerMode()).toBe("0 10002 400");
   }, 300_000);
 });
 
