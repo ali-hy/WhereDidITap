@@ -24,7 +24,10 @@ data class TurnOffFormState(
     val formError: UiText? = null,
     val showRecoveryHint: Boolean = false,
     val busy: Boolean = false,
-)
+) {
+    // [value] is a code being typed.
+    override fun toString(): String = "TurnOffFormState(useRecovery=$useRecovery, busy=$busy)"
+}
 
 data class SecurityState(
     val turnOff: TurnOffFormState? = null,
@@ -32,7 +35,10 @@ data class SecurityState(
     val acknowledged: Boolean = false,
     val busy: Boolean = false,
     val message: UiText? = null,
-)
+) {
+    // [newCodes] are recovery codes.
+    override fun toString(): String = "SecurityState(busy=$busy, acknowledged=$acknowledged)"
+}
 
 @HiltViewModel
 class SecurityViewModel

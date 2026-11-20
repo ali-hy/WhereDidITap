@@ -28,7 +28,10 @@ data class TwoStepFormState(
     val busy: Boolean = false,
     val ownerDialog: Int? = null,
     val showRecoveryHint: Boolean = false,
-)
+) {
+    // [value] is a code being typed.
+    override fun toString(): String = "TwoStepFormState(useRecovery=$useRecovery, busy=$busy)"
+}
 
 @HiltViewModel
 class TwoStepViewModel
@@ -191,7 +194,7 @@ class TwoStepViewModel
         }
 
         /** The dialog's Cancel and its dismissal: the held sign-in ends, the form stays. */
-        fun keepOtherUsersEntries() {
+        fun keepOtherUsersEntries(onCancelled: () -> Unit = {}) {
             val held = pending ?: return
             if (ownerBusy) return
             ownerBusy = true
@@ -207,6 +210,7 @@ class TwoStepViewModel
                     form = form.copy(ownerDialog = null, value = "", formError = readError(e))
                 } finally {
                     ownerBusy = false
+                    onCancelled()
                 }
             }
         }

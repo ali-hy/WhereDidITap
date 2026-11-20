@@ -26,7 +26,10 @@ data class ConfirmFormState(
     @StringRes val error: Int? = null,
     val formError: UiText? = null,
     val busy: Boolean = false,
-)
+) {
+    // [value] is a password or a code being typed.
+    override fun toString(): String = "ConfirmFormState(useRecovery=$useRecovery, busy=$busy)"
+}
 
 @Singleton
 class ConfirmationCoordinator
@@ -177,6 +180,8 @@ class ConfirmationCoordinator
         }
 
         fun cancel() {
+            // A request in flight can't be abandoned.
+            if (mutableForm.value.busy) return
             synchronized(lock) { open }?.complete(false)
         }
     }

@@ -62,19 +62,27 @@ data class TwoStepChallenge(
     val expiresAt: Instant,
     val email: String,
     val password: String?,
-)
+) {
+    // The token and password never reach a log.
+    override fun toString(): String = "TwoStepChallenge(expiresAt=$expiresAt)"
+}
 
 /** A TOTP secret to enrol: grouped for typing, plus the `otpauth://` URI for the QR code. */
 data class TwoStepSecret(
     val secret: String,
     val otpauthUri: String,
     val expiresAt: Instant,
-)
+) {
+    override fun toString(): String = "TwoStepSecret(expiresAt=$expiresAt)"
+}
 
 data class TwoStepVerified(
     val pending: PendingSignIn,
     val recoveryCodesLeft: Int?,
-)
+) {
+    // The pending sign-in holds the session's tokens.
+    override fun toString(): String = "TwoStepVerified(recoveryCodesLeft=$recoveryCodesLeft)"
+}
 
 /** A sign-in the server accepted, held until the outbox owner check lets it be stored (A-69). */
 data class PendingSignIn(

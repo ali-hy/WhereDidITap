@@ -28,7 +28,10 @@ data class TwoStepSetupState(
     val busy: Boolean = false,
     val codes: List<String> = emptyList(),
     val acknowledged: Boolean = false,
-)
+) {
+    // The secret, the typed code and the recovery codes stay out of logs.
+    override fun toString(): String = "TwoStepSetupState(step=$step, busy=$busy)"
+}
 
 @HiltViewModel
 class TwoStepSetupViewModel

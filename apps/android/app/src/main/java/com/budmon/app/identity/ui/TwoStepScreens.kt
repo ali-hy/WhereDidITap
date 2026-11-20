@@ -12,6 +12,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.PersistableBundle
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
@@ -34,9 +35,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -81,6 +84,7 @@ import com.budmon.app.ui.components.AppTextField
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 private const val QR_SIZE_DP = 224
@@ -189,7 +193,7 @@ fun TwoStepRoute(
         OutboxOwnerDialog(
             count,
             onDelete = { viewModel.discardOtherUsersEntries(savePassword, onSignedIn, onEnded) },
-            onCancel = viewModel::keepOtherUsersEntries,
+            onCancel = { viewModel.keepOtherUsersEntries(onBack) },
         )
     }
 }
@@ -208,7 +212,9 @@ fun ConfirmItsYouSheet(
     onCancel: () -> Unit,
 ) {
     val focus = rememberFieldFocus(form.error, form.useRecovery)
-    ModalBottomSheet(onDismissRequest = onCancel) {
+    val sheetState =
+        rememberModalBottomSheetState(confirmValueChange = { it != SheetValue.Hidden || !form.busy })
+    ModalBottomSheet(onDismissRequest = onCancel, sheetState = sheetState) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -244,7 +250,7 @@ fun ConfirmItsYouSheet(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 AppButton(stringResource(R.string.confirm_submit), onSubmit, busy = form.busy)
-                AppButton(stringResource(R.string.confirm_cancel), onCancel, variant = AppButtonVariant.Secondary)
+                AppButton(stringResource(R.string.confirm_cancel), onCancel, variant = AppButtonVariant.Secondary, enabled = !form.busy)
             }
         }
     }
@@ -287,10 +293,11 @@ fun TwoStepSetupScreen(
     onOpenInApp: () -> Unit,
     onCopyKey: () -> Unit,
     onStartAgain: () -> Unit,
+    replace: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Page(modifier) {
-        Heading(stringResource(R.string.twostep_setup_title))
+        Heading(stringResource(if (replace) R.string.twostep_replace else R.string.twostep_setup_title))
         when (state.step) {
             SetupStep.Loading, SetupStep.Done, SetupStep.Codes -> {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -306,10 +313,15 @@ fun TwoStepSetupScreen(
 
             SetupStep.Scan -> {
                 val secret = state.secret
-                Text(stringResource(R.string.twostep_setup_step, 1), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (!replace) Text(stringResource(R.string.twostep_setup_step, 1), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(stringResource(R.string.twostep_setup_steps))
                 state.formError?.let { ErrorLine(uiString(it)) }
                 if (secret != null) {
+                    Text(
+                        stringResource(R.string.twostep_setup_scan),
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.semantics { heading() },
+                    )
                     val bitmap = remember(secret.otpauthUri) { qrBitmap(secret.otpauthUri).asImageBitmap() }
                     Image(
                         bitmap = bitmap,
@@ -339,7 +351,7 @@ fun TwoStepSetupScreen(
                     imeAction = ImeAction.Done,
                     readOnly = state.busy,
                 )
-                AppButton(stringResource(R.string.twostep_setup_submit), onSubmit, Modifier.fillMaxWidth(), busy = state.busy)
+                AppButton(stringResource(if (replace) R.string.twostep_verify else R.string.twostep_setup_submit), onSubmit, Modifier.fillMaxWidth(), busy = state.busy)
             }
         }
     }
@@ -396,10 +408,15 @@ fun RecoveryCodesScreen(
 private fun copySensitive(
     context: Context,
     text: String,
+    scope: CoroutineScope,
+    snackbar: SnackbarHostState,
+    copiedMessage: String,
 ) {
     val clip = ClipData.newPlainText("", text)
     clip.description.extras = PersistableBundle().apply { putBoolean(SENSITIVE_EXTRA, true) }
     context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(clip)
+    // Android 13 and later show their own confirmation.
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) scope.launch { snackbar.showSnackbar(copiedMessage) }
 }
 
 private fun shareText(
@@ -427,6 +444,7 @@ fun TwoStepSetupRoute(
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val noApp = stringResource(R.string.twostep_no_app)
+    val copied = stringResource(R.string.twostep_copied)
     LaunchedEffect(Unit) { viewModel.start(replace) }
     LaunchedEffect(state.step) { if (state.step == SetupStep.Done) onDone() }
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
@@ -436,7 +454,7 @@ fun TwoStepSetupRoute(
                     codes = state.codes,
                     acknowledged = state.acknowledged,
                     onAcknowledgedChange = viewModel::onAcknowledgedChange,
-                    onCopyAll = { copySensitive(context, state.codes.joinToString("\n")) },
+                    onCopyAll = { copySensitive(context, state.codes.joinToString("\n"), scope, snackbar, copied) },
                     onShare = { shareText(context, state.codes.joinToString("\n")) },
                     onDone = viewModel::finish,
                 )
@@ -455,8 +473,11 @@ fun TwoStepSetupRoute(
                             }
                         }
                     },
-                    onCopyKey = { state.secret?.let { copySensitive(context, it.secret.filterNot { c -> c.isWhitespace() }) } },
+                    onCopyKey = {
+                        state.secret?.let { copySensitive(context, it.secret.filterNot { c -> c.isWhitespace() }, scope, snackbar, copied) }
+                    },
                     onStartAgain = viewModel::startAgain,
+                    replace = replace,
                 )
             }
         }
@@ -549,6 +570,8 @@ fun SecurityRoute(
     val state = viewModel.state
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val copied = stringResource(R.string.twostep_copied)
     LaunchedEffect(Unit) { viewModel.refresh(onMeUpdated) }
     val message = state.message?.let { uiString(it) }
     LaunchedEffect(message) {
@@ -568,7 +591,7 @@ fun SecurityRoute(
                     codes = codes,
                     acknowledged = state.acknowledged,
                     onAcknowledgedChange = viewModel::onAcknowledgedChange,
-                    onCopyAll = { copySensitive(context, codes.joinToString("\n")) },
+                    onCopyAll = { copySensitive(context, codes.joinToString("\n"), scope, snackbar, copied) },
                     onShare = { shareText(context, codes.joinToString("\n")) },
                     onDone = { viewModel.finishNewCodes(onMeUpdated) },
                     newCodes = true,
