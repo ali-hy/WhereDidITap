@@ -47,7 +47,7 @@ apply_secret_ownership() {
 # mode 0400. The value is held in a shell variable only (never an argument, the environment or a
 # temporary file). Exit 22 on an empty value; exit 1 if the remove or the install fails.
 write_secret() {
-  local rel="$1" value="" dir key uid
+  local rel="$1" value="" dir key uid path
   dir="${rel%/*}"
   key="${rel##*/}"
   uid="$(service_uid "${dir}")"
@@ -58,8 +58,8 @@ write_secret() {
     IFS= read -r -d '' value || true
   fi
   [ -n "${value}" ] || die 22 "empty value for ${rel}; nothing written"
-  local path="${BUDMON_HOME}/secrets/${dir}/${key}"
-  # Remove any old file first (A-537): install can't open a 0400 file for writing.
+  path="${BUDMON_HOME}/secrets/${dir}/${key}"
+  # Remove any old file first (A-537): uutils install can't write /dev/stdin over an existing file.
   sudo rm -f "${path}" || die 1 "writing ${rel} failed; nothing written"
   printf '%s' "${value}" |
     sudo install -o "${uid}" -g "${uid}" -m 0400 /dev/stdin "${path}" ||
