@@ -725,8 +725,13 @@ test.describe("TP-4.43: sign-in path, expired setup, and errors inside the dialo
 
     expect((await disable).status()).toBe(429);
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText(/Too many attempts\. Try again in \d+ minutes?\./)).toBeVisible();
-    await expect(dialog.getByText(looseText("You can still use a recovery code."))).toBeVisible();
+    // A-102: the field's message is F-174's text, a space, then twostep.limitRecovery (the
+    // catalog's bidi marks allowed around each part and the number).
+    const marks = `[${String.fromCharCode(0x200f, 0x2068, 0x2069)}]*`;
+    const limited = new RegExp(
+      String.raw`^${marks}Too many attempts\. Try again in ${marks}\d+${marks} minutes?\.${marks} ${marks}You can still use a recovery code\.${marks}$`,
+    );
+    await expect(dialog.getByText(limited)).toBeVisible();
   });
 });
 
