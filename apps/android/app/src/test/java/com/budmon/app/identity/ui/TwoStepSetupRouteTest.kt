@@ -470,7 +470,10 @@ class TwoStepSetupRouteTest {
             ApiException(ApiError.Defined("TWO_STEP_NOT_ENABLED", 409, null))
         val (_, done) = showReplace()
 
-        compose.waitUntil(5_000) { done.calls > 0 }
+        compose.waitUntil(5_000) {
+            compose.waitForIdle()
+            done.calls > 0
+        }
         compose.waitForIdle()
 
         assertEquals(1, done.calls)
@@ -482,13 +485,19 @@ class TwoStepSetupRouteTest {
         coEvery { repository.twoStepReplaceConfirm("123456") } throws
             ApiException(ApiError.Defined("TWO_STEP_NOT_ENABLED", 409, null))
         val (vm, done) = showReplace()
-        compose.waitUntil(5_000) { vm.state.step == SetupStep.Scan }
+        compose.waitUntil(5_000) {
+            compose.waitForIdle()
+            vm.state.step == SetupStep.Scan
+        }
 
         compose.runOnIdle {
             vm.onCodeChange("123456")
             vm.submit()
         }
-        compose.waitUntil(5_000) { done.calls > 0 || (vm.state.formError != null && !vm.state.busy) }
+        compose.waitUntil(5_000) {
+            compose.waitForIdle()
+            done.calls > 0 || (vm.state.formError != null && !vm.state.busy)
+        }
         compose.waitForIdle()
 
         assertEquals(1, done.calls)
