@@ -15,6 +15,7 @@ import com.budmon.app.core.network.ApiError
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import java.time.Clock
 import javax.inject.Inject
 
 enum class SetupStep { Loading, Scan, Codes, Expired, Failed, Done }
@@ -39,6 +40,7 @@ class TwoStepSetupViewModel
     constructor(
         private val repository: AuthRepository,
         private val confirmation: ConfirmationCoordinator,
+        private val clock: Clock,
     ) : ViewModel() {
         var state by mutableStateOf(TwoStepSetupState())
             private set
@@ -97,6 +99,11 @@ class TwoStepSetupViewModel
         /** Checks the code and turns two-step on (or swaps the authenticator). */
         fun submit() {
             if (state.busy || state.step != SetupStep.Scan) return
+            // A setup that has run out goes straight to "timed out", without a request.
+            if (state.secret?.let { !clock.instant().isBefore(it.expiresAt) } == true) {
+                state = state.copy(step = SetupStep.Expired, code = "", error = null, formError = null)
+                return
+            }
             val code = TwoStepInput.code(state.code)
             if (!TwoStepInput.isCode(code)) {
                 state = state.copy(error = R.string.twostep_code_invalid)

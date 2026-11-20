@@ -39,6 +39,7 @@ class TwoStepViewModel
     constructor(
         private val repository: AuthRepository,
         private val guard: OutboxOwnerGuard,
+        private val notice: RecoveryCodesNotice,
     ) : ViewModel() {
         var form by mutableStateOf(TwoStepFormState())
             private set
@@ -46,6 +47,7 @@ class TwoStepViewModel
         private var challenge: TwoStepChallenge? = null
         private var pending: PendingSignIn? = null
         private var ownerBusy = false
+        private var recoveryLeft: Int? = null
 
         /** Begins a challenge; any earlier one and the form are dropped. */
         fun start(challenge: TwoStepChallenge) {
@@ -53,6 +55,7 @@ class TwoStepViewModel
             pending = null
             this.challenge = challenge
             ownerBusy = false
+            recoveryLeft = null
             form = TwoStepFormState()
         }
 
@@ -88,6 +91,7 @@ class TwoStepViewModel
             viewModelScope.launch {
                 try {
                     val verified = repository.verifyTwoStep(current, if (recovery) null else normal, if (recovery) normal else null)
+                    recoveryLeft = verified.recoveryCodesLeft
                     decide(verified.pending, guard.complete(verified.pending), current, savePassword, onSignedIn)
                 } catch (e: CancellationException) {
                     throw e
@@ -162,6 +166,8 @@ class TwoStepViewModel
                     // No credential provider, or the user declined.
                 }
             }
+            recoveryLeft?.let(notice::post)
+            recoveryLeft = null
             onSignedIn(signedIn.me)
         }
 

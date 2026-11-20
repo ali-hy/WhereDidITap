@@ -162,7 +162,10 @@ class SecurityViewModel
             viewModelScope.launch {
                 try {
                     val codes = confirmation.withConfirmation { repository.regenerateRecoveryCodes() }
-                    if (codes != null) state = state.copy(newCodes = codes, acknowledged = false)
+                    if (codes != null) {
+                        state = state.copy(newCodes = codes, acknowledged = false)
+                        refresh(onMeUpdated)
+                    }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -200,8 +203,9 @@ class SecurityViewModel
         }
 
         /** Back while the codes show: they stay unacknowledged, so the banner shows. */
-        fun leaveNewCodes() {
+        fun leaveNewCodes(onMeUpdated: (Me) -> Unit = {}) {
             state = state.copy(newCodes = null, acknowledged = false)
+            refresh(onMeUpdated)
         }
 
         /** After an authenticator replacement: the confirmation shows here. */

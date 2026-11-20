@@ -36,6 +36,7 @@ import androidx.navigation.navigation
 import com.budmon.app.core.update.UpdateState
 import com.budmon.app.identity.ConfirmationCoordinator
 import com.budmon.app.identity.InviteViewModel
+import com.budmon.app.identity.RecoveryCodesNotice
 import com.budmon.app.identity.SecurityViewModel
 import com.budmon.app.identity.SessionUiState
 import com.budmon.app.identity.SessionViewModel
@@ -81,6 +82,8 @@ class MainActivity : ComponentActivity() {
 
     @Inject lateinit var confirmation: ConfirmationCoordinator
 
+    @Inject lateinit var recoveryNotice: RecoveryCodesNotice
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // The window behind Compose follows the mode, so no light frame shows before it draws.
@@ -118,6 +121,7 @@ class MainActivity : ComponentActivity() {
 
                                     is SessionUiState.SignedIn -> {
                                         val nav = rememberNavController()
+                                        val recoveryLeft by recoveryNotice.left.collectAsStateWithLifecycle()
                                         // Two hosts, so a switch drops the other graph's back stack.
                                         NavHost(nav, startDestination = ROUTE_SIGNED_IN) {
                                             navigation(startDestination = ROUTE_HOME, route = ROUTE_SIGNED_IN) {
@@ -147,6 +151,9 @@ class MainActivity : ComponentActivity() {
                                                                 viewModel = hiltViewModel<SignOutViewModel>(),
                                                                 onSignedOut = sessionModel::onSignedOut,
                                                                 onSecurity = { nav.navigate(ROUTE_SECURITY) },
+                                                                recoveryLeft = recoveryLeft,
+                                                                onRecoveryNoticeShown = recoveryNotice::consume,
+                                                                onCreateCodes = { nav.navigate("$ROUTE_SECURITY?newCodes=true") },
                                                             )
                                                         } else {
                                                             val retrying by sessionModel.probing.collectAsStateWithLifecycle()
@@ -159,7 +166,10 @@ class MainActivity : ComponentActivity() {
                                                         }
                                                     }
                                                 }
-                                                composable(ROUTE_SECURITY) {
+                                                composable(
+                                                    ROUTE_SECURITY_PATTERN,
+                                                    arguments = listOf(navArgument("newCodes") { type = NavType.BoolType; defaultValue = false }),
+                                                ) { entry ->
                                                     val me = current.me
                                                     if (me != null) {
                                                         SecurityRoute(
@@ -169,6 +179,7 @@ class MainActivity : ComponentActivity() {
                                                             onTurnOn = { nav.navigate("$ROUTE_TWO_STEP_SETUP?mode=setup") },
                                                             onReplace = { nav.navigate("$ROUTE_TWO_STEP_SETUP?mode=replace") },
                                                             onBack = { nav.popBackStack() },
+                                                            startNewCodes = entry.arguments?.getBoolean("newCodes") == true,
                                                         )
                                                     } else {
                                                         val retrying by sessionModel.probing.collectAsStateWithLifecycle()
@@ -181,7 +192,7 @@ class MainActivity : ComponentActivity() {
                                                 ) { entry ->
                                                     val setup = hiltViewModel<TwoStepSetupViewModel>()
                                                     // Absent when setup was opened without Sign-in & security under it.
-                                                    val securityEntry = remember(entry) { runCatching { nav.getBackStackEntry(ROUTE_SECURITY) }.getOrNull() }
+                                                    val securityEntry = remember(entry) { runCatching { nav.getBackStackEntry(ROUTE_SECURITY_PATTERN) }.getOrNull() }
                                                     val security: SecurityViewModel? = securityEntry?.let { hiltViewModel(it) }
                                                     TwoStepSetupRoute(
                                                         viewModel = setup,
@@ -307,6 +318,7 @@ class MainActivity : ComponentActivity() {
         const val ROUTE_HOME = "home"
         const val ROUTE_TWO_STEP = "two_step"
         const val ROUTE_SECURITY = "settings/security"
+        const val ROUTE_SECURITY_PATTERN = "settings/security?newCodes={newCodes}"
         const val ROUTE_TWO_STEP_SETUP = "settings/two_step"
     }
 

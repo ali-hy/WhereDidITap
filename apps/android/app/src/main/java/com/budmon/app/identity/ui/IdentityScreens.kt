@@ -29,6 +29,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -632,6 +636,37 @@ fun HomeFirstRunScreen(
     }
 }
 
+/**
+ * J-5: after a recovery-code sign-in, how many codes are left. With 3 or fewer it stays until
+ * dismissed and offers Create new codes.
+ */
+@Composable
+private fun RecoveryLeftNotice(
+    left: Int?,
+    onShown: () -> Unit,
+    onCreateCodes: () -> Unit,
+) {
+    val host = remember { SnackbarHostState() }
+    val message = left?.let { pluralStringResource(R.plurals.twostep_recovery_left, it, it) }
+    val create = stringResource(R.string.twostep_create_new)
+    LaunchedEffect(left) {
+        if (left == null || message == null) return@LaunchedEffect
+        val low = left <= LOW_CODES
+        val result =
+            host.showSnackbar(
+                message = message,
+                actionLabel = if (low) create else null,
+                withDismissAction = low,
+                duration = if (low) SnackbarDuration.Indefinite else SnackbarDuration.Long,
+            )
+        onShown()
+        if (result == SnackbarResult.ActionPerformed) onCreateCodes()
+    }
+    Box(Modifier.fillMaxSize()) { SnackbarHost(host, Modifier.align(Alignment.BottomCenter)) }
+}
+
+private const val LOW_CODES = 3
+
 /** The home with its sign-out flow: the unsynced-entries question and a failure message. */
 @Composable
 fun HomeRoute(
@@ -640,8 +675,12 @@ fun HomeRoute(
     viewModel: SignOutViewModel,
     onSignedOut: () -> Unit,
     onSecurity: () -> Unit = {},
+    recoveryLeft: Int? = null,
+    onRecoveryNoticeShown: () -> Unit = {},
+    onCreateCodes: () -> Unit = {},
 ) {
     HomeFirstRunScreen(me, onSignOut = { viewModel.requestSignOut(onSignedOut) }, onSecurity = onSecurity)
+    RecoveryLeftNotice(recoveryLeft, onRecoveryNoticeShown, onCreateCodes)
     when (val state = viewModel.state) {
         SignOutState.Idle -> {}
 

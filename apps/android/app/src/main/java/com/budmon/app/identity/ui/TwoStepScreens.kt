@@ -44,11 +44,14 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -56,6 +59,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
@@ -155,7 +159,7 @@ fun TwoStepScreen(
         AppTextField(
             value = form.value,
             onValueChange = onValueChange,
-            label = stringResource(if (form.useRecovery) R.string.twostep_recovery else R.string.twostep_code),
+            label = stringResource(if (form.useRecovery) R.string.twostep_recovery else R.string.confirm_code),
             error = form.error?.let { stringResource(it) },
             keyboardType = if (form.useRecovery) KeyboardType.Text else KeyboardType.NumberPassword,
             keyboardActions = KeyboardActions(onDone = { onSubmit() }),
@@ -518,6 +522,9 @@ fun SecurityScreen(
     Page(modifier) {
         Heading(stringResource(R.string.twostep_title))
         Text(stringResource(if (me.twoStepEnabled) R.string.twostep_status_on else R.string.twostep_status_off))
+        if (me.twoStepEnabled) {
+            Text(pluralStringResource(R.plurals.twostep_codes_left, me.recoveryCodesLeft, me.recoveryCodesLeft))
+        }
         if (me.twoStepEnabled && !me.codesAcknowledged) {
             Text(stringResource(R.string.twostep_codes_unsaved), color = MaterialTheme.colorScheme.error)
         }
@@ -585,6 +592,7 @@ fun SecurityRoute(
     onTurnOn: () -> Unit,
     onReplace: () -> Unit,
     onBack: () -> Unit,
+    startNewCodes: Boolean = false,
 ) {
     val state = viewModel.state
     val context = LocalContext.current
@@ -592,6 +600,14 @@ fun SecurityRoute(
     val scope = rememberCoroutineScope()
     val copied = stringResource(R.string.twostep_copied)
     LaunchedEffect(Unit) { viewModel.refresh(onMeUpdated) }
+    // Arriving from the sign-in prompt's action: create the codes once.
+    var startedNewCodes by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(startNewCodes) {
+        if (startNewCodes && !startedNewCodes) {
+            startedNewCodes = true
+            viewModel.createNewCodes(onMeUpdated)
+        }
+    }
     val message = state.message?.let { uiString(it) }
     LaunchedEffect(message) {
         if (message != null) {
@@ -601,7 +617,7 @@ fun SecurityRoute(
     }
     val codes = state.newCodes
     BackHandler(enabled = codes == null) { onBack() }
-    BackHandler(enabled = codes != null) { viewModel.leaveNewCodes() }
+    BackHandler(enabled = codes != null) { viewModel.leaveNewCodes(onMeUpdated) }
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         Box(Modifier.padding(padding)) {
             if (codes != null) {
