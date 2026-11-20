@@ -60,7 +60,7 @@ class TwoStepSetupViewModel
 
         /** After the setup timed out: a fresh secret. */
         fun startAgain() {
-            if (state.busy) return
+            if (state.busy || state.step == SetupStep.Loading) return
             load()
         }
 
