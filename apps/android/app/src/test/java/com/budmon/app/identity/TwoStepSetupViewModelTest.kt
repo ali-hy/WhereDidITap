@@ -13,6 +13,7 @@
 // mode's TWO_STEP_NOT_ENABLED → Done; submit's errors; finish(). SetupStep.Failed is looked up by
 // name, so while it's missing only the tests that use it fail, not the build.
 // TP-4.48 (a), A-106: replaced is true only after a confirmed replacement.
+// TP-4.47x: startAgain() is ignored while a load is in flight (A-105, "ignored while busy").
 // Setup: a MockK AuthRepository, the real ConfirmationCoordinator around it,
 // Dispatchers.setMain(StandardTestDispatcher). `settle` advances virtual time until a condition
 // holds, since the LLD doesn't say which scope the coordinator's submit uses.
@@ -25,12 +26,14 @@ import com.budmon.app.core.network.ApiError
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.serialization.json.buildJsonObject
@@ -38,14 +41,15 @@ import kotlinx.serialization.json.put
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicInteger
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -651,5 +655,84 @@ class TwoStepSetupViewModelTest {
 
         assertEquals(SetupStep.Scan, vm.state.step)
         assertFalse(vm.replaced)
+    }
+
+    // ---- TP-4.47x, A-105: startAgain is ignored while a load is in flight ----
+
+    /**
+     * A view model on Failed (the first call answered 503) whose later calls wait on [gate];
+     * [calls] counts every twoStepSetup (or twoStepReplaceStart when [replace]).
+     */
+    private fun TestScope.failedThenHeld(
+        replace: Boolean,
+        gate: CompletableDeferred<Unit>,
+        calls: AtomicInteger,
+    ): TwoStepSetupViewModel {
+        val answer: suspend () -> TwoStepSecret = {
+            if (calls.incrementAndGet() == 1) throw unavailable
+            gate.await()
+            secret
+        }
+        if (replace) {
+            coEvery { repository.twoStepReplaceStart() } coAnswers { answer() }
+        } else {
+            coEvery { repository.twoStepSetup() } coAnswers { answer() }
+        }
+        val (vm, _) = subject()
+        vm.start(replace)
+        advanceUntilIdle()
+        assertEquals(failed, vm.state.step)
+        return vm
+    }
+
+    @Test
+    fun `TP-4_47x startAgain twice while the load is in flight - one more twoStepSetup, then Scan`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val calls = AtomicInteger(0)
+        val vm = failedThenHeld(replace = false, gate = gate, calls = calls)
+
+        vm.startAgain()
+        runCurrent()
+        assertEquals(SetupStep.Loading, vm.state.step)
+        vm.startAgain()
+        runCurrent()
+
+        assertEquals("one call for start, one for the first startAgain", 2, calls.get())
+        gate.complete(Unit)
+        settle("step Scan") { vm.state.step == SetupStep.Scan }
+        coVerify(exactly = 2) { repository.twoStepSetup() }
+    }
+
+    @Test
+    fun `TP-4_47x replace mode, startAgain twice while the load is in flight - one more twoStepReplaceStart`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val calls = AtomicInteger(0)
+        val vm = failedThenHeld(replace = true, gate = gate, calls = calls)
+
+        vm.startAgain()
+        runCurrent()
+        vm.startAgain()
+        runCurrent()
+
+        assertEquals(2, calls.get())
+        gate.complete(Unit)
+        settle("step Scan") { vm.state.step == SetupStep.Scan }
+        coVerify(exactly = 2) { repository.twoStepReplaceStart() }
+        coVerify(exactly = 0) { repository.twoStepSetup() }
+    }
+
+    @Test
+    fun `TP-4_47x startAgain twice in a row, before anything runs - one more twoStepSetup`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val calls = AtomicInteger(0)
+        val vm = failedThenHeld(replace = false, gate = gate, calls = calls)
+
+        vm.startAgain()
+        vm.startAgain()
+        advanceUntilIdle()
+
+        assertEquals(2, calls.get())
+        gate.complete(Unit)
+        settle("step Scan") { vm.state.step == SetupStep.Scan }
     }
 }
