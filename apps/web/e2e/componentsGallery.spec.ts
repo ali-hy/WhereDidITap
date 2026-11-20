@@ -2,7 +2,8 @@
 // (built in identity S-1): axe (colour contrast included) in light and dark, and in pseudo-RTL
 // through the pseudo-rtl project; every component's section; a 2 px focus outline on every
 // control; borders and a Highlight focus outline in forced colours. The route's absence from a
-// production build is TP-11.27's check (no built file contains "__fixtures").
+// production build is TP-11.27's check (no built file contains "__fixtures"). TP-11.37 (A-541):
+// axe with toasts showing.
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "./fixtures.js";
 
@@ -151,4 +152,20 @@ test.describe("TP-1.43: forced colours", () => {
     expect(focused.length).toBeGreaterThan(10);
     expect(focused.filter((f) => f.color !== highlight || f.style === "none")).toEqual([]);
   });
+});
+
+test("TP-11.37 (A-541): with Show toasts' three toasts showing, axe finds no violations and each toast is an li without role=status inside the ol", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "chromium project only");
+  await openGallery(page);
+
+  await page.getByRole("button", { name: "Show toasts" }).click();
+
+  const toasts = page.locator("ol > li");
+  await expect(toasts).toHaveCount(3);
+  const results = await new AxeBuilder({ page }).analyze();
+  await expect(toasts).toHaveCount(3);
+  expect(results.violations.map((v) => `${v.id}: ${String(v.nodes.length)}`)).toEqual([]);
+  expect(await page.locator("ol > li[role='status']").count()).toBe(0);
 });

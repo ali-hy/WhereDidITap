@@ -1,5 +1,5 @@
 // Focus and announcements on navigation (F-216, F-218, A-333, A-336), and the 360 px layout. TP-11.15,
-// TP-11.16.
+// TP-11.16, TP-11.38 (A-542: focus waits for the new page's heading).
 import { catalogText, expect, test, type Page } from "./fixtures.js";
 
 async function expectFocusedHeading(page: Page, text: string): Promise<void> {
@@ -103,4 +103,24 @@ test.describe("TP-11.16: 360 px layout", () => {
       expect(width).toBeLessThanOrEqual(360);
     });
   }
+});
+
+test("TP-11.38 (A-542): the components gallery's Slow heading link: once the 300 ms resource resolves, focus is on 'Slow heading' (not BODY, not the gallery's h1) and it's announced", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "chromium project only");
+  await page.goto("/__fixtures/components");
+  const h1 = page.locator("main h1");
+  await expect(h1).toHaveCount(1);
+  await expect(page.locator("[data-component]").first()).toBeVisible();
+  const galleryHeading = (await h1.textContent()) ?? "";
+
+  await page.getByRole("link", { name: "Slow heading" }).click();
+
+  await expect(page).toHaveURL(/\/__fixtures\/slow-heading$/);
+  await expect(h1).toHaveText("Slow heading");
+  await expect(h1).toBeFocused();
+  expect(await page.evaluate(() => document.activeElement?.tagName)).toBe("H1");
+  expect(galleryHeading).not.toBe("Slow heading");
+  await expect(page.locator("#live-polite")).toHaveText("Slow heading");
 });
