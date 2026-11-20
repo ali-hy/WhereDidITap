@@ -1,12 +1,13 @@
 // S-4 two-step verification in the browser (identity LLD §8.1, F-156, F-164, F-165, F-166; HLD J-5,
-// J-7, J-15; A-99 to A-103): TP-4.30 to TP-4.33, TP-4.39, TP-4.43, TP-4.44, plus extra cases
-// ending in "x".
+// J-7, J-15, J-21; A-99 to A-104): TP-4.30 to TP-4.33, TP-4.39, TP-4.43, TP-4.44, TP-4.46, plus
+// extra cases ending in "x".
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 //
 // Each test signs up its own user and turns two-step on from Sign-in & security's Turn on (§10.1);
 // codes come from TestAuthenticator, which may wait for the next 30-second step, hence the longer
 // timeout. TP-4.39's sign-in page cases route the first factor instead (no real two-step needed).
 import { readFile } from "node:fs/promises";
+import type { Locator } from "@playwright/test";
 import {
   catalogText,
   createInvitation,
@@ -70,6 +71,15 @@ const codeField = (page: Page) => page.locator("main").getByLabel(catalogText("C
 /** F-166's dialog (its title "Confirm it's you"). */
 const confirmDialog = (page: Page) =>
   page.getByRole("dialog").filter({ has: page.getByText(catalogText(CONFIRM_ITS_YOU)) });
+
+/** A promise the test resolves when it chooses (a held route's release). */
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
 
 const json = (status: number, body: unknown) => ({
   status,
@@ -758,5 +768,319 @@ test.describe("TP-4.44: Done clears the unsaved-codes banner (A-103)", () => {
     expect((await ack).status()).toBe(200);
     await expect(codesDialog).toHaveCount(0);
     await expect(section.getByText(looseText(UNSAVED))).toHaveCount(0);
+  });
+});
+
+test.describe("TP-4.46: replace-mode wording, the sign-in recovery hint and busy dialogs (A-104)", () => {
+  const QR_ALT = "QR code for your authenticator app. Use the key below if you can't scan.";
+  /** The catalog's bidi marks, allowed around each part of a pattern built from parts. */
+  const marks = `[${String.fromCharCode(0x200f, 0x2068, 0x2069)}]*`;
+  /** F-165's step line in any step ("Step {n} of 2"). */
+  const STEP_LINE = new RegExp(String.raw`Step ${marks}[\d٠-٩]+${marks} of 2`);
+  const LIMIT_RECOVERY = "You can still use a recovery code.";
+
+  /** Asserts `upper`'s box ends above where `lower`'s starts. */
+  async function expectAbove(upper: Locator, lower: Locator): Promise<void> {
+    const a = await upper.boundingBox();
+    const b = await lower.boundingBox();
+    expect(a).not.toBeNull();
+    expect(b).not.toBeNull();
+    expect((a?.y ?? 0) + (a?.height ?? 0)).toBeLessThanOrEqual((b?.y ?? 0) + 0.5);
+  }
+
+  test("TP-4.46 (a): setup mode: <h1> 'Turn on two-step verification', 'Step 1 of 2', the <h2> 'Scan this code' above the QR, and Verify and turn on", async ({
+    page,
+    request,
+  }) => {
+    await signedUpUser(page, request, "Setup Wording Person");
+    await page.goto("/settings/security");
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
+
+    await twoStepSection(page)
+      .getByRole("button", { name: catalogText("Turn on") })
+      .click();
+
+    await expect(page).toHaveURL(/\/settings\/security\/two-step$/);
+    const main = page.locator("main");
+    const qr = main.getByRole("img", { name: catalogText(QR_ALT) });
+    await expect(qr).toBeVisible();
+    await expect(main.locator("h1")).toHaveText(looseText("Turn on two-step verification"));
+    await expect(main.getByText(looseText("Step 1 of 2"))).toBeVisible();
+    const scan = main.getByRole("heading", { level: 2, name: catalogText("Scan this code") });
+    await expect(scan).toBeVisible();
+    await expectAbove(scan, qr);
+    await expect(
+      main.getByRole("button", { name: catalogText("Verify and turn on") }),
+    ).toBeVisible();
+    await expect(main.getByRole("button", { name: catalogText("Verify") })).toHaveCount(0);
+  });
+
+  test("TP-4.46 (a), TP-4.46x: replace mode after step-up: <h1> 'Replace authenticator app', no step line, the <h2> 'Scan this code' above the QR, and Verify; a code from the new key → /settings/security with 'Your authenticator app was replaced.'", async ({
+    page,
+    request,
+  }) => {
+    // TP-4.46x: A-104 G-2's success (twostep.replaced) has no other web test.
+    const { email } = await signedUpUser(page, request, "Replace Wording Person");
+    const { auth } = await enableTwoStep(page, { acknowledge: true });
+    await unconfirmSessions(request, email);
+    await page.goto("/settings/security");
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
+    const starts: number[] = [];
+    page.on("response", (r) => {
+      if (isPost("/api/v1/me/two-step/replace/start")(r)) starts.push(r.status());
+    });
+
+    await twoStepSection(page)
+      .getByRole("button", { name: catalogText("Replace authenticator app") })
+      .click();
+    const dialog = confirmDialog(page);
+    await expect(dialog).toBeVisible();
+    const started = page.waitForResponse(
+      (r) => isPost("/api/v1/me/two-step/replace/start")(r) && r.status() === 200,
+    );
+    await dialog.getByLabel(catalogText("Code")).fill(await auth.nextCode());
+    await dialog.getByRole("button", { name: catalogText("Confirm") }).click();
+    const { secret } = (await (await started).json()) as { secret: string };
+
+    await expect(dialog).toHaveCount(0);
+    expect(starts).toEqual([403, 200]);
+    await expect(page).toHaveURL(
+      (u) =>
+        u.pathname === "/settings/security/two-step" && u.searchParams.get("mode") === "replace",
+    );
+    const main = page.locator("main");
+    const qr = main.getByRole("img", { name: catalogText(QR_ALT) });
+    await expect(qr).toBeVisible();
+    await expect(main.locator("h1")).toHaveText(looseText("Replace authenticator app"));
+    await expect(main.getByText(STEP_LINE)).toHaveCount(0);
+    const scan = main.getByRole("heading", { level: 2, name: catalogText("Scan this code") });
+    await expect(scan).toBeVisible();
+    await expectAbove(scan, qr);
+    const verify = main.getByRole("button", { name: catalogText("Verify") });
+    await expect(verify).toBeVisible();
+    await expect(main.getByRole("button", { name: catalogText("Verify and turn on") })).toHaveCount(
+      0,
+    );
+
+    // TP-4.46x: the new key's code replaces the app.
+    const replaced = page.waitForResponse(isPost("/api/v1/me/two-step/replace/confirm"));
+    const newApp = TestAuthenticator.fromKey(secret);
+    await main.getByLabel(catalogText("Code")).fill(await newApp.nextCode());
+    await verify.click();
+
+    const answer = await replaced;
+    expect(answer.status(), await answer.text()).toBe(200);
+    await expect(page).toHaveURL(/\/settings\/security$/);
+    await expect(
+      toastWith(page, looseText("Your authenticator app was replaced.")).first(),
+    ).toBeVisible();
+  });
+
+  /** auth.verifyTwoStep answering RATE_LIMITED (60 s); returns the bodies it was sent. */
+  async function routeVerifyRateLimited(page: Page): Promise<unknown[]> {
+    const bodies: unknown[] = [];
+    await page.route("**/api/v1/auth/two-step/verify", (route) => {
+      bodies.push(route.request().postDataJSON());
+      return route.fulfill(
+        json(429, {
+          defined: true,
+          code: "RATE_LIMITED",
+          status: 429,
+          message: "Too many requests",
+          data: { retryAfterSeconds: 60 },
+        }),
+      );
+    });
+    return bodies;
+  }
+
+  /** P-F-214's notice for 60 s: "Too many attempts. Try again in 1 minute." */
+  async function expectOneMinuteNotice(page: Page, project: string): Promise<void> {
+    const notice = page
+      .locator("main")
+      .getByRole("status")
+      .filter({ hasText: /Too many attempts/ });
+    await expect(notice).toBeVisible();
+    // ar-XB keeps its own plural forms and may localise the digit.
+    await expect(notice).toHaveText(
+      project === "chromium"
+        ? looseText("Too many attempts. Try again in 1 minute.")
+        : new RegExp(
+            String.raw`^${marks}Too many attempts\. Try again in ${marks}[1١]${marks} minutes?\.${marks}$`,
+          ),
+    );
+  }
+
+  test("TP-4.46 (b): sign-in two-step in recovery mode with auth.verifyTwoStep answering RATE_LIMITED (60 s) shows the rate-limit notice and not 'You can still use a recovery code.'", async ({
+    page,
+    request,
+  }, testInfo) => {
+    const { email } = await createUser(request);
+    const bodies = await routeVerifyRateLimited(page);
+    await routedSignInToTwoStep(page, email);
+    await page.locator("main").getByText(catalogText("Use a recovery code instead")).click();
+    await page.locator("main").getByLabel(catalogText("Recovery code")).fill("7KQ2-M3XD-4TRA");
+
+    await verifyButton(page).click();
+
+    await expectOneMinuteNotice(page, testInfo.project.name);
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toMatchObject({ recoveryCode: "7KQ2-M3XD-4TRA" });
+    expect(bodies[0]).not.toHaveProperty("code");
+    await expect(page.locator("main").getByText(looseText(LIMIT_RECOVERY))).toHaveCount(0);
+  });
+
+  test("TP-4.46x: sign-in two-step with a 6-digit code answering RATE_LIMITED (60 s) shows the rate-limit notice and 'You can still use a recovery code.'", async ({
+    page,
+    request,
+  }, testInfo) => {
+    // A-104 m-2 / A-103 (3): the hint's other branch, so (b)'s absence can't pass by accident.
+    const { email } = await createUser(request);
+    const bodies = await routeVerifyRateLimited(page);
+    await routedSignInToTwoStep(page, email);
+    await codeField(page).fill("123456");
+
+    await verifyButton(page).click();
+
+    await expectOneMinuteNotice(page, testInfo.project.name);
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toMatchObject({ code: "123456" });
+    await expect(page.locator("main").getByText(looseText(LIMIT_RECOVERY))).toBeVisible();
+  });
+
+  /** Holds the POST to `path` until the test releases it, then lets it reach the server. */
+  async function holdPost(
+    page: Page,
+    path: string,
+  ): Promise<{ arrived: Promise<void>; release: () => void }> {
+    const arrived = deferred();
+    const gate = deferred();
+    await page.route(`**${path}`, async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+      arrived.resolve();
+      await gate.promise;
+      await route.continue();
+    });
+    return { arrived: arrived.promise, release: gate.resolve };
+  }
+
+  /** Clicks a point on the overlay, outside a centred dialog. */
+  const clickOutside = (page: Page) => page.mouse.click(5, 5);
+
+  test("TP-4.46 (c), TP-4.46x: Turn off with me.twoStepDisable held: Escape (and, x, a click outside) leaves the dialog open with Cancel disabled; the response then closes it and two-step is off", async ({
+    page,
+    request,
+  }) => {
+    // TP-4.46x: F-164 (A-104) names the overlay along with Escape.
+    await signedUpUser(page, request, "Busy Turn Off Person");
+    const { auth } = await enableTwoStep(page, { acknowledge: true });
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
+    const held = await holdPost(page, "/api/v1/me/two-step/disable");
+    await twoStepSection(page)
+      .getByRole("button", { name: catalogText("Turn off") })
+      .click();
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toBeVisible();
+    const cancel = dialog.getByRole("button", { name: catalogText("Cancel") });
+    await expect(cancel).toBeEnabled();
+    await dialog.getByLabel(catalogText("Code")).fill(await auth.nextCode());
+    const disabled = page.waitForResponse(isPost("/api/v1/me/two-step/disable"));
+    await dialog.getByRole("button", { name: catalogText("Turn off") }).click();
+    await held.arrived;
+    await expect(cancel).toBeDisabled();
+
+    await page.keyboard.press("Escape");
+
+    await expect(dialog).toBeVisible();
+    await expect(cancel).toBeDisabled();
+    await clickOutside(page);
+    await expect(dialog).toBeVisible();
+    await expect(cancel).toBeDisabled();
+
+    held.release();
+    expect((await disabled).status()).toBe(200);
+    await expect(dialog).toHaveCount(0);
+    await expect(toastWith(page, looseText("Two-step verification is off.")).first()).toBeVisible();
+    await expect(twoStepSection(page).getByText(catalogText("Off"))).toBeVisible();
+  });
+
+  test("TP-4.46 (d), TP-4.46x: a step-up dialog with me.confirm held: Escape (and, x, a click outside) leaves it open with Cancel disabled; the response then closes it and Create new codes resumes", async ({
+    page,
+    request,
+  }) => {
+    // TP-4.46x: F-166 (A-104) names the overlay along with Escape.
+    const { email } = await signedUpUser(page, request, "Busy Step Up Person");
+    const { auth } = await enableTwoStep(page, { acknowledge: true });
+    await unconfirmSessions(request, email);
+    await page.goto("/settings/security");
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
+    const held = await holdPost(page, "/api/v1/me/confirm");
+    await twoStepSection(page)
+      .getByRole("button", { name: catalogText("Create new codes") })
+      .click();
+    const dialog = confirmDialog(page);
+    await expect(dialog).toBeVisible();
+    const cancel = dialog.getByRole("button", { name: catalogText("Cancel") });
+    await expect(cancel).toBeEnabled();
+    await dialog.getByLabel(catalogText("Code")).fill(await auth.nextCode());
+    const confirmed = page.waitForResponse(isPost("/api/v1/me/confirm"));
+    const fresh = page.waitForResponse(
+      (r) => isPost("/api/v1/me/two-step/recovery-codes")(r) && r.status() === 200,
+    );
+    await dialog.getByRole("button", { name: catalogText("Confirm") }).click();
+    await held.arrived;
+    await expect(cancel).toBeDisabled();
+
+    await page.keyboard.press("Escape");
+
+    await expect(dialog).toBeVisible();
+    await expect(cancel).toBeDisabled();
+    await clickOutside(page);
+    await expect(dialog).toBeVisible();
+    await expect(cancel).toBeDisabled();
+
+    held.release();
+    expect((await confirmed).status()).toBe(200);
+    await expect(dialog).toHaveCount(0);
+    const { recoveryCodes } = (await (await fresh).json()) as { recoveryCodes: string[] };
+    const codesDialog = page.getByRole("dialog").filter({ hasText: NEW_CODES_DONE });
+    await expect(codesDialog).toBeVisible();
+    await expect(codesDialog.getByText(recoveryCodes[0] ?? "-")).toBeVisible();
+  });
+
+  test("TP-4.46x: the regenerated-codes dialog with me.acknowledgeRecoveryCodes held: Escape and a click outside leave it open; the response then closes it", async ({
+    page,
+    request,
+  }) => {
+    // F-164 (A-104): the codes Dialog doesn't close while codesBusy(); TP-4.46 covers the others.
+    await signedUpUser(page, request, "Busy Codes Person");
+    await enableTwoStep(page, { acknowledge: true });
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
+    await twoStepSection(page)
+      .getByRole("button", { name: catalogText("Create new codes") })
+      .click();
+    const codesDialog = page.getByRole("dialog").filter({ hasText: NEW_CODES_DONE });
+    await expect(codesDialog).toBeVisible();
+    await codesDialog
+      .getByRole("checkbox", { name: catalogText("I've saved my recovery codes") })
+      .check();
+    const held = await holdPost(page, "/api/v1/me/two-step/acknowledge-codes");
+    const ack = page.waitForResponse(isPost("/api/v1/me/two-step/acknowledge-codes"));
+    await codesDialog.getByRole("button", { name: catalogText("Done") }).click();
+    await held.arrived;
+
+    await page.keyboard.press("Escape");
+
+    await expect(codesDialog).toBeVisible();
+    await clickOutside(page);
+    await expect(codesDialog).toBeVisible();
+
+    held.release();
+    expect((await ack).status()).toBe(200);
+    await expect(codesDialog).toHaveCount(0);
+    expect(here(page)).toBe("/settings/security");
   });
 });

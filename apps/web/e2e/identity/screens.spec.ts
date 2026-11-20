@@ -2,7 +2,7 @@
 // (responsive), TP-3.45 (axe), TP-3.46 (pseudo-RTL, A-75), TP-3.53 (loading, error and list-size
 // states, A-75), TP-3.54 (page titles), TP-3.59 (axe with the account menu open, A-88). Later
 // slices add their routes and screens: S-4 adds TP-3.53's S-2, S-11 and S-16 cases (S-16 with a
-// code factor, A-75). Extra cases end in "x".
+// code factor, A-75) and S-10's two-step section. Extra cases end in "x".
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
@@ -439,7 +439,7 @@ test.describe("TP-3.53: loading, error and list-size states (HLD §4.4; A-75)", 
   });
 });
 
-test.describe("TP-3.53: S-4's screens: S-2, S-11 and S-16 (HLD §4.4; A-75)", () => {
+test.describe("TP-3.53: S-4's screens: S-2, S-11, S-16 and S-10's two-step section (HLD §4.4; A-75)", () => {
   test.describe.configure({ timeout: 120_000 });
 
   const json = (status: number, body: unknown) => ({
@@ -449,6 +449,60 @@ test.describe("TP-3.53: S-4's screens: S-2, S-11 and S-16 (HLD §4.4; A-75)", ()
   });
 
   const QR_ALT = "QR code for your authenticator app. Use the key below if you can't scan.";
+
+  test("TP-3.53: S-10 two-step section: while its me.get is pending, the section is busy with a skeleton; INTERNAL → 'Something went wrong on our side. Try again in a moment.' with Try again, which then shows 'Off'", async ({
+    page,
+    request,
+  }) => {
+    const { token } = await createInvitation(request, { email: uniqueEmail() });
+    await signUpThroughUi(page, token, "Two Step States");
+    // Boot first (its me.get probe), so the route below sees only the section's me.get.
+    await page.goto("/settings");
+    await expect(page.locator("main h1")).toHaveText(looseText("Settings"));
+    const gate = deferred();
+    let calls = 0;
+    await page.route(
+      (url) => url.pathname === "/api/v1/me",
+      async (route) => {
+        if (route.request().method() !== "GET") {
+          await route.fallback();
+          return;
+        }
+        calls += 1;
+        if (calls > 1) {
+          await route.continue();
+          return;
+        }
+        await gate.promise;
+        await route.fulfill(INTERNAL);
+      },
+    );
+
+    // A client-side move: the section mounts and loads; nothing else reads me.
+    await page
+      .getByRole("navigation", { name: catalogText("Settings") })
+      .getByRole("link", { name: catalogText("Sign-in & security") })
+      .click();
+
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
+    const section = twoStepSection(page);
+    await expect(section).toHaveAttribute("aria-busy", "true");
+    // P-A-515 (c): the Skeleton's aria-hidden blocks, shown after 300 ms.
+    await expect(section.locator('[aria-hidden="true"]:has(> div)').first()).toBeVisible();
+    await expect(section.getByText(catalogText("Off"))).toHaveCount(0);
+    gate.resolve();
+
+    await expect(section.getByText(catalogText(INTERNAL_READ))).toBeVisible();
+    await expect(section).not.toHaveAttribute("aria-busy", "true");
+    const retry = section.getByRole("button", { name: catalogText("Try again") });
+    await retry.click();
+
+    await expect(section.getByText(catalogText("Off"))).toBeVisible();
+    await expect(section.getByRole("button", { name: catalogText("Turn on") })).toBeVisible();
+    await expect(section.getByText(catalogText(INTERNAL_READ))).toHaveCount(0);
+    await expect(retry).toHaveCount(0);
+    expect(calls).toBe(2);
+  });
 
   test("TP-3.53: S-2 Two-step verification: the code field starts empty; while auth.verifyTwoStep is pending, Verify is busy; TWO_STEP_CHALLENGE_EXPIRED { reason: expired } on the first try → /sign-in?reason=two_step_timeout with 'This sign-in timed out. Sign in again.'", async ({
     page,
