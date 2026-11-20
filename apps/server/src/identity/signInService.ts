@@ -102,7 +102,7 @@ async function isClosed(tx: DbHandle, user: UserRow): Promise<boolean> {
 }
 
 interface CompleteInput {
-  user: UserRow;
+  user: Pick<UserRow, "id">;
   method: "password" | "google";
   pendingLink: PendingGoogleLink | null;
   delivery: "cookie" | "bearer";
@@ -341,13 +341,11 @@ export async function verifyTwoStepAtSignIn(
       }
 
       await challengesRepo.consume(tx, challenge.id, new Date(now.epochMilliseconds));
-      const user = await usersRepo.findById(tx, challenge.userId, { lock: true });
-      if (user === null) return { kind: "expired", reason: "expired" };
       const outcome = await completeSignIn(
         deps,
         tx,
         {
-          user,
+          user: { id: challenge.userId },
           method: data.method,
           pendingLink: data.pendingLink,
           delivery: input.delivery,
@@ -357,7 +355,7 @@ export async function verifyTwoStepAtSignIn(
       );
       if (check.method === "recovery") {
         await recordSecurityEvent(deps, tx, {
-          userId: user.id,
+          userId: challenge.userId,
           kind: "recovery_code_used",
           sessionId: outcome.session.sessionId,
           clientKind: req.clientKind,
@@ -367,7 +365,7 @@ export async function verifyTwoStepAtSignIn(
           kind: "signed_in",
           outcome: {
             ...outcome,
-            recoveryCodesLeft: await twoStepRepo.countUnusedCodes(tx, user.id),
+            recoveryCodesLeft: await twoStepRepo.countUnusedCodes(tx, challenge.userId),
           },
         };
       }

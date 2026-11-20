@@ -11,7 +11,7 @@ import { hitLimits } from "./limits.js";
 import { confirmationFactor } from "./requireConfirmed.js";
 import type { ReqInfo } from "./sessionService.js";
 import * as sessionsRepo from "./sessionsRepo.js";
-import { checkSecondFactor, requireOneFactor } from "./twoStepService.js";
+import { checkSecondFactor } from "./twoStepService.js";
 
 export interface ConfirmInput {
   password: string | null;
@@ -46,7 +46,6 @@ export async function confirmIdentity(
     if (input.code === null && input.recoveryCode === null) {
       throw issue("code", "required", "Required");
     }
-    requireOneFactor(input);
     const accepted = await withTransaction(
       deps.database,
       async (tx) => {

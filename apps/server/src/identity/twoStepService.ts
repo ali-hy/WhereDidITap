@@ -244,11 +244,11 @@ export async function twoStepDisable(
   req: ReqInfo,
 ): Promise<void> {
   requireOneFactor(input);
-  const row = await twoStepRepo.get(deps.database.handle, principal.userId);
-  if (row?.state !== "enabled") throw new TwoStepNotEnabledError();
   await withTransaction(
     deps.database,
     async (tx) => {
+      const row = await twoStepRepo.get(tx, principal.userId, { lock: true });
+      if (row?.state !== "enabled") throw new TwoStepNotEnabledError();
       const check = await checkSecondFactor(deps, tx, principal.userId, input, req);
       if (!check.ok) throw new TwoStepCodeInvalidError();
       await twoStepRepo.remove(tx, principal.userId);
