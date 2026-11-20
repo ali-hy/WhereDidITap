@@ -153,6 +153,12 @@ export function createBudmonEslintConfig({ tsconfigRootDir }) {
             message:
               'bigint({ mode: "number" }) is forbidden for money columns; use mode "bigint".',
           },
+          {
+            selector:
+              "ImportDeclaration[source.value=/^@kobalte.core(.dialog|.alert-dialog)?$/] > ImportSpecifier[imported.name=/^(Dialog|AlertDialog)$/]",
+            message:
+              "Import Kobalte dialogs as a namespace: import * as Dialog from '@kobalte/core/dialog' (or * as AlertDialog from '@kobalte/core/alert-dialog'). The named Dialog and AlertDialog exports are one shared object (A-540).",
+          },
         ],
       },
     },

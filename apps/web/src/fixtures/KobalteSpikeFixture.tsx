@@ -1,7 +1,7 @@
 // /__fixtures/kobalte-spike (A-331, DV-3): a dialog, a combobox, a date field and a menu, driven
 // by keyboard in TP-11.28.
 import { Combobox } from "@kobalte/core/combobox";
-import { Dialog } from "@kobalte/core/dialog";
+import * as Dialog from "@kobalte/core/dialog";
 import { DropdownMenu } from "@kobalte/core/dropdown-menu";
 import { TextField } from "@kobalte/core/text-field";
 import { createSignal, type JSX } from "solid-js";
@@ -16,7 +16,7 @@ export function KobalteSpikeFixture(): JSX.Element {
     <>
       <h1 tabindex="-1">Kobalte spike</h1>
 
-      <Dialog>
+      <Dialog.Root>
         <Dialog.Trigger class="focus-visible:outline">Open dialog</Dialog.Trigger>
         <Dialog.Portal>
           <Dialog.Overlay class="fixed inset-0 bg-fg/30" />
@@ -27,7 +27,7 @@ export function KobalteSpikeFixture(): JSX.Element {
             </Dialog.CloseButton>
           </Dialog.Content>
         </Dialog.Portal>
-      </Dialog>
+      </Dialog.Root>
 
       <Combobox
         options={CURRENCIES}
