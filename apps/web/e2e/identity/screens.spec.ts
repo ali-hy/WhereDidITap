@@ -679,7 +679,7 @@ test.describe("TP-3.53: S-4's screens: S-2, S-11, S-16 and S-10's two-step secti
       .getByRole("dialog")
       .filter({ has: page.getByText(catalogText("Confirm it's you")) });
     await expect(dialog).toBeVisible();
-    const code = dialog.getByLabel(catalogText("Code"));
+    const code = dialog.getByLabel(catalogText("Code from your authenticator app"));
     await expect(code).toHaveValue("");
     await expect(code).toBeFocused();
     await expect(code).toHaveAttribute("inputmode", "numeric");

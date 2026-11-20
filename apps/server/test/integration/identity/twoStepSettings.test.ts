@@ -367,6 +367,25 @@ describe("TP-4.6: me.twoStepEnable", () => {
     expect(res.json()).toEqual({ confirmedUntil: wire(NOW.add({ minutes: 10 })) });
   });
 
+  it("TP-4.6x: 15 min + 1 ms after setup, step-up and setup both lapsed → 403 CONFIRMATION_REQUIRED first; after the password step-up → 410 TWO_STEP_SETUP_EXPIRED", async () => {
+    // Pins the current order (the step-up guard runs before F-64's step 1).
+    const { user, session } = await pendingSetup();
+    api.clock.set(NOW.add({ minutes: 15, milliseconds: 1 }));
+    const code = codeAt(SECRET_BYTES, api.clock.now());
+
+    const first = await post("/me/two-step/enable", { code }, session);
+    expect(first.status).toBe(403);
+    expect(errorOf(first)).toEqual(confirmationRequired("password"));
+
+    const confirmed = await post("/me/confirm", { password: FACTORY_PASSWORD }, session);
+    expect(confirmed.status).toBe(200);
+    const second = await post("/me/two-step/enable", { code }, session);
+
+    expect(second.status).toBe(410);
+    expect(errorOf(second)).toEqual(SETUP_EXPIRED);
+    expect((await twoStepRow(h, user.id))?.state).not.toBe("enabled");
+  });
+
   it("TP-4.6x: without step-up → 403 CONFIRMATION_REQUIRED { factor: password }; still pending", async () => {
     const { user } = await pendingSetup();
     const stale = await sessionFactory(h, { userId: user.id, now: NOW, confirmedAt: HOUR_AGO });
