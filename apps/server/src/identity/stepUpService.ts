@@ -31,6 +31,12 @@ export async function confirmIdentity(
   input: ConfirmInput,
   req: ReqInfo,
 ): Promise<{ confirmedUntil: Temporal.Instant }> {
+  // More than one factor is a malformed request, whatever the account uses.
+  if ([input.password, input.code, input.recoveryCode].filter((v) => v !== null).length > 1) {
+    throw new ValidationFailedError([
+      { path: [], code: "too_many_factors", message: "Give exactly one factor" },
+    ]);
+  }
   const pool = deps.database.handle;
   const factor = await confirmationFactor(deps, pool, principal.userId);
 

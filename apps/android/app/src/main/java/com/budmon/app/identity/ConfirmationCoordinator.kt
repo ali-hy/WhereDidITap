@@ -170,16 +170,6 @@ class ConfirmationCoordinator
             }
         }
 
-        /** Sends one factor directly. */
-        fun submit(
-            password: String? = null,
-            code: String? = null,
-            recoveryCode: String? = null,
-        ) {
-            if (mutableRequest.value == null || mutableForm.value.busy) return
-            send(Submission(password, code, recoveryCode))
-        }
-
         private fun send(submission: Submission) {
             // Busy at once, so a second tap before the request starts is ignored.
             mutableForm.value = mutableForm.value.copy(busy = true, error = null, formError = null)
