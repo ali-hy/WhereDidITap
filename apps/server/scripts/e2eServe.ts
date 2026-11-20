@@ -270,6 +270,9 @@ async function main(): Promise<void> {
 
     // 2. The API and a general worker, in-process.
     const api = createApiContainer(config("api", apiEnv), apiOverrides);
+    // As main/api.ts (A-209): the send-only pg-boss, so API requests can queue jobs; api.close()
+    // stops it.
+    await api.boss.start();
     const app = await createApiServer(api);
     await app.listen({ host: API_HOST, port: API_PORT });
     stops.push(async () => {
