@@ -4,6 +4,7 @@
 // Setup per TP-4.41: a MockK AuthRepository; the real ConfirmationCoordinator around it; a recording
 // onMeUpdated; Dispatchers.setMain(StandardTestDispatcher) so viewModelScope runs on virtual time.
 // Errors use Operation.Mutation (A-102).
+// TP-4.48 (b) and TP-4.48x (A-106): showReplaced sets the replacement's message.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.identity
 
@@ -487,5 +488,29 @@ class SecurityViewModelTest {
 
         assertNull(vm.state.message)
         assertFalse(vm.state.busy)
+    }
+
+    // ---- TP-4.48 (b), A-106: the replacement's confirmation ----
+
+    @Test
+    fun `TP-4_48 (b) showReplaced - message twostep_replaced, no request`() = runTest {
+        val vm = viewModel()
+
+        vm.showReplaced()
+        advanceUntilIdle()
+
+        assertEquals(UiText(R.string.twostep_replaced), vm.state.message)
+        coVerify(exactly = 0) { repository.getMe() }
+        assertTrue(updates.isEmpty())
+    }
+
+    @Test
+    fun `TP-4_48x showReplaced, then messageShown - message null`() = runTest {
+        val vm = viewModel()
+        vm.showReplaced()
+
+        vm.messageShown()
+
+        assertNull(vm.state.message)
     }
 }

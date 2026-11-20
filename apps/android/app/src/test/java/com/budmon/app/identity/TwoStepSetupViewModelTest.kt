@@ -12,6 +12,7 @@
 // TP-4.47 (a) to (d), A-105's rules (§8.2): a failed start → Failed with the read text; replace
 // mode's TWO_STEP_NOT_ENABLED → Done; submit's errors; finish(). SetupStep.Failed is looked up by
 // name, so while it's missing only the tests that use it fail, not the build.
+// TP-4.48 (a), A-106: replaced is true only after a confirmed replacement.
 // Setup: a MockK AuthRepository, the real ConfirmationCoordinator around it,
 // Dispatchers.setMain(StandardTestDispatcher). `settle` advances virtual time until a condition
 // holds, since the LLD doesn't say which scope the coordinator's submit uses.
@@ -40,6 +41,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -564,4 +566,90 @@ class TwoStepSetupViewModelTest {
             coVerify(exactly = 2) { repository.acknowledgeRecoveryCodes() }
             assertEquals(emptyList<String>(), vm.state.codes)
         }
+
+    // ---- TP-4.48 (a), A-106: replaced ----
+
+    private val passwordStepUp =
+        ApiException(ApiError.Defined("CONFIRMATION_REQUIRED", 403, buildJsonObject { put("factor", "password") }))
+
+    @Test
+    fun `TP-4_48 (a) a new view model - replaced false`() = runTest {
+        val (vm, _) = subject()
+
+        assertFalse(vm.replaced)
+    }
+
+    @Test
+    fun `TP-4_48 (a) start(false) and an enable - step Codes, replaced false`() = runTest {
+        val vm = onCodes()
+
+        assertFalse(vm.replaced)
+    }
+
+    @Test
+    fun `TP-4_48 (a) start(true) with the step-up cancelled - step Done, replaced false`() = runTest {
+        coEvery { repository.twoStepReplaceStart() } throws passwordStepUp
+        val (vm, coordinator) = subject()
+        vm.start(true)
+        advanceUntilIdle()
+        assertEquals(ConfirmFactor.Password, coordinator.request.value)
+
+        coordinator.cancel()
+        settle("step Done") { vm.state.step == SetupStep.Done }
+
+        assertFalse(vm.replaced)
+        coVerify(exactly = 0) { repository.twoStepReplaceConfirm(any()) }
+    }
+
+    @Test
+    fun `TP-4_48 (a) start(true) and a confirm answered TWO_STEP_NOT_ENABLED - step Done, replaced false`() = runTest {
+        coEvery { repository.twoStepReplaceConfirm("123456") } throws defined("TWO_STEP_NOT_ENABLED", 409)
+        val vm = scanning(replace = true)
+
+        send(vm, "123456")
+
+        coVerify(exactly = 1) { repository.twoStepReplaceConfirm("123456") }
+        assertFalse(vm.replaced)
+    }
+
+    @Test
+    fun `TP-4_48 (a) start(true) and a successful confirm - step Done, replaced true`() = runTest {
+        val vm = scanning(replace = true)
+        assertFalse(vm.replaced)
+
+        vm.onCodeChange("123456")
+        vm.submit()
+        settle("step Done") { vm.state.step == SetupStep.Done && !vm.state.busy }
+
+        assertTrue(vm.replaced)
+    }
+
+    @Test
+    fun `TP-4_48x replace confirm whose step-up is cancelled - still Scan, replaced false`() = runTest {
+        coEvery { repository.twoStepReplaceConfirm("123456") } throws passwordStepUp
+        val (vm, coordinator) = subject()
+        vm.start(true)
+        advanceUntilIdle()
+        vm.onCodeChange("123456")
+        vm.submit()
+        advanceUntilIdle()
+        assertEquals(ConfirmFactor.Password, coordinator.request.value)
+
+        coordinator.cancel()
+        settle("busy reset") { !vm.state.busy }
+
+        assertEquals(SetupStep.Scan, vm.state.step)
+        assertFalse(vm.replaced)
+    }
+
+    @Test
+    fun `TP-4_48x replace confirm answered 503 - still Scan, replaced false`() = runTest {
+        coEvery { repository.twoStepReplaceConfirm("123456") } throws unavailable
+        val vm = scanning(replace = true)
+
+        send(vm, "123456")
+
+        assertEquals(SetupStep.Scan, vm.state.step)
+        assertFalse(vm.replaced)
+    }
 }

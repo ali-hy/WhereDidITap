@@ -1,5 +1,5 @@
 // F-214 SecurityRoute and TurnOffTwoStepDialog (identity LLD §8.2's S-4 signatures, A-100, A-101).
-// TP-4.42 rows (a) to (d), plus TP-4.42x.
+// TP-4.42 rows (a) to (d), plus TP-4.42x. TP-4.48 (c) (A-106): the replacement's snackbar.
 // Setup per TP-4.42: a Compose rule in a test activity (FLAG_SECURE is read from its window); a
 // MockK AuthRepository; the real SecurityViewModel and ConfirmationCoordinator around it. The host
 // keeps `me` in a mutableStateOf that onMeUpdated updates (P-A-534), as MainActivity's session does.
@@ -98,8 +98,8 @@ class SecurityRouteTest {
     private fun secureFlagSet(): Boolean =
         compose.activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0
 
-    /** Shows SecurityRoute for [initial], its host keeping `me` in state updated by onMeUpdated. */
-    private fun showRoute(initial: Me = meOn) {
+    /** Shows SecurityRoute for [initial] (its host keeps `me` updated by onMeUpdated); returns the view model. */
+    private fun showRoute(initial: Me = meOn): SecurityViewModel {
         val vm = SecurityViewModel(repository, ConfirmationCoordinator(repository))
         val me = mutableStateOf(initial)
         compose.setContent {
@@ -118,6 +118,7 @@ class SecurityRouteTest {
             }
         }
         compose.waitForIdle()
+        return vm
     }
 
     // ---- node helpers ----
@@ -415,5 +416,32 @@ class SecurityRouteTest {
 
         compose.onNode(hasText(text(R.string.error_unavailable)) and inDialog).assertExists()
         compose.onNode(hasText(text(R.string.twostep_limit_recovery))).assertDoesNotExist()
+    }
+
+    // ---- TP-4.48 (c), A-106: the replacement's snackbar ----
+
+    private val replacedText = "Your authenticator app was replaced."
+
+    @Test
+    fun `TP-4_48 (c) SecurityRoute after showReplaced - the snackbar Your authenticator app was replaced once, then message null`() {
+        val vm = showRoute()
+
+        compose.runOnIdle { vm.showReplaced() }
+        compose.waitUntilAtLeastOneExists(hasText(replacedText), timeoutMillis = 5_000)
+        compose.onAllNodes(hasText(replacedText)).assertCountEquals(1)
+
+        // The snackbar's own timeout, then messageShown().
+        compose.mainClock.advanceTimeBy(15_000)
+        compose.waitUntil(5_000) {
+            compose.waitForIdle()
+            vm.state.message == null
+        }
+        compose.waitUntilDoesNotExist(hasText(replacedText), timeoutMillis = 5_000)
+
+        // Not shown a second time.
+        compose.mainClock.advanceTimeBy(15_000)
+        compose.waitForIdle()
+        compose.onAllNodes(hasText(replacedText)).assertCountEquals(0)
+        assertEquals(null, vm.state.message)
     }
 }
