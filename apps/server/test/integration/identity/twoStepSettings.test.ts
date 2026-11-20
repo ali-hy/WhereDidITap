@@ -97,10 +97,21 @@ const CODE_INVALID = {
 };
 
 /** A password user without two-step, and a session confirmed at `confirmedAt`. */
+/**
+ * The access token lasts an hour, past the 15-minute setup window, so the expiry cases reach the
+ * setup check rather than the auth hook's 401.
+ */
+const ACCESS_EXPIRES_AT = NOW.add({ hours: 1 });
+
 async function passwordUser(confirmedAt: Temporal.Instant) {
   const user = await userFactory(h);
   await passwordFactory(h, user.id);
-  const session = await sessionFactory(h, { userId: user.id, now: NOW, confirmedAt });
+  const session = await sessionFactory(h, {
+    userId: user.id,
+    now: NOW,
+    confirmedAt,
+    accessExpiresAt: ACCESS_EXPIRES_AT,
+  });
   return { user, session };
 }
 
@@ -110,7 +121,12 @@ async function twoStepSignedIn(confirmedAt: Temporal.Instant, codesAcknowledged?
     now: NOW,
     ...(codesAcknowledged === undefined ? {} : { codesAcknowledged }),
   });
-  const session = await sessionFactory(h, { userId: user.id, now: NOW, confirmedAt });
+  const session = await sessionFactory(h, {
+    userId: user.id,
+    now: NOW,
+    confirmedAt,
+    accessExpiresAt: ACCESS_EXPIRES_AT,
+  });
   return { user, codes, session };
 }
 
