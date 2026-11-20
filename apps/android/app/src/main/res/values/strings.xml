@@ -193,6 +193,7 @@
     <string name="twostep_lost_help_body">Use one of your recovery codes. If you don\'t have them, contact the administrator, who can turn two-step verification off for you.</string>
     <string name="twostep_limit_recovery">You can still use a recovery code.</string>
     <string name="twostep_setup_title">Turn on two-step verification</string>
+    <string name="twostep_replaced">Your authenticator app was replaced.</string>
     <string name="twostep_setup_scan">Scan this code</string>
     <string name="twostep_setup_cant_scan">Can\'t scan? Enter this key instead:</string>
     <string name="twostep_setup_steps">1. Open your authenticator app (for example Google Authenticator, Microsoft Authenticator, 1Password). 2. Add an account and scan the code. 3. Enter the 6-digit code it shows.</string>

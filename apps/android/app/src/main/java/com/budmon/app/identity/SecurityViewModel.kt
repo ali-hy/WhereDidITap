@@ -204,6 +204,11 @@ class SecurityViewModel
             state = state.copy(newCodes = null, acknowledged = false)
         }
 
+        /** After an authenticator replacement: the confirmation shows here. */
+        fun showReplaced() {
+            state = state.copy(message = UiText(R.string.twostep_replaced))
+        }
+
         fun messageShown() {
             state = state.copy(message = null)
         }

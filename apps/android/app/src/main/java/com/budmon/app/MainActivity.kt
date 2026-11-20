@@ -179,10 +179,16 @@ class MainActivity : ComponentActivity() {
                                                     "$ROUTE_TWO_STEP_SETUP?mode={mode}",
                                                     arguments = listOf(navArgument("mode") { type = NavType.StringType; defaultValue = "setup" }),
                                                 ) { entry ->
+                                                    val setup = hiltViewModel<TwoStepSetupViewModel>()
+                                                    val security: SecurityViewModel =
+                                                        hiltViewModel(remember(entry) { nav.getBackStackEntry(ROUTE_SECURITY) })
                                                     TwoStepSetupRoute(
-                                                        viewModel = hiltViewModel<TwoStepSetupViewModel>(),
+                                                        viewModel = setup,
                                                         replace = entry.arguments?.getString("mode") == "replace",
-                                                        onDone = { nav.popBackStack() },
+                                                        onDone = {
+                                                            if (setup.replaced) security.showReplaced()
+                                                            nav.popBackStack()
+                                                        },
                                                     )
                                                 }
                                             }

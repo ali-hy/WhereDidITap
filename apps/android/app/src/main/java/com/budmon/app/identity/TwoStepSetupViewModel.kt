@@ -44,6 +44,10 @@ class TwoStepSetupViewModel
             private set
 
         private var replace = false
+
+        /** True once a replacement was confirmed. */
+        var replaced = false
+            private set
         private var started = false
 
         /** Asks for a secret (after a step-up if needed); a second call is ignored. */
@@ -103,6 +107,7 @@ class TwoStepSetupViewModel
                 try {
                     if (replace) {
                         val done = confirmation.withConfirmation { repository.twoStepReplaceConfirm(code) }
+                        if (done != null) replaced = true
                         state = if (done == null) state else state.copy(step = SetupStep.Done, code = "")
                     } else {
                         val codes = confirmation.withConfirmation { repository.twoStepEnable(code) }
