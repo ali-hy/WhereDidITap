@@ -100,7 +100,7 @@ export function TwoStepSetupPage(): JSX.Element {
         setPhase({ kind: "expired" });
         return;
       }
-      if (key === "TWO_STEP_ALREADY_ENABLED") {
+      if (key === "TWO_STEP_ALREADY_ENABLED" || key === "TWO_STEP_NOT_ENABLED") {
         await backToSecurity();
         return;
       }
