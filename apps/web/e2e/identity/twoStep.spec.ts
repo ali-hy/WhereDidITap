@@ -1084,3 +1084,50 @@ test.describe("TP-4.46: replace-mode wording, the sign-in recovery hint and busy
     expect(here(page)).toBe("/settings/security");
   });
 });
+
+test.describe("TP-4.47x: replacing the authenticator after two-step was turned off elsewhere (A-105)", () => {
+  test("TP-4.47x: replace mode, me.twoStepReplaceConfirm answering TWO_STEP_NOT_ENABLED → /settings/security in place of the page, with no toast", async ({
+    page,
+    request,
+  }) => {
+    const { email } = await signedUpUser(page, request, "Replace Off Person");
+    const { auth } = await enableTwoStep(page, { acknowledge: true });
+    await unconfirmSessions(request, email);
+    await page.goto("/settings/security");
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
+    await twoStepSection(page)
+      .getByRole("button", { name: catalogText("Replace authenticator app") })
+      .click();
+    const dialog = confirmDialog(page);
+    await dialog.getByLabel(catalogText("Code")).fill(await auth.nextCode());
+    await dialog.getByRole("button", { name: catalogText("Confirm") }).click();
+    const main = page.locator("main");
+    await expect(main.locator("h1")).toHaveText(looseText("Replace authenticator app"));
+    const confirms: number[] = [];
+    await page.route("**/api/v1/me/two-step/replace/confirm", (route) => {
+      confirms.push(1);
+      return route.fulfill(
+        json(409, {
+          defined: true,
+          code: "TWO_STEP_NOT_ENABLED",
+          status: 409,
+          message: "Two-step not enabled",
+        }),
+      );
+    });
+    const historyLength = await page.evaluate(() => history.length);
+
+    await main.getByLabel(catalogText("Code")).fill("123456");
+    await main.getByRole("button", { name: catalogText("Verify") }).click();
+
+    await expect(page).toHaveURL(/\/settings\/security$/);
+    await expect(main.locator("h1")).toHaveText(looseText("Sign-in & security"));
+    await expect(twoStepSection(page)).toBeVisible();
+    expect(confirms).toHaveLength(1);
+    // navigate({ replace: true }): no history entry added.
+    expect(await page.evaluate(() => history.length)).toBe(historyLength);
+    await expect(toastWith(page, looseText("Your authenticator app was replaced."))).toHaveCount(0);
+    // Kobalte renders each toast as an <li role="status">: none at all.
+    await expect(page.locator("li[role='status']")).toHaveCount(0);
+  });
+});

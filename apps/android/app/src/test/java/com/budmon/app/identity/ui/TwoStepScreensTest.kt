@@ -8,11 +8,14 @@
 // TP-4.45 (b)'s sheet half: Cancel disabled while form.busy (A-104). TP-4.45x: Cancel enabled when
 // not busy; TwoStepRoute's owner dialog (MockK DAO with entries of another user, as TP-4.45 says)
 // whose Cancel pops through onBack (A-104 G-1: "TwoStepRoute passes onBack").
+// B-1 (S-4 re-review): ConfirmItsYouHost's sheet isn't rebuilt (no slide-in again) when the form
+// changes or turns busy; while busy, Back and an outside tap leave it shown.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.identity.ui
 
 import android.content.Context
 import android.view.KeyEvent
+import android.view.MotionEvent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.focusable
@@ -69,6 +72,7 @@ import com.budmon.app.ui.theme.ThemeSetting
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -488,6 +492,138 @@ class TwoStepScreensTest {
         assertNull(coordinator.request.value)
         compose.waitForIdle()
         compose.onNodeWithText(text(R.string.confirm_title)).assertDoesNotExist()
+        scope.cancel()
+    }
+
+    // ---- B-1: the sheet stays put while its form changes (A-104's busy guard) ----
+
+    private val confirmationRequired =
+        ApiException(ApiError.Defined("CONFIRMATION_REQUIRED", 403, buildJsonObject { put("factor", "two_step") }))
+
+    /**
+     * Shows ConfirmItsYouHost and starts a withConfirmation whose first run needs the code factor and
+     * whose second returns "ok"; waits for the sheet to settle. Returns the outcome holder.
+     */
+    private fun openSheet(coordinator: ConfirmationCoordinator, scope: CoroutineScope, runs: AtomicInteger): () -> Result<String?>? {
+        var outcome: Result<String?>? = null
+        show { ConfirmItsYouHost(coordinator) }
+        compose.runOnUiThread {
+            scope.launch {
+                outcome = runCatching {
+                    coordinator.withConfirmation {
+                        if (runs.incrementAndGet() == 1) throw confirmationRequired
+                        "ok"
+                    }
+                }
+            }
+        }
+        compose.waitUntil(5_000) {
+            compose.waitForIdle()
+            coordinator.request.value != null
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText(text(R.string.confirm_title)).assertIsDisplayed()
+        return { outcome }
+    }
+
+    /** The sheet's heading's top in its window. */
+    private fun sheetTop(): Float = compose.onNodeWithText(text(R.string.confirm_title)).fetchSemanticsNode().positionInRoot.y
+
+    /**
+     * Runs [change] on the main thread with the clock paused, then steps [frames] frames: the heading
+     * must stay at [top] on every one. A sheet rebuilt from a new (Hidden) state starts off-screen and
+     * slides in again, which moves it on the first frames.
+     */
+    private fun assertStaysAt(top: Float, frames: Int = 30, change: () -> Unit) {
+        compose.mainClock.autoAdvance = false
+        try {
+            compose.runOnUiThread(change)
+            repeat(frames) { frame ->
+                compose.mainClock.advanceTimeByFrame()
+                assertEquals("frame $frame: the sheet stays in place", top, sheetTop(), 0.5f)
+            }
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
+    }
+
+    @Test
+    fun `TP-4_45x (B-1) ConfirmItsYouHost, typing in the sheet - the sheet stays shown and in place on every frame, not shown again`() {
+        val coordinator = ConfirmationCoordinator(mockk<AuthRepository>())
+        val scope = CoroutineScope(Dispatchers.Main.immediate)
+        openSheet(coordinator, scope, AtomicInteger(0))
+        val top = sheetTop()
+
+        for (typed in listOf("1", "12", "123")) {
+            assertStaysAt(top) { coordinator.onValueChange(typed) }
+        }
+
+        compose.waitForIdle()
+        compose.onNodeWithText(text(R.string.confirm_title)).assertIsDisplayed()
+        assertEquals(ConfirmFactor.TwoStep, coordinator.request.value)
+        scope.cancel()
+    }
+
+    @Test
+    fun `TP-4_45x (B-1) ConfirmItsYouHost, confirm held - busy keeps the sheet in place, Back and an outside tap leave it shown with request non-null, the answer then reruns run()`() {
+        val gate = CompletableDeferred<Unit>()
+        val repository = mockk<AuthRepository> {
+            coEvery { confirm(any(), any(), any()) } coAnswers {
+                gate.await()
+                Instant.parse("2026-11-15T10:20:00Z")
+            }
+        }
+        val coordinator = ConfirmationCoordinator(repository)
+        val scope = CoroutineScope(Dispatchers.Main.immediate)
+        val runs = AtomicInteger(0)
+        val outcome = openSheet(coordinator, scope, runs)
+        compose.runOnUiThread { coordinator.onValueChange("123456") }
+        compose.waitForIdle()
+        val top = sheetTop()
+
+        // Busy flips on: the sheet must not be rebuilt either.
+        assertStaysAt(top) { coordinator.submit() }
+        compose.waitUntil(5_000) {
+            compose.waitForIdle()
+            coordinator.form.value.busy
+        }
+
+        // Back and a tap above the sheet (on the scrim) go to the sheet's window.
+        val sheetRoot =
+            (compose.onNodeWithText(text(R.string.confirm_title)).fetchSemanticsNode().root as ViewRootForTest).view.rootView
+        compose.runOnUiThread {
+            sheetRoot.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK))
+            sheetRoot.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK))
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText(text(R.string.confirm_title)).assertIsDisplayed()
+        assertEquals(ConfirmFactor.TwoStep, coordinator.request.value)
+
+        compose.runOnUiThread {
+            val x = sheetRoot.width / 2f
+            val y = 4f
+            val down = MotionEvent.obtain(0L, 0L, MotionEvent.ACTION_DOWN, x, y, 0)
+            val up = MotionEvent.obtain(0L, 50L, MotionEvent.ACTION_UP, x, y, 0)
+            sheetRoot.dispatchTouchEvent(down)
+            sheetRoot.dispatchTouchEvent(up)
+            down.recycle()
+            up.recycle()
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText(text(R.string.confirm_title)).assertIsDisplayed()
+        assertEquals(ConfirmFactor.TwoStep, coordinator.request.value)
+        assertEquals(top, sheetTop(), 0.5f)
+        assertNull(outcome())
+
+        gate.complete(Unit)
+        compose.waitUntil(5_000) {
+            compose.waitForIdle()
+            outcome() != null
+        }
+
+        assertEquals("ok", outcome()!!.getOrThrow())
+        assertEquals(2, runs.get())
+        coVerify(exactly = 1) { repository.confirm(null, "123456", null) }
         scope.cancel()
     }
 

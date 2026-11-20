@@ -9,6 +9,9 @@
 // - replace: twoStepReplaceConfirm, then Done with no codes step (A-104, F-165's replace mode);
 // - finish: acknowledgeRecoveryCodes only when ticked; a failure keeps the codes (F-165, as
 //   F-214's finishNewCodes).
+// TP-4.47 (a) to (d), A-105's rules (§8.2): a failed start → Failed with the read text; replace
+// mode's TWO_STEP_NOT_ENABLED → Done; submit's errors; finish(). SetupStep.Failed is looked up by
+// name, so while it's missing only the tests that use it fail, not the build.
 // Setup: a MockK AuthRepository, the real ConfirmationCoordinator around it,
 // Dispatchers.setMain(StandardTestDispatcher). `settle` advances virtual time until a condition
 // holds, since the LLD doesn't say which scope the coordinator's submit uses.
@@ -16,6 +19,7 @@
 package com.budmon.app.identity
 
 import com.budmon.app.R
+import com.budmon.app.core.error.Operation
 import com.budmon.app.core.network.ApiError
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -34,6 +38,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -181,7 +186,7 @@ class TwoStepSetupViewModelTest {
     }
 
     @Test
-    fun `TP-4_34x submit with 5 digits - error twostep_code_invalid, no twoStepEnable, step Scan`() = runTest {
+    fun `TP-4_47 (c) submit with 12345 - error twostep_code_invalid, no twoStepEnable, step Scan`() = runTest {
         val vm = scanning()
 
         send(vm, "12345")
@@ -239,13 +244,14 @@ class TwoStepSetupViewModelTest {
         }
 
     @Test
-    fun `TP-4_34x twoStepEnable answered TWO_STEP_SETUP_EXPIRED - step Expired, busy false`() = runTest {
+    fun `TP-4_47 (c) twoStepEnable answered TWO_STEP_SETUP_EXPIRED - step Expired, formError null, busy false`() = runTest {
         coEvery { repository.twoStepEnable("123456") } throws defined("TWO_STEP_SETUP_EXPIRED", 410)
         val vm = scanning()
 
         send(vm, "123456")
 
         assertEquals(SetupStep.Expired, vm.state.step)
+        assertNull(vm.state.formError)
         assertFalse(vm.state.busy)
     }
 
@@ -346,7 +352,7 @@ class TwoStepSetupViewModelTest {
     }
 
     @Test
-    fun `TP-4_34x Codes, not ticked, finish - ignored, no acknowledgeRecoveryCodes, step Codes`() = runTest {
+    fun `TP-4_47 (d) Codes, not ticked, finish - ignored, no acknowledgeRecoveryCodes, step Codes`() = runTest {
         val vm = onCodes()
 
         vm.finish()
@@ -370,4 +376,192 @@ class TwoStepSetupViewModelTest {
         coVerify(exactly = 0) { repository.acknowledgeRecoveryCodes() }
         assertEquals(SetupStep.Codes, vm.state.step)
     }
+
+    // ---- TP-4.47, A-105 ----
+
+    /** A-105's new step, by name (see the header). */
+    private val failed: SetupStep
+        get() = SetupStep.entries.firstOrNull { it.name == "Failed" } ?: error("SetupStep.Failed is missing (A-105)")
+
+    private val unavailable = ApiException(ApiError.Unavailable)
+    private val internal = ApiError.Defined("INTERNAL", 500, buildJsonObject { put("outcome", "not_applied") })
+    private val notEnabled = defined("TWO_STEP_NOT_ENABLED", 409)
+
+    /** Starts a view model whose first twoStepSetup throws [thrown]; later calls return the secret. */
+    private fun TestScope.failedStart(thrown: Throwable): TwoStepSetupViewModel {
+        var calls = 0
+        coEvery { repository.twoStepSetup() } answers {
+            calls += 1
+            if (calls == 1) throw thrown
+            secret
+        }
+        val (vm, _) = subject()
+        vm.start(false)
+        advanceUntilIdle()
+        return vm
+    }
+
+    @Test
+    fun `TP-4_47 (a) start(false), twoStepSetup answered 503 - step Failed, formError the read text, busy false`() = runTest {
+        val vm = failedStart(unavailable)
+
+        assertEquals(failed, vm.state.step)
+        assertEquals(IdentityErrorMessages.forError(ApiError.Unavailable, Operation.Read), vm.state.formError)
+        assertFalse(vm.state.busy)
+    }
+
+    @Test
+    fun `TP-4_47 (a) start(false), twoStepSetup failing with Network - step Failed, formError the read text`() = runTest {
+        val vm = failedStart(ApiException(ApiError.Network))
+
+        assertEquals(failed, vm.state.step)
+        assertEquals(IdentityErrorMessages.forError(ApiError.Network, Operation.Read), vm.state.formError)
+    }
+
+    @Test
+    fun `TP-4_47 (a) start(false), twoStepSetup throwing IllegalStateException - step Failed with Unknown's read text, then startAgain - step Scan with the secret`() =
+        runTest {
+            val vm = failedStart(IllegalStateException("not an ApiException"))
+            assertEquals(failed, vm.state.step)
+            assertEquals(IdentityErrorMessages.forError(ApiError.Unknown, Operation.Read), vm.state.formError)
+
+            vm.startAgain()
+            settle("step Scan") { vm.state.step == SetupStep.Scan }
+
+            coVerify(exactly = 2) { repository.twoStepSetup() }
+            assertEquals(secret, vm.state.secret)
+        }
+
+    @Test
+    fun `TP-4_47x start(false) answered INTERNAL not_applied - formError the read text, not the mutation text`() = runTest {
+        val vm = failedStart(ApiException(internal))
+
+        assertEquals(failed, vm.state.step)
+        assertEquals(IdentityErrorMessages.forError(internal, Operation.Read), vm.state.formError)
+        assertNotEquals(IdentityErrorMessages.forError(internal, Operation.Mutation), vm.state.formError)
+    }
+
+    @Test
+    fun `TP-4_47x Failed, startAgain failing again - step Failed again`() = runTest {
+        coEvery { repository.twoStepSetup() } throws unavailable
+        val (vm, _) = subject()
+        vm.start(false)
+        advanceUntilIdle()
+        assertEquals(failed, vm.state.step)
+
+        vm.startAgain()
+        advanceUntilIdle()
+        settle("step Failed after the second call") { vm.state.step == failed && !vm.state.busy }
+
+        coVerify(exactly = 2) { repository.twoStepSetup() }
+        assertEquals(IdentityErrorMessages.forError(ApiError.Unavailable, Operation.Read), vm.state.formError)
+    }
+
+    @Test
+    fun `TP-4_47x replace mode, twoStepReplaceStart answered 503 - step Failed, then startAgain calls twoStepReplaceStart again, never twoStepSetup`() =
+        runTest {
+            var calls = 0
+            coEvery { repository.twoStepReplaceStart() } answers {
+                calls += 1
+                if (calls == 1) throw unavailable
+                secret
+            }
+            val (vm, _) = subject()
+            vm.start(true)
+            advanceUntilIdle()
+            assertEquals(failed, vm.state.step)
+
+            vm.startAgain()
+            settle("step Scan") { vm.state.step == SetupStep.Scan }
+
+            coVerify(exactly = 2) { repository.twoStepReplaceStart() }
+            coVerify(exactly = 0) { repository.twoStepSetup() }
+        }
+
+    @Test
+    fun `TP-4_47 (b) start(true), twoStepReplaceStart answered TWO_STEP_NOT_ENABLED - step Done, no formError`() = runTest {
+        coEvery { repository.twoStepReplaceStart() } throws notEnabled
+        val (vm, _) = subject()
+
+        vm.start(true)
+        advanceUntilIdle()
+
+        assertEquals(SetupStep.Done, vm.state.step)
+        assertNull(vm.state.formError)
+    }
+
+    @Test
+    fun `TP-4_47 (b) replace mode, twoStepReplaceConfirm answered TWO_STEP_NOT_ENABLED - step Done, no formError, busy false`() = runTest {
+        coEvery { repository.twoStepReplaceConfirm("123456") } throws notEnabled
+        val vm = scanning(replace = true)
+
+        send(vm, "123456")
+
+        coVerify(exactly = 1) { repository.twoStepReplaceConfirm("123456") }
+        assertEquals(SetupStep.Done, vm.state.step)
+        assertNull(vm.state.formError)
+        assertFalse(vm.state.busy)
+    }
+
+    @Test
+    fun `TP-4_47 (c) code 123 456 answered TWO_STEP_CODE_INVALID - twoStepEnable(123456), error twostep_setup_clock_hint, code cleared`() =
+        runTest {
+            coEvery { repository.twoStepEnable("123456") } throws defined("TWO_STEP_CODE_INVALID", 400)
+            val vm = scanning()
+
+            send(vm, "123 456")
+
+            coVerify(exactly = 1) { repository.twoStepEnable("123456") }
+            assertEquals(R.string.twostep_setup_clock_hint, vm.state.error)
+            assertEquals("", vm.state.code)
+            assertEquals(SetupStep.Scan, vm.state.step)
+        }
+
+    @Test
+    fun `TP-4_47 (c) twoStepEnable answered 503 - formError the mutation text, step Scan, the code kept`() = runTest {
+        coEvery { repository.twoStepEnable("123456") } throws unavailable
+        val vm = scanning()
+
+        send(vm, "123456")
+
+        assertEquals(IdentityErrorMessages.forError(ApiError.Unavailable, Operation.Mutation), vm.state.formError)
+        assertEquals(SetupStep.Scan, vm.state.step)
+        assertEquals("123456", vm.state.code)
+        assertNull(vm.state.error)
+    }
+
+    @Test
+    fun `TP-4_47x twoStepEnable answered INTERNAL not_applied - formError the mutation text, not the read text`() = runTest {
+        coEvery { repository.twoStepEnable("123456") } throws ApiException(internal)
+        val vm = scanning()
+
+        send(vm, "123456")
+
+        assertEquals(IdentityErrorMessages.forError(internal, Operation.Mutation), vm.state.formError)
+        assertNotEquals(IdentityErrorMessages.forError(internal, Operation.Read), vm.state.formError)
+    }
+
+    @Test
+    fun `TP-4_47 (d) Codes, ticked, finish failing then succeeding - the codes kept with formError, then Done with the codes empty`() =
+        runTest {
+            var calls = 0
+            coEvery { repository.acknowledgeRecoveryCodes() } answers {
+                calls += 1
+                if (calls == 1) throw unavailable
+            }
+            val vm = onCodes()
+            vm.onAcknowledgedChange(true)
+
+            vm.finish()
+            settle("formError after the failure") { vm.state.formError != null && !vm.state.busy }
+            assertEquals(SetupStep.Codes, vm.state.step)
+            assertEquals(codes, vm.state.codes)
+            assertEquals(IdentityErrorMessages.forError(ApiError.Unavailable, Operation.Mutation), vm.state.formError)
+
+            vm.finish()
+            settle("step Done") { vm.state.step == SetupStep.Done && !vm.state.busy }
+
+            coVerify(exactly = 2) { repository.acknowledgeRecoveryCodes() }
+            assertEquals(emptyList<String>(), vm.state.codes)
+        }
 }

@@ -12,6 +12,8 @@
 // itself ("asks for the step-up on start", §8.2), so the tests never call start().
 // "No handler" is Robolectric's checkActivities(true): startActivity then throws
 // ActivityNotFoundException for an intent nothing resolves.
+// TP-4.47 (b) and (e), A-105: replace mode's TWO_STEP_NOT_ENABLED leaves with no twostep_replaced;
+// the Failed step's Try again.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.identity.ui
 
@@ -40,6 +42,9 @@ import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.budmon.app.R
+import com.budmon.app.core.error.UiText
+import com.budmon.app.core.network.ApiError
+import com.budmon.app.identity.ApiException
 import com.budmon.app.identity.AuthRepository
 import com.budmon.app.identity.ConfirmationCoordinator
 import com.budmon.app.identity.SetupStep
@@ -52,6 +57,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -436,5 +442,91 @@ class TwoStepSetupRouteTest {
             R.string.twostep_setup_copy to "Copy",
         )
         for ((id, value) in expected) assertEquals(value, text(id))
+    }
+
+    // ---- TP-4.47 (b) and (e), A-105 ----
+
+    /** A-105's new step, by name, so while it's missing only these tests fail, not the build. */
+    private val failed: SetupStep
+        get() = SetupStep.entries.firstOrNull { it.name == "Failed" } ?: error("SetupStep.Failed is missing (A-105)")
+
+    private fun replacedShown() = compose.onAllNodes(hasText("Your authenticator app was replaced.")).fetchSemanticsNodes().isNotEmpty()
+
+    /** Shows the route in replace mode with a counting onDone; returns the view model and the counter. */
+    private fun showReplace(): Pair<TwoStepSetupViewModel, Counter> {
+        val vm = TwoStepSetupViewModel(repository, ConfirmationCoordinator(repository))
+        val done = Counter()
+        compose.setContent {
+            AppTheme(ThemeSetting.LIGHT) {
+                TwoStepSetupRoute(viewModel = vm, replace = true, onDone = done.call)
+            }
+        }
+        return vm to done
+    }
+
+    @Test
+    fun `TP-4_47 (b) the route in replace mode, twoStepReplaceStart answered TWO_STEP_NOT_ENABLED - onDone once, no twostep_replaced`() {
+        coEvery { repository.twoStepReplaceStart() } throws
+            ApiException(ApiError.Defined("TWO_STEP_NOT_ENABLED", 409, null))
+        val (_, done) = showReplace()
+
+        compose.waitUntil(5_000) { done.calls > 0 }
+        compose.waitForIdle()
+
+        assertEquals(1, done.calls)
+        assertFalse("no twostep_replaced snackbar", replacedShown())
+    }
+
+    @Test
+    fun `TP-4_47 (b) the route in replace mode, twoStepReplaceConfirm answered TWO_STEP_NOT_ENABLED - onDone once, no twostep_replaced`() {
+        coEvery { repository.twoStepReplaceConfirm("123456") } throws
+            ApiException(ApiError.Defined("TWO_STEP_NOT_ENABLED", 409, null))
+        val (vm, done) = showReplace()
+        compose.waitUntil(5_000) { vm.state.step == SetupStep.Scan }
+
+        compose.runOnIdle {
+            vm.onCodeChange("123456")
+            vm.submit()
+        }
+        compose.waitUntil(5_000) { done.calls > 0 || (vm.state.formError != null && !vm.state.busy) }
+        compose.waitForIdle()
+
+        assertEquals(1, done.calls)
+        assertFalse("no twostep_replaced snackbar", replacedShown())
+    }
+
+    private fun showFailed(startAgain: Counter) {
+        compose.setContent {
+            AppTheme(ThemeSetting.LIGHT) {
+                TwoStepSetupScreen(
+                    state = state(failed).copy(secret = null, formError = UiText(R.string.error_unavailable)),
+                    onCodeChange = {},
+                    onSubmit = {},
+                    onOpenInApp = {},
+                    onCopyKey = {},
+                    onStartAgain = startAgain.call,
+                )
+            }
+        }
+        compose.waitForIdle()
+    }
+
+    @Test
+    fun `TP-4_47 (e) TwoStepSetupScreen Failed - formError's text and Try again calling onStartAgain`() {
+        val startAgain = Counter()
+        showFailed(startAgain)
+
+        compose.onNodeWithText(text(R.string.error_unavailable)).assertExists()
+        compose.onNode(hasText(text(R.string.error_fallback_retry)) and hasClickAction()).inView().performClick()
+
+        assertEquals(1, startAgain.calls)
+    }
+
+    @Test
+    fun `TP-4_47x TwoStepSetupScreen Failed - not the Expired step's text or Start again`() {
+        showFailed(Counter())
+
+        compose.onNodeWithText(text(R.string.twostep_setup_expired)).assertDoesNotExist()
+        compose.onNode(hasText(text(R.string.twostep_setup_start_again)) and hasClickAction()).assertDoesNotExist()
     }
 }
