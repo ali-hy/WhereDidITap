@@ -7,6 +7,8 @@
 // (`entries`, empty unless a test fills it), a relaxed MockK TokenStore (`owner`) and a relaxed MockK
 // OutboxRepository; Dispatchers.setMain(StandardTestDispatcher) so viewModelScope runs on virtual
 // time. `log` records commitSignIn, savePassword and onSignedIn in order; `ended` records onEnded.
+// TP-4.50 (b), A-107: a recovery sign-in posts recoveryCodesLeft to the real RecoveryCodesNotice
+// before onSignedIn.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.identity
 
@@ -75,6 +77,7 @@ class TwoStepViewModelTest {
     private val tokenStore = mockk<TokenStore>(relaxed = true) { coEvery { outboxOwnerUserId() } answers { owner } }
     private val outbox = mockk<OutboxRepository>(relaxed = true)
     private val guard = OutboxOwnerGuard(dao, tokenStore, outbox, repository)
+    private val notice = RecoveryCodesNotice()
 
     private val challenge = TwoStepChallenge(
         token = "bmc_" + "C".repeat(43),
@@ -99,7 +102,7 @@ class TwoStepViewModelTest {
 
     private fun TestScope.viewModel(start: TwoStepChallenge = challenge): TwoStepViewModel {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
-        val vm = TwoStepViewModel(repository, guard)
+        val vm = TwoStepViewModel(repository, guard, notice)
         vm.start(start)
         advanceUntilIdle()
         return vm
@@ -523,7 +526,7 @@ class TwoStepViewModelTest {
         val store = ViewModelStore()
         val factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T = TwoStepViewModel(repository, guard) as T
+            override fun <T : ViewModel> create(modelClass: Class<T>): T = TwoStepViewModel(repository, guard, notice) as T
         }
         val vm = ViewModelProvider(store, factory)[TwoStepViewModel::class.java]
         vm.start(challenge)
@@ -534,5 +537,75 @@ class TwoStepViewModelTest {
 
         // release() cancels on the guard's own IO scope, outside virtual time.
         coVerify(timeout = 5_000, exactly = 1) { repository.abandonSignIn(pending) }
+    }
+
+    // ---- TP-4.50 (b), A-107: RecoveryCodesNotice ----
+
+    /** onSignedIn that records notice.left at the moment it runs. */
+    private fun recordingNotice(seen: MutableList<Int?>): (Me) -> Unit = { seen += notice.left.value }
+
+    @Test
+    fun `TP-4_50 (b) a recovery code answered with recoveryCodesLeft 2 - notice left 2 before onSignedIn`() = runTest {
+        coEvery { repository.verifyTwoStep(challenge, null, "7KQ2M3XD4TRA") } returns TwoStepVerified(pending, 2)
+        val vm = viewModel()
+        vm.toggleRecovery()
+        val seen = mutableListOf<Int?>()
+
+        vm.onValueChange("7KQ2-M3XD-4TRA")
+        vm.submit(savePassword, recordingNotice(seen), onEnded)
+        advanceUntilIdle()
+
+        assertEquals(listOf<Int?>(2), seen)
+        assertEquals(2, notice.left.value)
+    }
+
+    @Test
+    fun `TP-4_50 (b) a code answered with recoveryCodesLeft null - notice left unchanged`() = runTest {
+        notice.post(5)
+        coEvery { repository.verifyTwoStep(challenge, "123456", null) } returns TwoStepVerified(pending, null)
+        val vm = viewModel()
+        val seen = mutableListOf<Int?>()
+
+        vm.onValueChange("123456")
+        vm.submit(savePassword, recordingNotice(seen), onEnded)
+        advanceUntilIdle()
+
+        assertEquals(listOf<Int?>(5), seen)
+        assertEquals(5, notice.left.value)
+    }
+
+    @Test
+    fun `TP-4_50x a code answered with recoveryCodesLeft null on a fresh notice - notice left null`() = runTest {
+        coEvery { repository.verifyTwoStep(challenge, "123456", null) } returns TwoStepVerified(pending, null)
+        val vm = viewModel()
+
+        send(vm, "123456")
+
+        assertNull(notice.left.value)
+        assertEquals(listOf("commit", "save $EMAIL $PASSWORD", "signedIn ${ME.id}"), log)
+    }
+
+    @Test
+    fun `TP-4_50x a recovery code answered TWO_STEP_CODE_INVALID - notice left unchanged, no onSignedIn`() = runTest {
+        coEvery { repository.verifyTwoStep(challenge, null, "7KQ2M3XD4TRA") } throws failure("TWO_STEP_CODE_INVALID", 400)
+        val vm = viewModel()
+        vm.toggleRecovery()
+
+        send(vm, "7KQ2M3XD4TRA")
+
+        assertNull(notice.left.value)
+        assertFalse(log.any { it.startsWith("signedIn") })
+    }
+
+    @Test
+    fun `TP-4_50x RecoveryCodesNotice - post sets left, consume clears it`() {
+        val fresh = RecoveryCodesNotice()
+        assertNull(fresh.left.value)
+
+        fresh.post(3)
+        assertEquals(3, fresh.left.value)
+        fresh.consume()
+
+        assertNull(fresh.left.value)
     }
 }

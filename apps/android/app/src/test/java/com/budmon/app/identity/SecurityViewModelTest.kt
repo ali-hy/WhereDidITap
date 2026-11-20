@@ -5,6 +5,7 @@
 // onMeUpdated; Dispatchers.setMain(StandardTestDispatcher) so viewModelScope runs on virtual time.
 // Errors use Operation.Mutation (A-102).
 // TP-4.48 (b) and TP-4.48x (A-106): showReplaced sets the replacement's message.
+// TP-4.50 (a), A-107: createNewCodes and leaveNewCodes re-read me through onMeUpdated (QA Q-5).
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.identity
 
@@ -511,6 +512,57 @@ class SecurityViewModelTest {
 
         vm.messageShown()
 
+        assertNull(vm.state.message)
+    }
+
+    // ---- TP-4.50 (a), A-107: me re-read after new codes and after Back ----
+
+    @Test
+    fun `TP-4_50 (a) createNewCodes(onMeUpdated) succeeding, then leaveNewCodes(onMeUpdated) - getMe after each, onMeUpdated twice`() =
+        runTest {
+            val vm = viewModel()
+
+            vm.createNewCodes(onMeUpdated)
+            advanceUntilIdle()
+            assertEquals(codes, vm.state.newCodes)
+            coVerify(exactly = 1) { repository.getMe() }
+            assertEquals(listOf(meAfter), updates)
+
+            vm.leaveNewCodes(onMeUpdated)
+            advanceUntilIdle()
+
+            assertNull(vm.state.newCodes)
+            coVerify(exactly = 2) { repository.getMe() }
+            assertEquals(listOf(meAfter, meAfter), updates)
+            coVerify(exactly = 0) { repository.acknowledgeRecoveryCodes() }
+        }
+
+    @Test
+    fun `TP-4_50x createNewCodes(onMeUpdated) cancelled at the step-up - no getMe, no onMeUpdated`() = runTest {
+        coEvery { repository.regenerateRecoveryCodes() } throws
+            failure("CONFIRMATION_REQUIRED", 403, buildJsonObject { put("factor", "password") })
+        val vm = viewModel()
+
+        vm.createNewCodes(onMeUpdated)
+        advanceUntilIdle()
+        coordinator.cancel()
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { repository.getMe() }
+        assertTrue(updates.isEmpty())
+    }
+
+    @Test
+    fun `TP-4_50x leaveNewCodes(onMeUpdated) with getMe failing - newCodes null, no onMeUpdated, no message`() = runTest {
+        val vm = viewModel()
+        showNewCodes(vm)
+        coEvery { repository.getMe() } throws ApiException(ApiError.Network)
+
+        vm.leaveNewCodes(onMeUpdated)
+        advanceUntilIdle()
+
+        assertNull(vm.state.newCodes)
+        assertTrue(updates.isEmpty())
         assertNull(vm.state.message)
     }
 }

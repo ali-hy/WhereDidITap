@@ -13,6 +13,8 @@
 // mode's TWO_STEP_NOT_ENABLED → Done; submit's errors; finish(). SetupStep.Failed is looked up by
 // name, so while it's missing only the tests that use it fail, not the build.
 // TP-4.48 (a), A-106: replaced is true only after a confirmed replacement.
+// TP-4.50 (f), A-107: submit checks the setup's expiry first (a fixed Clock), so a dead setup asks for
+// no step-up. Every other test runs at beforeExpiry.
 // TP-4.47x: startAgain() is ignored while a load is in flight (A-105, "ignored while busy").
 // Setup: a MockK AuthRepository, the real ConfirmationCoordinator around it,
 // Dispatchers.setMain(StandardTestDispatcher). `settle` advances virtual time until a condition
@@ -48,7 +50,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.time.Clock
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.concurrent.atomic.AtomicInteger
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -74,10 +78,13 @@ class TwoStepSetupViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun TestScope.subject(): Pair<TwoStepSetupViewModel, ConfirmationCoordinator> {
+    /** Ten minutes before the secret's expiresAt. */
+    private val beforeExpiry: Clock = Clock.fixed(Instant.parse("2026-11-15T10:00:00Z"), ZoneOffset.UTC)
+
+    private fun TestScope.subject(clock: Clock = beforeExpiry): Pair<TwoStepSetupViewModel, ConfirmationCoordinator> {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         val coordinator = ConfirmationCoordinator(repository)
-        return TwoStepSetupViewModel(repository, coordinator) to coordinator
+        return TwoStepSetupViewModel(repository, coordinator, clock) to coordinator
     }
 
     private fun TestScope.settle(
@@ -734,5 +741,64 @@ class TwoStepSetupViewModelTest {
         assertEquals(2, calls.get())
         gate.complete(Unit)
         settle("step Scan") { vm.state.step == SetupStep.Scan }
+    }
+
+    // ---- TP-4.50 (f), A-107: the expiry pre-check ----
+
+    private val atExpiry: Clock = Clock.fixed(secret.expiresAt, ZoneOffset.UTC)
+
+    /** A view model on Scan whose clock is [clock] (setup unless [replace]). */
+    private fun TestScope.scanningAt(clock: Clock, replace: Boolean = false): TwoStepSetupViewModel {
+        val (vm, _) = subject(clock)
+        vm.start(replace)
+        advanceUntilIdle()
+        assertEquals(SetupStep.Scan, vm.state.step)
+        return vm
+    }
+
+    @Test
+    fun `TP-4_50 (f) submit with the clock at expiresAt - step Expired, no twoStepEnable call`() = runTest {
+        val vm = scanningAt(atExpiry)
+
+        send(vm, "123456")
+
+        assertEquals(SetupStep.Expired, vm.state.step)
+        coVerify(exactly = 0) { repository.twoStepEnable(any()) }
+        coVerify(exactly = 0) { repository.confirm(any(), any(), any()) }
+    }
+
+    @Test
+    fun `TP-4_50x replace mode, submit with the clock past expiresAt - step Expired, no twoStepReplaceConfirm call`() = runTest {
+        val vm = scanningAt(Clock.fixed(secret.expiresAt.plusSeconds(60), ZoneOffset.UTC), replace = true)
+
+        send(vm, "123456")
+
+        assertEquals(SetupStep.Expired, vm.state.step)
+        coVerify(exactly = 0) { repository.twoStepReplaceConfirm(any()) }
+    }
+
+    @Test
+    fun `TP-4_50x submit 1 ms before expiresAt - twoStepEnable(123456) called, step Codes`() = runTest {
+        val vm = scanningAt(Clock.fixed(secret.expiresAt.minusMillis(1), ZoneOffset.UTC))
+
+        vm.onCodeChange("123456")
+        vm.submit()
+        settle("step Codes") { vm.state.step == SetupStep.Codes }
+
+        coVerify(exactly = 1) { repository.twoStepEnable("123456") }
+    }
+
+    @Test
+    fun `TP-4_50x submit at expiresAt needing a step-up - no step-up asked, step Expired`() = runTest {
+        coEvery { repository.twoStepEnable(any()) } throws
+            ApiException(ApiError.Defined("CONFIRMATION_REQUIRED", 403, buildJsonObject { put("factor", "password") }))
+        val (vm, coordinator) = subject(atExpiry)
+        vm.start(false)
+        advanceUntilIdle()
+
+        send(vm, "123456")
+
+        assertNull(coordinator.request.value)
+        assertEquals(SetupStep.Expired, vm.state.step)
     }
 }

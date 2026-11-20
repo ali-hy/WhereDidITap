@@ -2,6 +2,7 @@
 // menu with Sign-in & security, and SecurityScreen's two-step section. TP-4.40, plus TP-4.40x.
 // Screens get fake lambdas that count their calls. `me` is ME with Me's flat two-step fields
 // (twoStepEnabled, codesAcknowledged; A-103 (2)).
+// TP-4.50 (d), A-107: "N recovery codes left" under the status while two-step is on.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.identity.ui
 
@@ -186,5 +187,41 @@ class SecurityScreenTest {
             R.string.twostep_codes_done to "Done",
         )
         for ((id, value) in expected) assertEquals(value, text(id))
+    }
+
+    // ---- TP-4.50 (d), A-107: recovery codes left (twostep_codes_left, plurals) ----
+
+    private fun exists(text: String) = compose.onAllNodes(hasText(text)).fetchSemanticsNodes().isNotEmpty()
+
+    @Test
+    fun `TP-4_50 (d) SecurityScreen with two-step on and 8 codes left - 8 recovery codes left`() {
+        showSecurity(onSaved.copy(recoveryCodesLeft = 8))
+
+        compose.onNode(hasText("8 recovery codes left")).inView().assertIsDisplayed()
+    }
+
+    @Test
+    fun `TP-4_50x SecurityScreen with two-step on and 1 code left - 1 recovery code left (singular)`() {
+        showSecurity(onSaved.copy(recoveryCodesLeft = 1))
+
+        compose.onNode(hasText("1 recovery code left")).inView().assertIsDisplayed()
+        assertTrue("no plural form", !exists("1 recovery codes left"))
+    }
+
+    @Test
+    fun `TP-4_50x SecurityScreen with two-step off - no recovery codes left line`() {
+        showSecurity(off)
+
+        assertTrue(!exists("0 recovery codes left"))
+        assertTrue(compose.onAllNodes(hasText("recovery codes left", substring = true)).fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun `TP-4_50x SecurityScreen with two-step on, 8 codes left - the count below the status On`() {
+        showSecurity(onSaved.copy(recoveryCodesLeft = 8))
+
+        val statusBottom = compose.onNode(hasText(text(R.string.twostep_status_on))).fetchSemanticsNode().boundsInRoot.bottom
+        val countTop = compose.onNode(hasText("8 recovery codes left")).fetchSemanticsNode().boundsInRoot.top
+        assertTrue("the count is under the status line", countTop >= statusBottom)
     }
 }

@@ -10,6 +10,8 @@
 // whose Cancel pops through onBack (A-104 G-1: "TwoStepRoute passes onBack").
 // B-1 (S-4 re-review): ConfirmItsYouHost's sheet isn't rebuilt (no slide-in again) when the form
 // changes or turns busy; while busy, Back and an outside tap leave it shown.
+// TP-4.50 (e), A-107: the step-up sheet's code field is confirm_code "Code from your authenticator
+// app"; recovery mode keeps twostep_recovery; the sign-in screen keeps twostep_code.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.identity.ui
 
@@ -61,6 +63,7 @@ import com.budmon.app.identity.ConfirmationCoordinator
 import com.budmon.app.identity.ME
 import com.budmon.app.identity.OutboxOwnerGuard
 import com.budmon.app.identity.PendingSignIn
+import com.budmon.app.identity.RecoveryCodesNotice
 import com.budmon.app.identity.TwoStepChallenge
 import com.budmon.app.identity.TwoStepFormState
 import com.budmon.app.identity.TwoStepVerified
@@ -133,6 +136,9 @@ class TwoStepScreensTest {
     /** The editable field whose label (content description, P-A-524's AppTextField) is [labelId]. */
     private fun field(labelId: Int): SemanticsNodeInteraction =
         compose.onNode(hasContentDescription(text(labelId)) and SemanticsMatcher.keyIsDefined(SemanticsProperties.EditableText))
+
+    /** A-107: the step-up sheet's code field label. */
+    private val confirmCode = R.string.confirm_code
 
     private val emptyText = SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString(""))
 
@@ -266,7 +272,7 @@ class TwoStepScreensTest {
         }
         val dao = mockk<OutboxDao> { coEvery { countAll() } returns 0 }
         val guard = OutboxOwnerGuard(dao, mockk(relaxed = true), mockk(relaxed = true), repository)
-        val vm = TwoStepViewModel(repository, guard)
+        val vm = TwoStepViewModel(repository, guard, RecoveryCodesNotice())
         vm.start(challenge)
         val back = Counter()
         show { TwoStepRoute(viewModel = vm, savePassword = { _, _ -> }, onSignedIn = {}, onEnded = {}, onBack = back.call) }
@@ -309,14 +315,14 @@ class TwoStepScreensTest {
     }
 
     @Test
-    fun `TP-4_35x ConfirmItsYouSheet TwoStep - Confirm it's you, the Code field, Confirm calls onSubmit, Cancel calls onCancel`() {
+    fun `TP-4_35x ConfirmItsYouSheet TwoStep - Confirm it's you, the code field, Confirm calls onSubmit, Cancel calls onCancel`() {
         val submit = Counter()
         val cancel = Counter()
         val values = Counter()
         showSheet(ConfirmFactor.TwoStep, mutableStateOf(confirmForm()), submit = submit, cancel = cancel, values = values)
 
         compose.onNodeWithText(text(R.string.confirm_title)).assertIsDisplayed()
-        field(R.string.twostep_code).performTextInput("123456")
+        field(confirmCode).performTextInput("123456")
         button(R.string.confirm_submit).performClick()
         assertEquals("123456", values.last)
         assertEquals(1, submit.calls)
@@ -421,7 +427,7 @@ class TwoStepScreensTest {
             coEvery { outboxOwnerUserId() } returns "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a77"
         }
         val guard = OutboxOwnerGuard(dao, tokenStore, mockk(relaxed = true), repository)
-        val vm = TwoStepViewModel(repository, guard)
+        val vm = TwoStepViewModel(repository, guard, RecoveryCodesNotice())
         vm.start(challenge)
         val back = Counter()
         val signedIn = Counter()
@@ -473,7 +479,7 @@ class TwoStepScreensTest {
             coordinator.request.value != null
         }
         compose.onNodeWithText(text(R.string.confirm_title)).assertIsDisplayed()
-        field(R.string.twostep_code).assertExists()
+        field(confirmCode).assertExists()
 
         // Back goes to the sheet's window, as a real key press does.
         val sheetRoot =
@@ -657,5 +663,32 @@ class TwoStepScreensTest {
             R.string.twostep_open_app to "Open in authenticator app",
         )
         for ((id, value) in expected) assertEquals(value, text(id))
+    }
+
+    // ---- TP-4.50 (e), A-107: the step-up's code field ----
+
+    @Test
+    fun `TP-4_50 (e) ConfirmItsYouSheet TwoStep - the field labelled Code from your authenticator app, not Code`() {
+        showSheet(ConfirmFactor.TwoStep, mutableStateOf(confirmForm()))
+
+        assertEquals("Code from your authenticator app", text(confirmCode))
+        field(confirmCode).assertExists()
+        field(R.string.twostep_code).assertDoesNotExist()
+    }
+
+    @Test
+    fun `TP-4_50x ConfirmItsYouSheet TwoStep in recovery mode - the field still labelled Recovery code`() {
+        showSheet(ConfirmFactor.TwoStep, mutableStateOf(confirmForm(useRecovery = true)))
+
+        field(R.string.twostep_recovery).assertExists()
+        field(confirmCode).assertDoesNotExist()
+    }
+
+    @Test
+    fun `TP-4_50x TwoStepScreen (sign-in) - the field still labelled Code`() {
+        showTwoStep(mutableStateOf(twoStepForm()))
+
+        field(R.string.twostep_code).assertExists()
+        field(confirmCode).assertDoesNotExist()
     }
 }

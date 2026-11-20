@@ -1,5 +1,7 @@
 // F-214 SecurityRoute and TurnOffTwoStepDialog (identity LLD §8.2's S-4 signatures, A-100, A-101).
 // TP-4.42 rows (a) to (d), plus TP-4.42x. TP-4.48 (c) (A-106): the replacement's snackbar.
+// TP-4.50x (A-107, QA Q-5): Back from the new codes shows the unsaved-codes banner at once;
+// startNewCodes opens the codes once.
 // Setup per TP-4.42: a Compose rule in a test activity (FLAG_SECURE is read from its window); a
 // MockK AuthRepository; the real SecurityViewModel and ConfirmationCoordinator around it. The host
 // keeps `me` in a mutableStateOf that onMeUpdated updates (P-A-534), as MainActivity's session does.
@@ -99,7 +101,7 @@ class SecurityRouteTest {
         compose.activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0
 
     /** Shows SecurityRoute for [initial] (its host keeps `me` updated by onMeUpdated); returns the view model. */
-    private fun showRoute(initial: Me = meOn): SecurityViewModel {
+    private fun showRoute(initial: Me = meOn, startNewCodes: Boolean = false): SecurityViewModel {
         val vm = SecurityViewModel(repository, ConfirmationCoordinator(repository))
         val me = mutableStateOf(initial)
         compose.setContent {
@@ -114,6 +116,7 @@ class SecurityRouteTest {
                     onTurnOn = {},
                     onReplace = {},
                     onBack = {},
+                    startNewCodes = startNewCodes,
                 )
             }
         }
@@ -443,5 +446,47 @@ class SecurityRouteTest {
         compose.waitForIdle()
         compose.onAllNodes(hasText(replacedText)).assertCountEquals(0)
         assertEquals(null, vm.state.message)
+    }
+
+    // ---- TP-4.50x, A-107: the banner after Back (QA Q-5), startNewCodes ----
+
+    @Test
+    fun `TP-4_50x (Q-5) Create new codes, then Back without Done - You may not have saved your recovery codes shows at once, no reopen`() {
+        // Regenerating leaves the new codes unacknowledged on the server.
+        coEvery { repository.regenerateRecoveryCodes() } answers {
+            serverMe = serverMe.copy(codesAcknowledged = false)
+            codes
+        }
+        showRoute()
+        compose.onAllNodes(hasText(text(R.string.twostep_codes_unsaved))).assertCountEquals(0)
+        createNewCodes()
+
+        systemBack()
+
+        assertSectionShown()
+        compose.waitUntilAtLeastOneExists(hasText(text(R.string.twostep_codes_unsaved)), timeoutMillis = 5_000)
+        assertEquals(false, updates.last().codesAcknowledged)
+        coVerify(exactly = 0) { repository.acknowledgeRecoveryCodes() }
+    }
+
+    @Test
+    fun `TP-4_50x startNewCodes true - the regenerated codes without a tap, regenerateRecoveryCodes once`() {
+        showRoute(startNewCodes = true)
+
+        compose.waitUntilAtLeastOneExists(code(codes[0]), timeoutMillis = 5_000)
+        compose.waitForIdle()
+
+        coVerify(exactly = 1) { repository.regenerateRecoveryCodes() }
+    }
+
+    @Test
+    fun `TP-4_50x startNewCodes true, then Back - the section, not the codes again`() {
+        showRoute(startNewCodes = true)
+        compose.waitUntilAtLeastOneExists(code(codes[0]), timeoutMillis = 5_000)
+
+        systemBack()
+
+        assertSectionShown()
+        coVerify(exactly = 1) { repository.regenerateRecoveryCodes() }
     }
 }
