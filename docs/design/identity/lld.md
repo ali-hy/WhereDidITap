@@ -2,7 +2,7 @@
 module: identity
 doc: lld
 status: approved # draft | in-review | approved
-version: 0.54
+version: 0.55
 hld_version: 0.12
 author: planner
 approved_by: main conversation on the owner's behalf (delegation 2026-10-07, "auto approve the hlds as well just keep going"); the owner reviewed and confirmed every flagged decision on 2026-11-14; plan re-review passed 2026-11-14
@@ -77,6 +77,7 @@ This document doesn't restate the HLD's rationale.
 | 0.52    | 2026-11-20 | **Implementation-time amendment A-103** (S-4 test-architect; approval stands): view-model state as Compose snapshot state (`SecurityViewModel.state` corrected); Android `Me`'s flat two-step fields; the recovery hint only for a rate-limited 6-digit code; `Operation.Read` in `TwoStepViewModel`; the banner gone after **Done**. TP-4.40 corrected; new TP-4.44. |
 | 0.53    | 2026-11-20 | **Implementation-time amendment A-104** (S-4 code review; approval stands): two-step owner-dialog Cancel returns to sign-in; replace-mode wording; no dismissal while busy; web sign-in hint for codes only; F-67's `req`; "Scan this code" and Android's "Copied." used; platform A-540 for Kobalte imports. New TP-4.45, TP-4.46. No new texts. |
 | 0.54    | 2026-11-20 | **Implementation-time amendment A-105** (S-4 test-architect; approval stands): `TwoStepSetupViewModel`'s rules stated in §8.2, a `Failed` step with **Try again**, and `TWO_STEP_NOT_ENABLED` → back to Sign-in & security on both platforms. New TP-4.47. |
+| 0.55    | 2026-11-20 | **Implementation-time amendment A-106** (approval stands): the replacement hand-over to Sign-in & security recorded as built (`TwoStepSetupViewModel.replaced`, `SecurityViewModel.showReplaced()`). New TP-4.48. |
 
 ## Amendments
 
@@ -189,6 +190,7 @@ The rows below are identity's own amendments. Text that cites one says "(A-n)" n
 | A-103 | S-4 test-architect (after 720405b): five questions | **(1)** Android view models expose Compose snapshot state (`mutableStateOf`, `private set`) as S-1 to S-3 do; A-101's `StateFlow<SecurityState>` was the outlier and is corrected; `TwoStepViewModel.form` and `TwoStepSetupViewModel.state` already read that way; `ConfirmationCoordinator` keeps its `StateFlow`s. The tests change, not the code. **(2)** Android's `Me` has F-204's flat `twoStepEnabled`, `recoveryCodesLeft`, `codesAcknowledged`; §8.2 and TP-4.40's `me.twoStep.*` corrected. **(3)** `showRecoveryHint` (and the web Turn off's extra line) only when the limited attempt was a 6-digit code. **(4)** `TwoStepViewModel`'s error texts, the catch-all included, use `Operation.Read`. **(5)** Yes: after a successful **Done** the section re-reads `me` and the banner is gone. All as built. | §8.2, F-164; TP-4.40, TP-4.44 | none | planner decision |
 | A-104 | S-4 code review on 03b5ba8 (B-1, G-1, G-2, m-1, m-2, N-1, N-5, N-6) | **B-1:** Kobalte namespace imports, platform A-540 (identity's two files already switched in fe862b0). **G-1:** the outbox-owner dialog's **Cancel** during two-step sign-in returns to sign-in with no message (the challenge is already consumed; staying would only produce a false "timed out"): `keepOtherUsersEntries(onCancelled)`. **G-2:** replace mode on both platforms: heading `twostep.replace`, no step line, submit `twostep.verify`; success `twostep.replaced`; all approved texts. **m-1 and N-6:** a dialog or sheet with a request in flight can't be dismissed (Android step-up sheet, web step-up dialog, web Turn off and codes dialogs), as A-101 says for Android's Turn off. **m-2:** A-103 (3)'s code-only hint on the web sign-in page too. **N-1:** F-67 takes `req`. **N-5:** keep both strings and use them: `twostep.setup.scan` becomes the scan step's heading (HLD J-7 step 2) on web and Android; Android shows `twostep_copied` below Android 13, where the system shows no confirmation. | F-67, F-156, F-164 to F-166, F-209, F-215, F-216, §8.2; TP-4.45, TP-4.46; platform A-540 | none | planner decision |
 | A-105 | S-4 test-architect: `TwoStepSetupViewModel`'s failed start, `TWO_STEP_NOT_ENABLED`, and rules stated only by analogy | **(1)** A start failing with anything but the two `…_ENABLED` keys shows a new `Failed` step: the error's text and **Try again** (`error_fallback_retry`), as the web's failed state; Expired stays for a timed-out setup only. **(2)** `TWO_STEP_NOT_ENABLED` → Done is right: in replace mode it means two-step was turned off elsewhere, and Sign-in & security refreshes and shows "Off"; no snackbar. The same now applies to the replace confirm, on both platforms. **(3)** Yes: §8.2 now states the view model's rules directly (code rule, clock hint, expiry, cancelled step-ups, finish failure, catch-all). No new texts. | §8.2, F-165, F-215; TP-4.47 | none | planner decision |
+| A-106 | S-4 (coordinator, after 94212e1): how `TwoStepSetupRoute` tells Sign-in & security to show `twostep_replaced` wasn't in §8.2 | **Recorded as built:** `TwoStepSetupViewModel.replaced` (true only after a confirmed replacement) and `SecurityViewModel.showReplaced()` (sets `message` to `twostep_replaced`); `MainActivity` calls `showReplaced()` on the `settings/security` entry's view model in the setup route's `onDone`, before popping; `SecurityRoute` shows it as its snackbar. Both halves are unit-testable; the `MainActivity` glue is checked by QA on the emulator, as A-100 (10) does for the two-step pop. | §8.2; TP-4.48 | none | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -3173,6 +3175,7 @@ data class TwoStepSetupState(val step: SetupStep, val secret: TwoStepSecret?, va
 enum class SetupStep { Loading, Scan, Codes, Expired, Failed, Done }   // A-105: Failed
 @HiltViewModel class TwoStepSetupViewModel @Inject constructor(repository: AuthRepository, confirmation: ConfirmationCoordinator) : ViewModel() {
     val state: TwoStepSetupState
+    val replaced: Boolean                // A-106: true once twoStepReplaceConfirm succeeded (never in setup mode)
     fun start(replace: Boolean)          // withConfirmation(twoStepSetup / twoStepReplaceStart); see A-105's rules below
     fun onCodeChange(v: String); fun submit(); fun startAgain(); fun onAcknowledgedChange(v: Boolean); fun finish()
 }
@@ -3185,13 +3188,18 @@ enum class SetupStep { Loading, Scan, Codes, Expired, Failed, Done }   // A-105:
 // startAgain(): ignored while busy; the same load as start (Loading, then Scan, Done or Failed). Used by Expired and Failed.
 // submit(): only in Scan and not busy. code = state.code with whitespace removed; not 6 digits → error = twostep_code_invalid,
 //   no call. Else busy, withConfirmation(twoStepEnable(code), or twoStepReplaceConfirm(code) when replace): null (step-up
-//   cancelled) → nothing changes; enable → Codes with the codes, code cleared; replace → Done, code cleared, and the route's
-//   snackbar twostep_replaced (A-104). Errors: TWO_STEP_CODE_INVALID → error = twostep_setup_clock_hint, code cleared;
+//   cancelled) → nothing changes; enable → Codes with the codes, code cleared; replace → Done, code cleared, replaced = true
+//   (A-106's hand-over shows twostep_replaced). Errors: TWO_STEP_CODE_INVALID → error = twostep_setup_clock_hint, code cleared;
 //   TWO_STEP_SETUP_EXPIRED → Expired, formError null; TWO_STEP_ALREADY_ENABLED or TWO_STEP_NOT_ENABLED → Done, no snackbar;
 //   anything else → formError = IdentityErrorMessages.forError(error, Operation.Mutation), still Scan, code kept.
 // onCodeChange(v): code = v, error and formError cleared. onAcknowledgedChange(v): acknowledged = v.
 // finish(): only in Codes, acknowledged and not busy. acknowledgeRecoveryCodes() → Done, codes cleared; failure → still
 //   Codes with the codes kept, formError = IdentityErrorMessages.forError(error, Operation.Mutation).
+// Hand-over after a replacement (A-106): MainActivity's settings/two_step destination gets the SecurityViewModel of the
+//   settings/security back-stack entry (hiltViewModel(nav.getBackStackEntry("settings/security")), null when that entry is
+//   absent) and passes TwoStepSetupRoute onDone = { if (setup.replaced) security?.showReplaced(); nav.popBackStack() }.
+//   SecurityRoute then shows state.message as its snackbar and calls messageShown(). Setup mode and a Done without a
+//   confirmed replacement (cancelled step-up, …_ENABLED keys) show nothing.
 // Screen by step: Loading → progress; Scan → the scan step (A-104); Codes → RecoveryCodesScreen; Expired →
 //   twostep_setup_expired with twostep_setup_start_again (A-102); Failed → formError's text with error_fallback_retry
 //   "Try again" (as the web's failed state), both calling onStartAgain; Done → the route calls onDone.
@@ -3201,7 +3209,7 @@ enum class SetupStep { Loading, Scan, Codes, Expired, Failed, Done }   // A-105:
 // A-104: setup mode → heading twostep_setup_title, step line twostep_setup_step, Scan step titled twostep_setup_scan "Scan
 // this code" (HLD J-7 step 2's heading, mirrored from §8.1) above the QR, submit twostep_setup_submit. Replace mode → heading
 // twostep_replace "Replace authenticator app", no step line (no codes step follows), the same Scan title, submit
-// twostep_verify "Verify"; success → back to settings/security with snackbar twostep_replaced. TwoStepSetupRoute passes
+// twostep_verify "Verify"; success → back to settings/security with snackbar twostep_replaced (A-106's hand-over). TwoStepSetupRoute passes
 // replace. Copy (key) and Copy all: after copySensitive, below Android 13 (Build.VERSION.SDK_INT < TIRAMISU) the route
 // shows snackbar twostep_copied "Copied."; from Android 13 the system's clipboard confirmation is enough, so none.
 @Composable fun RecoveryCodesScreen(codes: List<String>, acknowledged: Boolean, onAcknowledgedChange: (Boolean) -> Unit,
@@ -3234,6 +3242,7 @@ data class SecurityState(
     fun finishNewCodes(onMeUpdated: (Me) -> Unit)
     fun leaveNewCodes()                       // back while the codes show
     fun messageShown()
+    fun showReplaced()                        // A-106: message = UiText(R.string.twostep_replaced)
 }
 // submitTurnOff: not through ConfirmationCoordinator (F-66 checks the code itself and never raises CONFIRMATION_REQUIRED).
 //   Client rules and normalisation as TwoStepViewModel (A-100): twostep_code_invalid / twostep_recovery_invalid, no request.
@@ -3925,6 +3934,7 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-4.45 | S-4 | A | F-209, F-215, F-216 (A-104) | Robolectric; MockK `AuthRepository`; real `OutboxOwnerGuard` (MockK DAO with entries of another user) and `ConfirmationCoordinator`; Compose rule | (a) `TwoStepViewModel`: a verified code raising the owner dialog, then `keepOtherUsersEntries(onCancelled)`; (b) `ConfirmationCoordinator`: `submit()` with `confirm` suspended, then `cancel()`, then `confirm` returning; `ConfirmItsYouSheet` with `form.busy = true`; (c) `TwoStepSetupScreen` in the `Scan` step with `replace` false, then true; (d) Copy on `TwoStepSetupRoute` at `@Config(sdk = [32])`, then `[33]` | (a) `guard.cancel` called once with the pending sign-in, `onCancelled` called once, `formError` null, `ownerDialog` null; (b) the sheet stays open and the first caller's `run()` is called again exactly once after `confirm` returns; Cancel disabled; (c) setup: "Turn on two-step verification", "Step 1 of 2", "Scan this code", **Verify and turn on**; replace: "Replace authenticator app", no "Step" text, "Scan this code", **Verify**; (d) snackbar "Copied." at 32; none at 33; the clipboard holds the key without spaces in both |
 | TP-4.46 | S-4 | E | F-156, F-164, F-165, F-166 (A-104) | a two-step user (§10.1); routes as needed, with a delayed response where noted | (a) `/settings/security/two-step` and `?mode=replace` after step-up; (b) sign-in two-step in recovery mode with `auth.verifyTwoStep` routed to `RATE_LIMITED` (`retryAfterSeconds: 60`); (c) **Turn off** with `me.twoStepDisable` delayed, then Escape; (d) a step-up dialog with `me.confirm` delayed, then Escape | (a) setup: `<h1>` "Turn on two-step verification", "Step 1 of 2", `<h2>` "Scan this code", **Verify and turn on**; replace: `<h1>` "Replace authenticator app", no step line, `<h2>` "Scan this code", **Verify**; (b) the rate-limit notice and no "You can still use a recovery code."; (c) and (d) the dialog still open and Cancel disabled until the response, then closed by the result |
 | TP-4.47 | S-4 | A | F-215 `TwoStepSetupViewModel`, `TwoStepSetupScreen` (A-105) | Robolectric; MockK `AuthRepository`; real `ConfirmationCoordinator`; Compose rule for the screen | (a) `start(false)` with `twoStepSetup` throwing a 503, then `IOException`-mapped `Network`, then `IllegalStateException`; `startAgain()` succeeding; (b) `start(true)` with `twoStepReplaceStart` throwing `TWO_STEP_NOT_ENABLED`; replace `submit()` with `twoStepReplaceConfirm` throwing `TWO_STEP_NOT_ENABLED`; (c) `submit()` with "12345"; with "123 456" and `twoStepEnable` throwing `TWO_STEP_CODE_INVALID`; then `TWO_STEP_SETUP_EXPIRED`; then a 503; (d) `finish()` unticked; ticked with `acknowledgeRecoveryCodes` failing, then succeeding; (e) the screen in `Failed` | (a) `step = Failed` with `formError` = the read text for each (`ApiError.Unknown`'s for the last); then `Scan` with the secret; (b) `Done` both times and no `twostep_replaced`; (c) `error = twostep_code_invalid`, no call; `twoStepEnable("123456")` called, `error = twostep_setup_clock_hint`, `code` ""; `Expired`, `formError` null; `formError` = the mutation text, still `Scan`, code kept; (d) no call; `formError` set, still `Codes` with the ten codes; then `Done`, codes empty; (e) the error text and a **Try again** button calling `onStartAgain` |
+| TP-4.48 | S-4 | A | F-214, F-215 replacement hand-over (A-106) | Robolectric; MockK `AuthRepository`; real `ConfirmationCoordinator`; Compose rule for `SecurityRoute` | (a) `TwoStepSetupViewModel`: new; `start(false)` and an enable; `start(true)` with the step-up cancelled; `start(true)` and a confirm throwing `TWO_STEP_NOT_ENABLED`; `start(true)` and a successful confirm; (b) `SecurityViewModel.showReplaced()`; (c) `SecurityRoute` after `showReplaced()` | (a) `replaced` false, false, false, false, then true; (b) `state.message == UiText(R.string.twostep_replaced)`; (c) the snackbar "Your authenticator app was replaced." shows once and `message` is null afterwards (`messageShown()` called) |
 | TP-4.36 | S-4 | I | F-36 (moved from TP-3.26, A-72) | a user with two-step and a pending challenge | `auth.verifyTwoStep` with cookie delivery and no web header | `FORBIDDEN` |
 | TP-5.1 | S-5 | I | F-70 | users: password, Google-only, banned, owner-closed; one with 3 outstanding | Request each and an unknown email | Same `{ ok: true }`; reset rows and jobs only for the first two (`password_reset`, `password_set`); none for the rest |
 | TP-5.2 | S-5 | I | F-29 | none | 4 requests for one email in an hour; 11 from one IP | 4th, 11th `RATE_LIMITED` |
