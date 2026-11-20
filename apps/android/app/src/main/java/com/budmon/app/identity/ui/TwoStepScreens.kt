@@ -33,6 +33,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SheetValue
@@ -47,6 +48,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -213,9 +215,17 @@ fun ConfirmItsYouSheet(
     onCancel: () -> Unit,
 ) {
     val focus = rememberFieldFocus(form.error, form.useRecovery)
-    val sheetState =
-        rememberModalBottomSheetState(confirmValueChange = { it != SheetValue.Hidden || !form.busy })
-    ModalBottomSheet(onDismissRequest = onCancel, sheetState = sheetState) {
+    // A stable lambda: the saved state is keyed on it, and a new one would re-create the sheet.
+    val busy = rememberUpdatedState(form.busy)
+    val confirmChange = remember { { value: SheetValue -> value != SheetValue.Hidden || !busy.value } }
+    val sheetState = rememberModalBottomSheetState(confirmValueChange = confirmChange)
+    ModalBottomSheet(
+        onDismissRequest = onCancel,
+        sheetState = sheetState,
+        properties = ModalBottomSheetProperties(shouldDismissOnBackPress = !form.busy),
+    ) {
+        // Back is swallowed while the request is in flight.
+        BackHandler(enabled = form.busy) {}
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -302,6 +312,14 @@ fun TwoStepSetupScreen(
         when (state.step) {
             SetupStep.Loading, SetupStep.Done, SetupStep.Codes -> {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            }
+
+            SetupStep.Failed -> {
+                Text(
+                    state.formError?.let { uiString(it) } ?: stringResource(R.string.error_generic_read),
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                )
+                AppButton(stringResource(R.string.error_fallback_retry), onStartAgain)
             }
 
             SetupStep.Expired -> {

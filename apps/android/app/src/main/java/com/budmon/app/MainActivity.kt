@@ -180,13 +180,14 @@ class MainActivity : ComponentActivity() {
                                                     arguments = listOf(navArgument("mode") { type = NavType.StringType; defaultValue = "setup" }),
                                                 ) { entry ->
                                                     val setup = hiltViewModel<TwoStepSetupViewModel>()
-                                                    val security: SecurityViewModel =
-                                                        hiltViewModel(remember(entry) { nav.getBackStackEntry(ROUTE_SECURITY) })
+                                                    // Absent when setup was opened without Sign-in & security under it.
+                                                    val securityEntry = remember(entry) { runCatching { nav.getBackStackEntry(ROUTE_SECURITY) }.getOrNull() }
+                                                    val security: SecurityViewModel? = securityEntry?.let { hiltViewModel(it) }
                                                     TwoStepSetupRoute(
                                                         viewModel = setup,
                                                         replace = entry.arguments?.getString("mode") == "replace",
                                                         onDone = {
-                                                            if (setup.replaced) security.showReplaced()
+                                                            if (setup.replaced) security?.showReplaced()
                                                             nav.popBackStack()
                                                         },
                                                     )

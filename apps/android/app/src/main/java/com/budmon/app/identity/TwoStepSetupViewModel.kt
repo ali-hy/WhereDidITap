@@ -17,7 +17,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-enum class SetupStep { Loading, Scan, Codes, Expired, Done }
+enum class SetupStep { Loading, Scan, Codes, Expired, Failed, Done }
 
 data class TwoStepSetupState(
     val step: SetupStep = SetupStep.Loading,
@@ -84,7 +84,7 @@ class TwoStepSetupViewModel
                         if (key == "TWO_STEP_ALREADY_ENABLED" || key == "TWO_STEP_NOT_ENABLED") {
                             state.copy(step = SetupStep.Done)
                         } else {
-                            state.copy(step = SetupStep.Expired, formError = IdentityErrorMessages.forError(error, Operation.Read))
+                            state.copy(step = SetupStep.Failed, formError = IdentityErrorMessages.forError(error, Operation.Read))
                         }
                 }
             }
@@ -130,7 +130,7 @@ class TwoStepSetupViewModel
                 when (key) {
                     "TWO_STEP_CODE_INVALID" -> state.copy(error = R.string.twostep_setup_clock_hint, code = "")
                     "TWO_STEP_SETUP_EXPIRED" -> state.copy(step = SetupStep.Expired, formError = null)
-                    "TWO_STEP_ALREADY_ENABLED" -> state.copy(step = SetupStep.Done)
+                    "TWO_STEP_ALREADY_ENABLED", "TWO_STEP_NOT_ENABLED" -> state.copy(step = SetupStep.Done)
                     else -> state.copy(formError = IdentityErrorMessages.forError(error, Operation.Mutation))
                 }
         }

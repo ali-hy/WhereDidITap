@@ -194,7 +194,7 @@ class TwoStepViewModel
         }
 
         /** The dialog's Cancel and its dismissal: the held sign-in ends, the form stays. */
-        fun keepOtherUsersEntries(onCancelled: () -> Unit = {}) {
+        fun keepOtherUsersEntries(onCancelled: () -> Unit) {
             val held = pending ?: return
             if (ownerBusy) return
             ownerBusy = true
