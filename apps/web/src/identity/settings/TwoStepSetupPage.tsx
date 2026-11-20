@@ -176,6 +176,7 @@ export function TwoStepSetupPage(): JSX.Element {
                     <p class="text-fg-muted">{step(1)}</p>
                   </Show>
                   <p class="text-fg">{t(m.twostepSetupSteps)}</p>
+                  <h2 class="text-lg font-semibold text-fg">{t(m.twostepSetupScan)}</h2>
                   <QrCode text={info().otpauthUri} alt={t(m.twostepQrAlt)} />
                   <div>
                     <p class="text-fg">{t(m.twostepSetupCantScan)}</p>
@@ -196,7 +197,7 @@ export function TwoStepSetupPage(): JSX.Element {
                     onSubmit={confirm}
                     allowRecovery={false}
                     busy={busy()}
-                    submitLabel={m.twostepSetupSubmit}
+                    submitLabel={replace() ? m.twostepVerify : m.twostepSetupSubmit}
                     autofocus={false}
                   />
                 </>

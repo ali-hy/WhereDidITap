@@ -191,7 +191,14 @@ export function TwoStepSection(): JSX.Element {
         </Match>
       </Switch>
 
-      <AlertDialog.Root open={offOpen()} onOpenChange={setOffOpen} modal>
+      <AlertDialog.Root
+        open={offOpen()}
+        onOpenChange={(open) => {
+          if (!open && offBusy()) return;
+          setOffOpen(open);
+        }}
+        modal
+      >
         <AlertDialog.Portal>
           <AlertDialog.Overlay class={OVERLAY} />
           <div class="fixed inset-0 z-10 flex items-center justify-center p-4">
@@ -211,6 +218,7 @@ export function TwoStepSection(): JSX.Element {
                   actions={
                     <Button
                       variant="secondary"
+                      disabled={offBusy()}
                       onClick={() => {
                         setOffOpen(false);
                       }}
@@ -228,7 +236,7 @@ export function TwoStepSection(): JSX.Element {
       <Dialog.Root
         open={codes() !== null}
         onOpenChange={(open) => {
-          if (!open) {
+          if (!open && !codesBusy()) {
             setCodes(null);
             setCodesError([]);
             void status.refetch();

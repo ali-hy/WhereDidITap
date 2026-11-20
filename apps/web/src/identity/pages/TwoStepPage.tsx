@@ -30,6 +30,7 @@ export function TwoStepPage(): JSX.Element {
   const search: () => { next?: unknown } = useSearch({ strict: false });
   const gate = createRateLimitGate();
   const [busy, setBusy] = createSignal(false);
+  const [limitedCode, setLimitedCode] = createSignal(false);
   const [summary, setSummary] = createSignal<{ text: string }[]>([]);
 
   createEffect(() => {
@@ -86,6 +87,7 @@ export function TwoStepPage(): JSX.Element {
       if (error.kind === "defined" && error.key === "RATE_LIMITED") {
         const seconds = (error.data as { retryAfterSeconds?: unknown } | undefined)
           ?.retryAfterSeconds;
+        setLimitedCode(value.code !== undefined);
         gate.block(typeof seconds === "number" ? seconds : undefined);
         return;
       }
@@ -105,7 +107,7 @@ export function TwoStepPage(): JSX.Element {
         <p class="text-fg">{t(m.twostepPrompt)}</p>
         <FormErrorSummary messages={summary()} />
         <RateLimitNotice secondsLeft={gate.blockedFor()} />
-        <Show when={gate.blockedFor() > 0}>
+        <Show when={gate.blockedFor() > 0 && limitedCode()}>
           <p class="text-fg">{t(m.twostepLimitRecovery)}</p>
         </Show>
         <TwoStepForm onSubmit={submit} allowRecovery busy={busy()} />

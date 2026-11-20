@@ -131,7 +131,7 @@ export function ConfirmItsYouDialog(): JSX.Element {
     <Dialog.Root
       open={pending() !== null}
       onOpenChange={(open) => {
-        if (!open) finish(false);
+        if (!open && !busy()) finish(false);
       }}
       modal
     >
@@ -169,6 +169,7 @@ export function ConfirmItsYouDialog(): JSX.Element {
                       </Button>
                       <Button
                         variant="secondary"
+                        disabled={busy()}
                         onClick={() => {
                           finish(false);
                         }}
@@ -187,6 +188,7 @@ export function ConfirmItsYouDialog(): JSX.Element {
                   actions={
                     <Button
                       variant="secondary"
+                      disabled={busy()}
                       onClick={() => {
                         finish(false);
                       }}
