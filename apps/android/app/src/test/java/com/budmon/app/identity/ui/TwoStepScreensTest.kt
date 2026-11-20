@@ -5,6 +5,9 @@
 // Screens are rendered by hosts that keep `form` in a mutableStateOf updated by the lambdas
 // (P-A-534). TwoStepRoute runs a real TwoStepViewModel over a MockK AuthRepository and the real
 // OutboxOwnerGuard (MockK DAO, empty outbox), as TP-4.35 says.
+// TP-4.45 (b)'s sheet half: Cancel disabled while form.busy (A-104). TP-4.45x: Cancel enabled when
+// not busy; TwoStepRoute's owner dialog (MockK DAO with entries of another user, as TP-4.45 says)
+// whose Cancel pops through onBack (A-104 G-1: "TwoStepRoute passes onBack").
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 package com.budmon.app.identity.ui
 
@@ -28,7 +31,9 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
@@ -50,10 +55,15 @@ import com.budmon.app.identity.AuthRepository
 import com.budmon.app.identity.ConfirmFactor
 import com.budmon.app.identity.ConfirmFormState
 import com.budmon.app.identity.ConfirmationCoordinator
+import com.budmon.app.identity.ME
 import com.budmon.app.identity.OutboxOwnerGuard
+import com.budmon.app.identity.PendingSignIn
 import com.budmon.app.identity.TwoStepChallenge
 import com.budmon.app.identity.TwoStepFormState
+import com.budmon.app.identity.TwoStepVerified
 import com.budmon.app.identity.TwoStepViewModel
+import com.budmon.app.identity.storedSession
+import com.budmon.app.identity.store.TokenStore
 import com.budmon.app.ui.theme.AppTheme
 import com.budmon.app.ui.theme.ThemeSetting
 import io.mockk.coEvery
@@ -362,6 +372,75 @@ class TwoStepScreensTest {
 
         assertEquals(1, cancel.calls)
         assertEquals(0, submit.calls)
+    }
+
+    @Test
+    fun `TP-4_45 ConfirmItsYouSheet with form busy - Cancel disabled (A-104)`() {
+        showSheet(ConfirmFactor.Password, mutableStateOf(confirmForm().copy(value = "violet staircase umbrella", busy = true)))
+        compose.onNodeWithText(text(R.string.confirm_title)).assertIsDisplayed()
+
+        button(R.string.confirm_cancel).assertIsNotEnabled()
+    }
+
+    @Test
+    fun `TP-4_45x ConfirmItsYouSheet code factor with form busy - Cancel disabled (A-104)`() {
+        showSheet(ConfirmFactor.TwoStep, mutableStateOf(confirmForm().copy(value = "123456", busy = true)))
+        compose.onNodeWithText(text(R.string.confirm_title)).assertIsDisplayed()
+
+        button(R.string.confirm_cancel).assertIsNotEnabled()
+    }
+
+    @Test
+    fun `TP-4_45x ConfirmItsYouSheet not busy - Cancel enabled`() {
+        showSheet(ConfirmFactor.Password, mutableStateOf(confirmForm()))
+
+        button(R.string.confirm_cancel).assertIsEnabled()
+    }
+
+    // ---- TwoStepRoute's owner dialog (A-104) ----
+
+    @Test
+    fun `TP-4_45x TwoStepRoute, the owner dialog's Cancel - onBack once, the pending sign-in abandoned, not signed in (A-104)`() {
+        val challenge = TwoStepChallenge("bmc_" + "C".repeat(43), Instant.parse("2026-11-15T10:05:00Z"), "mona@example.com", null)
+        val pending = PendingSignIn(
+            session = storedSession(Instant.parse("2026-12-15T10:00:00Z")),
+            deviceToken = "bmd_" + "D".repeat(43),
+            me = ME,
+        )
+        val repository = mockk<AuthRepository> {
+            coEvery { verifyTwoStep(challenge, "123456", null) } returns TwoStepVerified(pending, null)
+            coEvery { abandonSignIn(pending) } returns Unit
+        }
+        // Two entries of another user.
+        val dao = mockk<OutboxDao> { coEvery { countAll() } returns 2 }
+        val tokenStore = mockk<TokenStore>(relaxed = true) {
+            coEvery { outboxOwnerUserId() } returns "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a77"
+        }
+        val guard = OutboxOwnerGuard(dao, tokenStore, mockk(relaxed = true), repository)
+        val vm = TwoStepViewModel(repository, guard)
+        vm.start(challenge)
+        val back = Counter()
+        val signedIn = Counter()
+        show {
+            TwoStepRoute(viewModel = vm, savePassword = { _, _ -> }, onSignedIn = { signedIn.call() }, onEnded = {}, onBack = back.call)
+        }
+
+        field(R.string.twostep_code).performTextInput("123456")
+        button(R.string.twostep_verify).performClick()
+        compose.waitUntil(5_000) {
+            compose.waitForIdle()
+            vm.form.ownerDialog != null
+        }
+        compose.onNode(hasText(text(R.string.outbox_cancel)) and hasClickAction()).performClick()
+        compose.waitUntil(5_000) {
+            compose.waitForIdle()
+            back.calls > 0
+        }
+
+        assertEquals(1, back.calls)
+        coVerify(exactly = 1) { repository.abandonSignIn(pending) }
+        assertEquals(0, signedIn.calls)
+        assertNull(vm.form.ownerDialog)
     }
 
     // ---- ConfirmItsYouHost (F-216) with the real coordinator ----

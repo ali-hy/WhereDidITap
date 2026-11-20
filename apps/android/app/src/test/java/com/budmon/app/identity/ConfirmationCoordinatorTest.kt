@@ -1,6 +1,8 @@
 // F-216 ConfirmationCoordinator (identity LLD §8.2's S-4 signatures, A-83, A-99, A-100, A-102). TP-4.35's
 // ConfirmationCoordinator rows (with A-100's form: onValueChange, toggleRecovery, submit(); a wrong
-// password or code in form.error, anything else in form.formError), plus TP-4.35x.
+// password or code in form.error, anything else in form.formError), plus TP-4.35x. TP-4.45 (b)'s
+// coordinator half (A-104: cancel() ignored while busy), plus TP-4.45x (cancel() works again once
+// the confirm has failed). The sheet half is in ui/TwoStepScreensTest.
 // Setup per TP-4.35: the real coordinator around a MockK AuthRepository;
 // Dispatchers.setMain(StandardTestDispatcher). The LLD doesn't say which scope submit() runs
 // repository.confirm on, so tests wait on the coordinator's StateFlows and on the callers' results
@@ -13,6 +15,7 @@ import com.budmon.app.core.network.ApiError
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -395,4 +398,75 @@ class ConfirmationCoordinatorTest {
         coordinator.cancel()
         assertNull(outcome.await().getOrThrow())
     }
+
+    // ---- TP-4.45 (b), A-104: no dismissal while a confirm is in flight ----
+
+    /** A confirm() that waits for [gate]; [started] completes when it is entered. */
+    private class HeldConfirm {
+        val started = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+    }
+
+    private fun holdConfirm(answer: suspend () -> Instant): HeldConfirm {
+        val held = HeldConfirm()
+        coEvery { repository.confirm(any(), any(), any()) } coAnswers {
+            held.started.complete(Unit)
+            held.gate.await()
+            answer()
+        }
+        return held
+    }
+
+    @Test
+    fun `TP-4_45 submit() with confirm suspended, then cancel() - ignored, the sheet stays open, run() called again exactly once after confirm returns`() =
+        runTest {
+            val held = holdConfirm { Instant.parse("2026-11-15T10:20:00Z") }
+            val coordinator = coordinator()
+            val run = Run("password", "done")
+
+            val outcome = async { runCatching { coordinator.withConfirmation(run.block(::confirmationRequired)) } }
+            coordinator.request.first { it != null }
+            coordinator.enter("violet staircase umbrella")
+            held.started.await()
+            assertTrue("busy while confirm runs", coordinator.form.value.busy)
+
+            coordinator.cancel()
+            runCurrent()
+
+            assertEquals("the sheet stays open", ConfirmFactor.Password, coordinator.request.value)
+            assertFalse(outcome.isCompleted)
+            assertEquals(1, run.calls.get())
+
+            held.gate.complete(Unit)
+
+            assertEquals("done", outcome.await().getOrThrow())
+            assertEquals("run() called again exactly once", 2, run.calls.get())
+            coVerify(exactly = 1) { repository.confirm("violet staircase umbrella", null, null) }
+            assertNull(coordinator.request.first { it == null })
+        }
+
+    @Test
+    fun `TP-4_45x cancel() while busy ignored, then confirm answered INVALID_CREDENTIALS - cancel() works again, null, run not rerun`() =
+        runTest {
+            val held = holdConfirm { throw ApiException(ApiError.Defined("INVALID_CREDENTIALS", 401, null)) }
+            val coordinator = coordinator()
+            val run = Run("password", "done")
+
+            val outcome = async { runCatching { coordinator.withConfirmation(run.block(::confirmationRequired)) } }
+            coordinator.request.first { it != null }
+            coordinator.enter("wrong password")
+            held.started.await()
+            coordinator.cancel()
+            runCurrent()
+            assertEquals(ConfirmFactor.Password, coordinator.request.value)
+
+            held.gate.complete(Unit)
+            coordinator.form.first { !it.busy && it.error != null }
+            assertEquals(R.string.error_invalid_credentials, coordinator.form.value.error)
+            coordinator.cancel()
+
+            assertNull(outcome.await().getOrThrow())
+            assertEquals(1, run.calls.get())
+            assertNull(coordinator.request.first { it == null })
+        }
 }

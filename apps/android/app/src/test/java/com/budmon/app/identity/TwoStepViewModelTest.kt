@@ -1,6 +1,8 @@
 // F-209 TwoStepViewModel (identity LLD §8.2's S-4 signatures, A-69, A-86, A-99, A-100). TP-4.35's
 // TwoStepViewModel rows (with A-100's normalised values, rate limit, busy and catch-all), plus
-// TP-4.35x; TP-4.44 (A-103). The screens are ui/TwoStepScreensTest.
+// TP-4.35x; TP-4.44 (A-103); TP-4.45 (a) and TP-4.45x (A-104's keepOtherUsersEntries(onCancelled):
+// a failing cancel still calls onCancelled, and the dialog's actions run once). The screens are
+// ui/TwoStepScreensTest.
 // Setup per TP-4.35: a MockK AuthRepository; the real OutboxOwnerGuard over a MockK OutboxDao
 // (`entries`, empty unless a test fills it), a relaxed MockK TokenStore (`owner`) and a relaxed MockK
 // OutboxRepository; Dispatchers.setMain(StandardTestDispatcher) so viewModelScope runs on virtual
@@ -22,6 +24,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.verify
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -424,21 +427,91 @@ class TwoStepViewModelTest {
             assertNull(vm.form.ownerDialog)
         }
 
-    @Test
-    fun `TP-4_35x ownerDialog then keepOtherUsersEntries - the pending sign-in abandoned once, ownerDialog null, not signed in`() = runTest {
+    // ---- TP-4.45 (a), A-104: the owner dialog's Cancel returns to sign-in ----
+
+    /** A view model showing the owner dialog for 2 entries of another user, after 123456 was verified. */
+    private fun TestScope.ownerDialogShown(): TwoStepViewModel {
         entries = 2
         owner = "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a77"
         coEvery { repository.verifyTwoStep(challenge, "123456", null) } returns TwoStepVerified(pending, null)
         val vm = viewModel()
         send(vm, "123456")
+        assertEquals(2, vm.form.ownerDialog)
+        return vm
+    }
 
-        vm.keepOtherUsersEntries()
+    @Test
+    fun `TP-4_45 ownerDialog then keepOtherUsersEntries(onCancelled) - guard cancel once with the pending sign-in, onCancelled once, formError and ownerDialog null`() =
+        runTest {
+            val vm = ownerDialogShown()
+            var cancelled = 0
+
+            vm.keepOtherUsersEntries { cancelled += 1 }
+            advanceUntilIdle()
+
+            coVerify(exactly = 1) { repository.abandonSignIn(pending) }
+            coVerify(exactly = 1) { repository.abandonSignIn(any()) }
+            assertEquals(1, cancelled)
+            assertNull(vm.form.formError)
+            assertNull(vm.form.ownerDialog)
+            coVerify(exactly = 0) { dao.deleteAll() }
+            assertFalse("not signed in", log.any { it.startsWith("signedIn") })
+        }
+
+    @Test
+    fun `TP-4_45x keepOtherUsersEntries with guard cancel failing - onCancelled still called once (finally), ownerDialog null`() = runTest {
+        val vm = ownerDialogShown()
+        coEvery { repository.abandonSignIn(pending) } throws IllegalStateException("offline")
+        var cancelled = 0
+
+        vm.keepOtherUsersEntries { cancelled += 1 }
         advanceUntilIdle()
 
-        coVerify(exactly = 1) { repository.abandonSignIn(pending) }
-        coVerify(exactly = 0) { dao.deleteAll() }
+        assertEquals(1, cancelled)
         assertNull(vm.form.ownerDialog)
         assertFalse("not signed in", log.any { it.startsWith("signedIn") })
+    }
+
+    @Test
+    fun `TP-4_45x keepOtherUsersEntries while Delete and continue runs - ignored, no cancel, onCancelled not called, the sign-in completes`() =
+        runTest {
+            val vm = ownerDialogShown()
+            val gate = CompletableDeferred<Unit>()
+            coEvery { dao.deleteAll() } coAnswers {
+                gate.await()
+                entries = 0
+                2
+            }
+            var cancelled = 0
+
+            vm.discardOtherUsersEntries(savePassword, onSignedIn, onEnded)
+            runCurrent()
+            vm.keepOtherUsersEntries { cancelled += 1 }
+            runCurrent()
+            gate.complete(Unit)
+            advanceUntilIdle()
+
+            coVerify(exactly = 0) { repository.abandonSignIn(any()) }
+            assertEquals(0, cancelled)
+            assertEquals(listOf("commit", "save $EMAIL $PASSWORD", "signedIn ${ME.id}"), log)
+        }
+
+    @Test
+    fun `TP-4_45x keepOtherUsersEntries twice while the first cancel runs - guard cancel once, onCancelled once`() = runTest {
+        val vm = ownerDialogShown()
+        val gate = CompletableDeferred<Unit>()
+        coEvery { repository.abandonSignIn(pending) } coAnswers { gate.await() }
+        var cancelled = 0
+
+        vm.keepOtherUsersEntries { cancelled += 1 }
+        runCurrent()
+        vm.keepOtherUsersEntries { cancelled += 1 }
+        runCurrent()
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { repository.abandonSignIn(any()) }
+        assertEquals(1, cancelled)
     }
 
     @Test
