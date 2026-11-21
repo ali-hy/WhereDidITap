@@ -77,90 +77,6 @@ const codeField = (page: Page) => page.locator("main").getByLabel(catalogText("C
 const confirmDialog = (page: Page) =>
   page.getByRole("dialog").filter({ has: page.getByText(catalogText(CONFIRM_ITS_YOU)) });
 
-// ---- Focus diagnostics (TP-4.49 (b), CI run 44920994318) ----
-
-/**
- * Init script: once `window.__focusLogOn` is true, logs every focusin/focusout, every `main h1`
- * change and every `#live-polite` text into `window.__focusLog`. Runs in the page, so it's
- * self-contained.
- */
-function recordFocusLog(): void {
-  const w = window as unknown as { __focusLog: string[]; __focusLogOn: boolean };
-  w.__focusLog = [];
-  w.__focusLogOn = false;
-  const describe = (el: EventTarget | Element | null): string => {
-    if (!(el instanceof Element)) return el === null ? "null" : "non-element";
-    const text = el.textContent.trim().replace(/\s+/g, " ").slice(0, 40);
-    return `${el.tagName}${el.id === "" ? "" : `#${el.id}`}[role=${el.getAttribute("role") ?? ""}] "${text}" connected=${String(el.isConnected)}`;
-  };
-  const log = (line: string): void => {
-    if (w.__focusLogOn) w.__focusLog.push(`${performance.now().toFixed(1)} ${line}`);
-  };
-  addEventListener(
-    "focusin",
-    (e) => {
-      log(`focusin ${describe(e.target)}`);
-    },
-    true,
-  );
-  addEventListener(
-    "focusout",
-    (e) => {
-      log(`focusout ${describe(e.target)} -> ${describe(e.relatedTarget)}`);
-    },
-    true,
-  );
-  let heading: Element | null = null;
-  let live = "";
-  /** The h1 that `n` is or holds, if any. */
-  const h1In = (n: Node): Element | null =>
-    n instanceof Element ? (n.tagName === "H1" ? n : n.querySelector("h1")) : null;
-  new MutationObserver((records) => {
-    for (const r of records) {
-      for (const n of r.addedNodes) {
-        const h = h1In(n);
-        if (h !== null) log(`h1 added ${describe(h)}`);
-      }
-      for (const n of r.removedNodes) {
-        const h = h1In(n);
-        if (h !== null) log(`h1 removed ${describe(h)}`);
-      }
-    }
-    const current = document.querySelector("main h1");
-    if (current !== heading) {
-      log(`main h1 now ${describe(current)} (previous ${describe(heading)})`);
-      heading = current;
-    }
-    const text = document.getElementById("live-polite")?.textContent ?? "";
-    if (text !== live) {
-      log(`#live-polite "${text}"`);
-      live = text;
-    }
-  }).observe(document, { childList: true, subtree: true, characterData: true });
-}
-
-/** Starts the log (just before the action under study). */
-async function startFocusLog(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const w = window as unknown as { __focusLog: string[]; __focusLogOn: boolean };
-    w.__focusLogOn = true;
-    w.__focusLog.push(
-      `${performance.now().toFixed(1)} start, active ${document.activeElement?.tagName ?? "null"}`,
-    );
-  });
-}
-
-/** Attaches the log to the test and prints it, so it shows in the CI job log. */
-async function dumpFocusLog(page: Page, name: string): Promise<void> {
-  const lines = await page
-    .evaluate(() => (window as unknown as { __focusLog?: string[] }).__focusLog ?? [])
-    .catch((e: unknown) => [`log unavailable: ${String(e)}`]);
-  const body = lines.join("\n");
-  await test.info().attach("focus-log.txt", { body, contentType: "text/plain" });
-  // eslint-disable-next-line no-console -- printed on purpose, so the CI job log shows it
-  console.log(`${name} focus log (${test.info().project.name}):\n${body}`);
-}
-
 /** A promise the test resolves when it chooses (a held route's release). */
 function deferred() {
   let resolve!: () => void;
@@ -1389,11 +1305,51 @@ test.describe("TP-4.49: S-4 QA's gaps (A-107, A-541, A-542)", () => {
 
   // ---- (b) focus after the setup steps ----
 
+  /**
+   * Before a navigation: records the first `main h1` other than the current one (the arriving
+   * page's) with its time, and every node removed from the document.
+   */
+  async function watchArrivingHeading(page: Page): Promise<void> {
+    await page.evaluate(() => {
+      const w = window as unknown as {
+        arriving: { el: Element | null; at: number; removed: Node[] };
+      };
+      const before = document.querySelector("main h1");
+      w.arriving = { el: null, at: 0, removed: [] };
+      new MutationObserver((records) => {
+        for (const r of records) for (const n of r.removedNodes) w.arriving.removed.push(n);
+        const h1 = document.querySelector("main h1");
+        if (w.arriving.el === null && h1 !== null && h1 !== before) {
+          w.arriving.el = h1;
+          w.arriving.at = performance.now();
+        }
+      }).observe(document.body, { childList: true, subtree: true });
+    });
+  }
+
+  /** 500 ms after the arriving <h1> appeared: is it still the page's, connected, never removed? */
+  async function arrivingHeadingAt500(
+    page: Page,
+  ): Promise<{ same: boolean; connected: boolean; removed: boolean }> {
+    await page.waitForFunction(() => {
+      const w = window as unknown as { arriving: { el: Element | null; at: number } };
+      return w.arriving.el !== null && performance.now() - w.arriving.at >= 500;
+    });
+    return page.evaluate(() => {
+      const w = window as unknown as { arriving: { el: Element | null; removed: Node[] } };
+      const it = w.arriving.el;
+      return {
+        same: it !== null && it === document.querySelector("main h1"),
+        connected: it?.isConnected ?? false,
+        removed: it !== null && w.arriving.removed.some((n) => n === it || n.contains(it)),
+      };
+    });
+  }
+
   test("TP-4.49 (b): setup: Verify and turn on → focus on the codes step's <h2> 'Save your recovery codes'; Done → focus on the Sign-in & security <h1>", async ({
     page,
     request,
   }) => {
-    await page.addInitScript(recordFocusLog);
     await signedUpUser(page, request, "Setup Focus Person");
     await page.goto("/settings/security");
     await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
@@ -1415,26 +1371,20 @@ test.describe("TP-4.49: S-4 QA's gaps (A-107, A-541, A-542)", () => {
     await expect(codesHeading).toBeFocused();
 
     await page.getByRole("checkbox", { name: catalogText("I've saved my recovery codes") }).check();
-    await startFocusLog(page);
+    await watchArrivingHeading(page);
     await page.getByRole("button", { name: catalogText("Done") }).click();
 
-    // Diagnostics only (CI run 44920994318): the log is attached and printed; the assertions are
-    // unchanged.
-    try {
-      await expect(page).toHaveURL(/\/settings\/security$/);
-      const h1 = main.locator("h1");
-      await expect(h1).toHaveText(looseText("Sign-in & security"));
-      await expect(h1).toBeFocused();
-    } catch (error) {
-      const active = await page
-        .evaluate(() => (document.activeElement?.outerHTML ?? "null").slice(0, 400))
-        .catch(() => "unavailable");
-      // eslint-disable-next-line no-console -- printed on purpose, so the CI job log shows it
-      console.log(`TP-4.49 (b) activeElement at failure: ${active}`);
-      throw error;
-    } finally {
-      await dumpFocusLog(page, "TP-4.49 (b)");
-    }
+    await expect(page).toHaveURL(/\/settings\/security$/);
+    const h1 = main.locator("h1");
+    await expect(h1).toHaveText(looseText("Sign-in & security"));
+    await expect(h1).toBeFocused();
+    // N-4 (A-545): the page's own Suspense boundaries keep the arriving <h1> mounted; a swap that
+    // keepFocus rescues still fails here.
+    expect(await arrivingHeadingAt500(page)).toEqual({
+      same: true,
+      connected: true,
+      removed: false,
+    });
   });
 
   // ---- (c) the J-5 prompt after a recovery-code sign-in ----
