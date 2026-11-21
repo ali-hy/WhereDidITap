@@ -76,23 +76,32 @@ function RootLayout(): JSX.Element {
 }
 
 const HEADING_WAIT_MS = 2000;
-const SETTLE_MS = 1000;
+const SETTLE_MS = 3000;
 
-/** A page that re-renders right after arriving replaces its h1; focus follows the new one. */
+/**
+ * A page that re-renders after arriving replaces its h1 and drops focus to the body; focus follows
+ * the new h1. Watches for a few seconds, and stops at the first key press or pointer press.
+ */
 function keepFocus(focused: HTMLElement): void {
-  const started = performance.now();
   let current = focused;
-  const frame = (): void => {
-    if (!current.isConnected && document.activeElement === document.body) {
-      const next = document.querySelector<HTMLElement>("main h1");
-      if (next !== null) {
-        next.focus();
-        current = next;
-      }
-    }
-    if (performance.now() - started < SETTLE_MS) requestAnimationFrame(frame);
+  const follow = (): void => {
+    if (current.isConnected || document.activeElement !== document.body) return;
+    const next = document.querySelector<HTMLElement>("main h1");
+    if (next === null) return;
+    next.focus();
+    current = next;
   };
-  requestAnimationFrame(frame);
+  const observer = new MutationObserver(follow);
+  observer.observe(document.body, { childList: true, subtree: true });
+  const stop = (): void => {
+    observer.disconnect();
+    clearTimeout(timer);
+    document.removeEventListener("keydown", stop, true);
+    document.removeEventListener("pointerdown", stop, true);
+  };
+  const timer = setTimeout(stop, SETTLE_MS);
+  document.addEventListener("keydown", stop, true);
+  document.addEventListener("pointerdown", stop, true);
 }
 
 /**
