@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The window behind Compose: Tokens.Teal.Light.canvas. -->
+    <color name="window_canvas">#FFF3F8F7</color>
+    <!-- The launcher tile: Tokens.Teal.Light.accent. -->
+    <color name="ic_launcher_background">#FF00736B</color>
+</resources>

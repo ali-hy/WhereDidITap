@@ -55,6 +55,16 @@ const STUB_PACKAGES: Readonly<Record<string, Readonly<Record<string, string>>>> 
     "index.d.ts":
       "declare function pino(): { info(message: string): void };\nexport default pino;\n",
   },
+  // TP-0.36: the root and the subpaths F-1's Kobalte dialog rule names (A-540).
+  "@kobalte/core": {
+    "index.d.ts":
+      "export declare const Dialog: { Root: unknown };\nexport declare const AlertDialog: { Root: unknown };\n",
+    "dialog.d.ts":
+      "export declare const Root: unknown;\nexport declare const Dialog: { Root: unknown };\n",
+    "alert-dialog.d.ts":
+      "export declare const Root: unknown;\nexport declare const AlertDialog: { Root: unknown };\n",
+    "combobox.d.ts": "export declare const Combobox: { Root: unknown };\n",
+  },
 };
 
 export type LintMessages = Readonly<Record<string, readonly Linter.LintMessage[]>>;

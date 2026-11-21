@@ -10,17 +10,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -33,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -44,6 +39,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.text.BidiFormatter
 import com.budmon.app.R
+import com.budmon.app.ui.components.AppButton
+import com.budmon.app.ui.components.AppButtonVariant
 import kotlinx.coroutines.delay
 import java.text.NumberFormat
 import java.util.Locale
@@ -73,7 +70,7 @@ fun UpdateRequiredScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(Icons.Filled.Warning, contentDescription = null, modifier = Modifier.size(48.dp))
+        Icon(painterResource(R.drawable.lucide_triangle_alert), contentDescription = null, modifier = Modifier.size(48.dp))
         Text(stringResource(R.string.update_required_title), style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
         Text(stringResource(R.string.update_required_body), textAlign = TextAlign.Center)
         if (pending > 0) {
@@ -84,12 +81,11 @@ fun UpdateRequiredScreen(
                 textAlign = TextAlign.Center,
             )
         }
-        Button(
+        AppButton(
+            text = stringResource(R.string.update_required_button),
             onClick = { downloadFailed = downloadUrl == null || !onOpenDownload(downloadUrl) },
             modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(stringResource(R.string.update_required_button))
-        }
+        )
         if (downloadFailed) {
             Text(
                 stringResource(R.string.update_download_failed),
@@ -100,7 +96,7 @@ fun UpdateRequiredScreen(
         }
         // The offline route belongs to `transactions`; until it exists the button is hidden.
         if (onRecordOffline != null) {
-            TextButton(onClick = onRecordOffline) { Text(stringResource(R.string.update_required_offline)) }
+            AppButton(stringResource(R.string.update_required_offline), onRecordOffline, variant = AppButtonVariant.Tertiary)
         }
     }
 }
@@ -112,8 +108,8 @@ fun UpdateCard(onUpdate: () -> Unit, onLater: () -> Unit, modifier: Modifier = M
         Column(Modifier.padding(16.dp)) {
             Text(stringResource(R.string.update_available))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onUpdate) { Text(stringResource(R.string.update_action)) }
-                TextButton(onClick = onLater) { Text(stringResource(R.string.update_later)) }
+                AppButton(stringResource(R.string.update_action), onUpdate)
+                AppButton(stringResource(R.string.update_later), onLater, variant = AppButtonVariant.Tertiary)
             }
         }
     }
@@ -158,15 +154,16 @@ fun ErrorFallbackScreen(
             Text(stringResource(R.string.error_fallback_body_no_reference))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
+            AppButton(
+                text = stringResource(R.string.error_fallback_retry),
                 onClick = onRetry,
                 enabled = !busy,
                 modifier =
                 Modifier.focusRequester(retryFocus).semantics {
                     if (stillFailing) stateDescription = stillFailingText
                 },
-            ) { Text(stringResource(R.string.error_fallback_retry)) }
-            TextButton(onClick = onHome) { Text(stringResource(R.string.error_fallback_home)) }
+            )
+            AppButton(stringResource(R.string.error_fallback_home), onHome, variant = AppButtonVariant.Secondary)
         }
         Text(
             if (stillFailing) stillFailingText else "",
@@ -208,7 +205,7 @@ fun OfflineBanner(isOnline: Boolean, pending: Int, modifier: Modifier = Modifier
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Icon(Icons.Filled.Info, contentDescription = null)
+            Icon(painterResource(R.drawable.lucide_info), contentDescription = null)
             Text(text)
         }
     }
@@ -228,7 +225,10 @@ fun SyncIndicator(pending: Int, syncing: Boolean, failed: Int, modifier: Modifie
     AssistChip(
         onClick = {},
         label = { Text(text) },
-        leadingIcon = { Icon(if (failed > 0) Icons.Filled.Warning else Icons.Filled.Refresh, contentDescription = null) },
+        leadingIcon = {
+            val icon = if (failed > 0) R.drawable.lucide_triangle_alert else R.drawable.lucide_refresh
+            Icon(painterResource(icon), contentDescription = null)
+        },
         modifier = modifier,
     )
 }
@@ -240,9 +240,14 @@ enum class SyncChipState { NotSynced, Failed, NeedsConfirmation }
 fun SyncChip(state: SyncChipState, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val (icon, text) =
         when (state) {
-            SyncChipState.NotSynced -> Icons.Filled.Refresh to stringResource(R.string.chip_not_synced)
-            SyncChipState.Failed -> Icons.Filled.Warning to stringResource(R.string.chip_failed)
-            SyncChipState.NeedsConfirmation -> Icons.Filled.Info to stringResource(R.string.chip_needs_confirmation)
+            SyncChipState.NotSynced -> R.drawable.lucide_refresh to stringResource(R.string.chip_not_synced)
+            SyncChipState.Failed -> R.drawable.lucide_triangle_alert to stringResource(R.string.chip_failed)
+            SyncChipState.NeedsConfirmation -> R.drawable.lucide_info to stringResource(R.string.chip_needs_confirmation)
         }
-    AssistChip(onClick = onClick, label = { Text(text) }, leadingIcon = { Icon(icon, contentDescription = null) }, modifier = modifier)
+    AssistChip(
+        onClick = onClick,
+        label = { Text(text) },
+        leadingIcon = { Icon(painterResource(icon), contentDescription = null) },
+        modifier = modifier,
+    )
 }

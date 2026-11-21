@@ -6,10 +6,12 @@ import { base, contract, createRoute } from "../src/index.js";
 import { listProcedures } from "../src/rules/listProcedures.js";
 
 describe("TP-4.32x: listProcedures", () => {
-  it("TP-4.32x: the platform contract has meta.clientConfig, GET /meta/client-config", () => {
-    expect(listProcedures(contract)).toEqual([
-      { path: "meta.clientConfig", method: "GET", route: "/meta/client-config" },
-    ]);
+  it("TP-4.32x (A-511 (6)): the contract has meta.clientConfig, GET /meta/client-config, among the modules' procedures", () => {
+    expect(listProcedures(contract)).toContainEqual({
+      path: "meta.clientConfig",
+      method: "GET",
+      route: "/meta/client-config",
+    });
   });
 
   it("TP-4.32x: nested routers give dotted paths", () => {

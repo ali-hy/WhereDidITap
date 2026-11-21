@@ -75,15 +75,13 @@ export function UpdateNotifier(props: {
 
   return (
     <Show when={required()}>
-      {/* A-462: alert icon, text and Reload on white, with a 2 px red block-end border. */}
-      <div
-        role="alert"
-        class="flex items-center gap-4 border-b-2 border-red-700 bg-white p-3 text-gray-900"
-      >
-        <Icon name="alert" class="shrink-0" />
+      {/* A-462: alert icon, text and Reload in inverse colours. */}
+      <div role="alert" class="flex items-center gap-4 bg-inverse px-4 py-2 text-on-inverse">
+        <Icon name="alert" class="size-5 shrink-0" />
         <p>{t(messages.updateRequiredWeb)}</p>
         <button
           type="button"
+          class="min-h-9 rounded-control border border-on-inverse px-3 font-semibold"
           onClick={() => {
             location.reload();
           }}

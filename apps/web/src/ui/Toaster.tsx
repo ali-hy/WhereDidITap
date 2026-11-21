@@ -11,9 +11,9 @@ const VISIBLE_LIMIT = 3;
 
 /** A-462: the non-colour cue and the inline-start border, by tone. */
 const TONES = {
-  info: { icon: "info", border: "border-sky-700" },
-  success: { icon: "check", border: "border-green-700" },
-  error: { icon: "alert", border: "border-red-700" },
+  info: { icon: "info", border: "border-s-info", text: "text-info" },
+  success: { icon: "check", border: "border-s-success", text: "text-success" },
+  error: { icon: "alert", border: "border-s-danger", text: "text-danger" },
 } as const;
 
 /** A-463: visible or queued toasts by tone and message, so an identical one isn't added twice. */
@@ -135,16 +135,18 @@ export function showToast(t: ToastOptions): string {
         toastId={props.toastId}
         priority={t.tone === "error" ? "high" : "low"}
         persistent
+        role="listitem"
         aria-live="off"
         data-tone={t.tone}
-        class={`flex [max-inline-size:min(24rem,calc(100vw-2rem))] items-center gap-3 rounded border-s-4 bg-white p-3 text-gray-900 shadow ${tone.border}`}
+        class={`flex [max-inline-size:min(24rem,calc(100vw-2rem))] items-center gap-3 rounded-control rounded-s-none border border-s-4 border-line bg-surface-raised p-3 text-fg shadow-overlay ${tone.border}`}
       >
-        <Icon name={tone.icon} class="shrink-0" />
+        <Icon name={tone.icon} class={`size-5 shrink-0 ${tone.text}`} />
         <Toast.Description>{t.message}</Toast.Description>
         <Show when={t.action}>
           {(action) => (
             <button
               type="button"
+              class="min-h-9 min-w-11 rounded-control px-2 font-semibold text-accent-fg hover:underline"
               onClick={() => {
                 action().onClick();
               }}
@@ -176,7 +178,7 @@ export function dismissToast(id: string): void {
 export function Toaster(): JSX.Element {
   return (
     <Toast.Region aria-live="off" limit={VISIBLE_LIMIT}>
-      <Toast.List class="fixed bottom-4 end-4 flex flex-col gap-2" />
+      <Toast.List class="fixed bottom-4 end-4 flex flex-col gap-2 max-[599px]:inset-x-4 max-[599px]:items-center" />
     </Toast.Region>
   );
 }

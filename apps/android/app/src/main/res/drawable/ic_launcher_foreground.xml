@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- A capital "D" outlined from IBM Plex Sans Bold, centred in the adaptive icon's safe zone. -->
+    <group
+        android:translateX="30.88"
+        android:translateY="76.3"
+        android:scaleX="0.0639"
+        android:scaleY="-0.0639">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M77 698H340Q409 698 466 676.0Q523 654 563 610.5Q603 567 625 501.5Q647 436 647 349Q647 262 625 196.5Q603 131 563 87.5Q523 44 466 22.0Q409 0 340 0H77ZM340 135Q408 135 447 173.0Q486 211 486 295V403Q486 487 447 525.0Q408 563 340 563H229V135Z" />
+    </group>
+</vector>

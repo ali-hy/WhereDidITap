@@ -6,9 +6,7 @@ import path from "node:path";
 import { Temporal, isUuid, systemClock, utcDateOf, type Clock } from "@budmon/shared";
 import { EXIT_CONFIG, loadConfigOrReport } from "../platform/config/startup.js";
 import { describeFailure } from "../platform/observability/describeFailure.js";
-import { createLogger } from "../platform/observability/logger.js";
 import { initSentry } from "../platform/observability/sentry.js";
-import type { Config } from "../platform/config/schema.js";
 import { createApiContainer, createWorkerContainer } from "../platform/container.js";
 import { serverRoot } from "../platform/config/serverRoot.js";
 import { readJournal } from "../platform/db/migrations.js";
@@ -20,6 +18,8 @@ import { createJobQueue } from "../platform/queue/jobQueue.js";
 import { listDeadLetters, redriveDeadLetter } from "../platform/queue/deadLetter.js";
 import { buildJobRegistry } from "../platform/queue/appRegistry.js";
 import { createPgBoss } from "../platform/queue/workers.js";
+import { cliLogger } from "../platform/observability/cliLogger.js";
+import { runBootstrapOwnerCommand } from "../identity/bootstrapOwnerCli.js";
 import { installProxySupport } from "../platform/crypto/proxy.js";
 import type { WorkerRole } from "../platform/queue/jobs.js";
 import { fxBackfillJob } from "../platform/fx/fxJobs.js";
@@ -36,6 +36,7 @@ const USAGE = [
   "  erasure:replay --since <RFC 3339 instant>",
   "  fx:backfill --date <YYYY-MM-DD>",
   "  diagnostics:sentry-test --yes",
+  "  identity:bootstrap-owner --email <address> [--replace]",
 ].join("\n");
 /** F-93: restore:verify's report isn't ok. */
 const EXIT_RESTORE_NOT_OK = 6;
@@ -53,17 +54,6 @@ function option(args: readonly string[], name: string): string | undefined {
 function role(value: string | undefined): WorkerRole | undefined | null {
   if (value === undefined) return undefined;
   return value === "capture" || value === "general" ? value : null;
-}
-
-function cliLogger(config: Config) {
-  return createLogger({
-    service: "cli",
-    release: config.release,
-    level: config.logLevel,
-    appEnv: config.appEnv,
-    // stdout carries only the command's output.
-    destination: { write: (line: string) => process.stderr.write(line) },
-  });
 }
 
 /** F-93 secrets:rewrap-api (kind api): F-117 over the container's sealed columns. */
@@ -311,6 +301,9 @@ export async function runCli(
     return fxBackfill(argv.slice(1), env, io, deps.clock ?? systemClock);
   }
   if (command === "diagnostics:sentry-test") return sentryTest(argv.slice(1), env, io);
+  if (command === "identity:bootstrap-owner") {
+    return runBootstrapOwnerCommand(argv.slice(1), env, io);
+  }
   if (command !== "jobs:dead" || (sub !== "list" && sub !== "redrive")) {
     io.stderr(`Unknown command: ${[command, sub].filter((x) => x !== undefined).join(" ")}`);
     io.stderr(USAGE);

@@ -1,0 +1,39 @@
+{
+  "themes": {
+    "teal": { "h": 186, "c": 0.09 }
+  },
+  "statuses": {
+    "danger": { "h": 27, "c": 0.15 },
+    "warning": { "h": 75, "c": 0.12 },
+    "success": { "h": 150, "c": 0.15 },
+    "info": { "h": 245, "c": 0.15 }
+  },
+  "tokens": {
+    "canvas": { "hue": "theme", "light": [0.975, 0.006], "dark": [0.17, 0.01] },
+    "surface": { "hue": "theme", "light": [1, 0], "dark": [0.205, 0.012] },
+    "surface-raised": { "hue": "theme", "light": [1, 0], "dark": [0.245, 0.014] },
+    "surface-sunken": { "hue": "theme", "light": [0.955, 0.008], "dark": [0.15, 0.01] },
+    "fg": { "hue": "theme", "light": [0.22, 0.015], "dark": [0.94, 0.01] },
+    "fg-muted": { "hue": "theme", "light": [0.46, 0.02], "dark": [0.76, 0.02] },
+    "line": { "hue": "theme", "light": [0.885, 0.012], "dark": [0.33, 0.012] },
+    "line-strong": { "hue": "theme", "light": [0.6, 0.012], "dark": [0.55, 0.012] },
+    "accent": { "hue": "theme", "light": [0.5, "C"], "dark": [0.8, "C"] },
+    "accent-hover": { "hue": "theme", "light": [0.44, "C"], "dark": [0.86, "C"] },
+    "on-accent": { "hue": "theme", "light": [1, 0], "dark": [0.2, 0.04] },
+    "accent-fg": { "hue": "theme", "light": [0.47, "C"], "dark": [0.82, "C"] },
+    "accent-tint": { "hue": "theme", "light": [0.955, 0.03], "dark": [0.3, 0.05] },
+    "on-accent-tint": { "hue": "theme", "light": [0.38, "C"], "dark": [0.88, "C"] },
+    "focus": { "hue": "theme", "light": [0.5, "C"], "dark": [0.8, "C"] }
+  },
+  "statusTokens": {
+    "{status}": { "light": [0.5, "c"], "dark": [0.78, "c"] },
+    "{status}-tint": { "light": [0.96, 0.03], "dark": [0.29, 0.05] },
+    "on-{status}-tint": { "light": [0.4, "c"], "dark": [0.88, "0.8c"] }
+  },
+  "aliases": {
+    "on-danger": { "light": "#ffffff", "dark": "=canvas" },
+    "income": { "light": "=success", "dark": "=success" },
+    "inverse": { "light": "=dark:surface", "dark": "=light:surface" },
+    "on-inverse": { "light": "=dark:fg", "dark": "=light:fg" }
+  }
+}

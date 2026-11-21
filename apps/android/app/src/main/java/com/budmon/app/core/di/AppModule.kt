@@ -15,6 +15,8 @@ import com.budmon.app.core.network.IdempotencyKeyInterceptor
 import com.budmon.app.core.network.TraceparentInterceptor
 import com.budmon.app.core.network.apiRoot
 import com.budmon.app.core.outbox.OutboxDao
+import com.budmon.app.identity.net.AuthInterceptor
+import com.budmon.app.identity.net.TokenRefreshAuthenticator
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -29,6 +31,7 @@ import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import java.time.Clock
 import javax.inject.Named
 import javax.inject.Singleton
+import kotlin.time.TimeSource
 
 /** F-257 (A-352): datastore/budmon_update.preferences_pb. */
 private val Context.updateDataStore: DataStore<Preferences> by preferencesDataStore(name = "budmon_update")
@@ -47,11 +50,31 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun okHttpClient(@Named("versionCode") versionCode: Int): OkHttpClient = OkHttpClient
+    fun timeSource(): TimeSource = TimeSource.Monotonic
+
+    /** Refreshes the session: no token, no authenticator. */
+    @Provides
+    @Singleton
+    @Named("refreshClient")
+    fun refreshClient(@Named("versionCode") versionCode: Int): OkHttpClient = OkHttpClient
+        .Builder()
+        .addInterceptor(ClientHeaderInterceptor(versionCode))
+        .addInterceptor(TraceparentInterceptor())
+        .build()
+
+    @Provides
+    @Singleton
+    fun okHttpClient(
+        @Named("versionCode") versionCode: Int,
+        authInterceptor: AuthInterceptor,
+        authenticator: TokenRefreshAuthenticator,
+    ): OkHttpClient = OkHttpClient
         .Builder()
         .addInterceptor(ClientHeaderInterceptor(versionCode))
         .addInterceptor(TraceparentInterceptor())
         .addInterceptor(IdempotencyKeyInterceptor())
+        .addInterceptor(authInterceptor)
+        .authenticator(authenticator)
         .build()
 
     @Provides

@@ -126,11 +126,12 @@ export function testRouter(boomError: Error = new Error("boom")): TestRouter {
 const PrincipalEcho = z.object({ userId: z.string(), isOwner: z.boolean(), sessionId: z.string() });
 
 /**
- * TP-4.8 and TP-4.16's contract: the platform contract plus authed and owner procedures, built on
- * F-53's bases for this contract (A-123, procedureBases).
+ * TP-4.8 and TP-4.16's contract: the platform's own part (`meta`) plus authed and owner
+ * procedures, built on F-53's bases for this contract (A-123, procedureBases). Modules' procedures
+ * stay out: authRouter() implements only these, and TP-4.8 checks every non-public one.
  */
 export const authContract = {
-  ...contract,
+  meta: contract.meta,
   test: {
     authedThing: base.route({ method: "GET", path: "/test/authed-thing" }).output(PrincipalEcho),
     ownerThing: base.route({ method: "GET", path: "/test/owner-thing" }).output(PrincipalEcho),

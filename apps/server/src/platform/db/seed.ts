@@ -1,6 +1,7 @@
 // F-23: the seed framework. Each seeder is idempotent.
 import { utcDateOf } from "@budmon/shared";
 import type { WorkerContainer } from "../container.js";
+import { identityDevSeeder } from "../../identity/identitySeed.js";
 import { normaliseRate } from "../fx/decimal.js";
 import { insertDay } from "../fx/fxRepo.js";
 import { createFixedProvider } from "../fx/providers.js";
@@ -34,8 +35,8 @@ export const fxRatesSeeder: Seeder = {
   },
 };
 
-/** The platform's seeders. */
-export const seeders: Seeder[] = [fxRatesSeeder];
+/** The platform's seeders, then each module's. */
+export const seeders: Seeder[] = [fxRatesSeeder, identityDevSeeder];
 
 export async function runSeeders(
   c: WorkerContainer,

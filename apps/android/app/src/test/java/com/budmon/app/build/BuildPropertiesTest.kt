@@ -1,12 +1,14 @@
-// F-264 API base URL and F-265 Google server client id: Gradle TestKit on the app module.
-// TP-13.16 and TP-13.17. Each case runs a real Gradle build of apps/android, so it needs the Android
-// SDK and runs only where the android job provides it.
+// F-264 API base URL, F-265 Google server client id and F-250's manifest: Gradle TestKit on the app
+// module. TP-13.16, TP-13.17 and TP-13.20 (Sentry auto-init off, A-535). Each case runs a real
+// Gradle build of apps/android, so it needs the Android SDK and runs only where the android job
+// provides it.
 //
 // A-348: `testImplementation(gradleTestKit())` in app/build.gradle.kts, which also sets the system
 // property `budmon.androidRoot`. Each case builds a temporary copy of apps/android (without build/,
-// .gradle/ and local.properties), so it never contends with the outer build. The copy keeps the
-// repository layout (<tmp>/apps/android) and brings the two files the build reads from outside
-// apps/android: packages/contract/openapi.json (openApiGenerate) and packages/shared/test-vectors.
+// .gradle/, .kotlin/ and local.properties; A-536), so it never contends with the outer build. The
+// copy keeps the repository layout (<tmp>/apps/android) and brings the two files the build reads
+// from outside apps/android: packages/contract/openapi.json (openApiGenerate) and
+// packages/shared/test-vectors.
 // AGP paths are in AgpPaths.kt.
 package com.budmon.app.build
 
@@ -35,7 +37,7 @@ class BuildPropertiesTest {
     fun copyProject() {
         base = Files.createTempDirectory("budmon-android-testkit-").toFile()
         root = File(base, "apps/android")
-        val skip = setOf("build", ".gradle", "local.properties")
+        val skip = setOf("build", ".gradle", ".kotlin", "local.properties")
         source.walkTopDown()
             .onEnter { dir -> dir == source || dir.name !in skip }
             .filter { it.isFile && it.name !in skip }
@@ -149,6 +151,19 @@ class BuildPropertiesTest {
     @Test
     fun `TP-13_17 an invalid id fails the build naming the property`() {
         assertTrue(fails(":app:assembleDebug", "-Pbudmon.googleServerClientId=abc").output.contains("budmon.googleServerClientId"))
+    }
+
+    // ---- TP-13.20 (F-250, A-535) ----
+
+    @Test
+    fun `TP-13_20 assembleDebug without budmon_sentryDsn - the merged manifest turns Sentry's auto-init off, SENTRY_DSN is empty`() {
+        succeeds(":app:assembleDebug")
+
+        val manifest = mergedManifest("debug")
+        val sentryMeta = Regex("<meta-data\\b[^>]*android:name=\"io\\.sentry\\.auto-init\"[^>]*/?>").findAll(manifest).toList()
+        assertTrue(manifest, sentryMeta.size == 1)
+        assertTrue(sentryMeta.single().value, sentryMeta.single().value.contains("android:value=\"false\""))
+        assertTrue(buildConfig("debug").contains("SENTRY_DSN = \"\""))
     }
 
     private companion object {

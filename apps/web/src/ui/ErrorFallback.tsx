@@ -5,7 +5,7 @@ import type { AppError } from "../api/errors.js";
 import { messages } from "../i18n/messages.js";
 import { useI18n } from "../i18n/useI18n.js";
 import { setDocumentTitle } from "./a11y.js";
-import { Icon } from "./icons/Icon.js";
+import { Button } from "./Button.js";
 
 /** Marks where the reference goes inside the translated sentence (private use, never shown). */
 const SLOT = "";
@@ -21,7 +21,7 @@ export function ErrorFallback(props: {
   const [busy, setBusy] = createSignal(false);
   const [stillFailing, setStillFailing] = createSignal(false);
   const statusId = createUniqueId();
-  let button: HTMLButtonElement | undefined;
+  let button: HTMLElement | undefined;
 
   // A-464: the tab title follows the <h1>.
   createEffect(() => {
@@ -52,7 +52,7 @@ export function ErrorFallback(props: {
       .replace(/[\u2068\u2069]/g, "")
       .split(SLOT);
   const reference = (requestId: () => string) => (
-    <p>
+    <p class="mt-2 font-mono text-sm text-fg-muted">
       {referenceParts()[0] ?? ""}
       <bdi dir="ltr">{requestId().slice(0, 8)}</bdi>
       {referenceParts()[1] ?? ""}
@@ -60,37 +60,37 @@ export function ErrorFallback(props: {
   );
 
   return (
-    <section class="mx-auto max-w-[40rem] p-4">
-      <h1 tabindex="-1" class="text-xl font-semibold">
+    <section>
+      <h1 tabindex="-1" class="text-2xl font-semibold text-fg">
         {t(messages.errorFallbackTitle)}
       </h1>
       {/* A-457: "share this reference" only when there is one. */}
-      <p>
+      <p class="mt-3 text-fg">
         {props.requestId === undefined || props.requestId === ""
           ? t(messages.errorFallbackBodyNoReference)
           : t(messages.errorFallbackBody)}
       </p>
       <Show when={props.requestId}>{(id) => reference(id)}</Show>
-      <div class="mt-4 flex gap-4">
-        <button
-          ref={button}
-          type="button"
+      <div class="mt-6 flex flex-wrap gap-3">
+        <Button
+          variant="primary"
+          icon="refresh"
+          busy={busy()}
+          ref={(el) => {
+            button = el;
+          }}
           data-fallback-retry
           aria-describedby={statusId}
-          aria-busy={busy() ? "true" : undefined}
-          disabled={busy()}
           onClick={() => void retry()}
         >
-          {/* B-6: a decorative spinner while the retry runs (§8.1 S-2). */}
-          <Show when={busy()}>
-            <Icon name="refresh" class="me-2 inline animate-spin" />
-          </Show>
           {t(messages.errorFallbackRetry)}
-        </button>
-        <a href="/">{t(messages.errorFallbackHome)}</a>
+        </Button>
+        <Button variant="secondary" href="/">
+          {t(messages.errorFallbackHome)}
+        </Button>
       </div>
       {/* A-400: the status element is always rendered and filled when the retry failed. */}
-      <p id={statusId} role="status">
+      <p id={statusId} role="status" class="mt-4 text-fg">
         {stillFailing() || props.stillFailing === true ? t(messages.errorFallbackStillFailing) : ""}
       </p>
     </section>

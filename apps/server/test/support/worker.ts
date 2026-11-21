@@ -3,7 +3,10 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { loadConfig } from "../../src/platform/config/loadConfig.js";
 import type { Config } from "../../src/platform/config/schema.js";
-import { createWorkerContainer } from "../../src/platform/container.js";
+import {
+  createWorkerContainer,
+  type WorkerContainerOverrides,
+} from "../../src/platform/container.js";
 import { observed, type Observed } from "./api.js";
 import { devWorker, readFileFrom, withFile } from "./configEnv.js";
 import type { WorkerContainer } from "./jobs.js";
@@ -56,7 +59,8 @@ export interface BuiltWorker {
  */
 export async function buildWorkerContainer(
   roles: RolesSpec,
-  overrides: Partial<WorkerContainer> = {},
+  // Identity LLD §10.1 (review S-6): WorkerContainerOverrides (F-34) adds identityOverrides.
+  overrides: WorkerContainerOverrides = {},
 ): Promise<BuiltWorker> {
   const testDb = await createTestDatabase(roles === "capture" ? "budmon_capture" : "budmon_app");
   const obs = observed();

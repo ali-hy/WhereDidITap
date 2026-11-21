@@ -1,0 +1,13 @@
+// The operator commands' logger: JSON lines on stderr, so stdout carries only the command's output.
+import type { Config } from "../config/schema.js";
+import { createLogger } from "./logger.js";
+
+export function cliLogger(config: Config) {
+  return createLogger({
+    service: "cli",
+    release: config.release,
+    level: config.logLevel,
+    appEnv: config.appEnv,
+    destination: { write: (line: string) => process.stderr.write(line) },
+  });
+}

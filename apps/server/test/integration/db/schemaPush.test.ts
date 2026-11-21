@@ -1,4 +1,5 @@
 // F-17 pushSchemaOntoEmpty. TP-2.12 (fresh container), plus extra cases TP-2.53x for §3.1.
+// Platform objects are asserted by name; whole-schema sets come from schemaTableNames() (A-512).
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootstrapCluster } from "../../../src/platform/db/clusterBootstrap.js";
 import {
@@ -6,7 +7,7 @@ import {
   pushSchemaOntoEmpty,
 } from "../../../src/platform/db/schemaPush.js";
 import type { Database } from "../../../src/platform/db/types.js";
-import { connectDatabase } from "../../support/platform.js";
+import { PLATFORM_TABLES, connectDatabase, schemaTableNames } from "../../support/platform.js";
 import { query, startFreshPostgres, type FreshPostgres } from "../../support/postgres.js";
 
 const DATABASE = "budmon";
@@ -41,16 +42,14 @@ async function rows(text: string): Promise<Record<string, unknown>[]> {
 }
 
 describe("TP-2.12: push onto an empty database", () => {
-  it("TP-2.12: creates the four platform tables", async () => {
+  it("TP-2.12: creates every registry table, the four platform tables among them", async () => {
     expect(firstPush.statements).toBeGreaterThan(0);
-    expect(
-      await rows("SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"),
-    ).toEqual([
-      { tablename: "currencies" },
-      { tablename: "exchange_rates" },
-      { tablename: "idempotency_records" },
-      { tablename: "rate_limit_counters" },
-    ]);
+    const tables = (
+      await rows("SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename")
+    ).map((r) => r["tablename"]);
+
+    expect(tables).toEqual(schemaTableNames());
+    expect(tables).toEqual(expect.arrayContaining([...PLATFORM_TABLES]));
   });
 
   it("TP-2.12: rate_limit_counters is UNLOGGED (relpersistence u)", async () => {
@@ -85,8 +84,10 @@ describe("TP-2.53x: the pushed schema matches §3.1", () => {
     const checks = await rows(
       "SELECT conname FROM pg_constraint WHERE contype = 'c' AND connamespace = 'public'::regnamespace ORDER BY conname",
     );
-    const indexes = await rows(
-      "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname LIKE '%\\_idx' ORDER BY indexname",
+    const indexes = await query(
+      pg.superuserUrl(DATABASE),
+      "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname LIKE '%\\_idx' AND tablename = ANY($1) ORDER BY indexname",
+      [[...PLATFORM_TABLES]],
     );
 
     expect(checks.map((r) => r["conname"])).toEqual(

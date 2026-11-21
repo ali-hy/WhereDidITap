@@ -11,12 +11,14 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { bytea } from "./types.js";
+import { usersTable } from "./users.js";
 
 export const idempotencyRecordsTable = pgTable(
   "idempotency_records",
   {
-    // The foreign key to identity's users table is declared in identity's schema (HLD §3.1).
-    userId: uuid().notNull(),
+    userId: uuid()
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
     idempotencyKey: uuid().notNull(),
     procedure: text().notNull(),
     requestHash: bytea().notNull(),

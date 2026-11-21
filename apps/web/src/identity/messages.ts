@@ -1,0 +1,655 @@
+// F-171: identity's web message descriptors. S-0 holds the error messages (F-174); each
+// slice adds the messages of its screens. The same IDs and texts are in en.json (F-9).
+import { defineMessages } from "@formatjs/intl";
+
+export const identityMessages = defineMessages({
+  errorInvalidCredentials: {
+    id: "error.invalidCredentials",
+    defaultMessage: "Email or password is incorrect.",
+  },
+  errorAccountClosed: {
+    id: "error.accountClosed",
+    defaultMessage: "This account has been closed.",
+  },
+  errorGoogleAccountUnknown: {
+    id: "error.googleAccountUnknown",
+    defaultMessage:
+      "There's no account for {email}. You need an invitation: ask someone who already has an account to invite you.",
+  },
+  errorGoogleEmailUnverified: {
+    id: "error.googleEmailUnverified",
+    defaultMessage:
+      "Google hasn't confirmed this email address. Sign in with your password, or use your invitation.",
+  },
+  errorGoogleAccountInUse: {
+    id: "error.googleAccountInUse",
+    defaultMessage: "This Google account is already used by another account.",
+  },
+  errorGoogleOtherAccountLinked: {
+    id: "error.googleOtherAccountLinked",
+    defaultMessage:
+      "Your account is connected to a different Google account. Use that one, or your password.",
+  },
+  errorGoogleAccountNotAllowed: {
+    id: "error.googleAccountNotAllowed",
+    defaultMessage: "This Google account can't be used here.",
+  },
+  errorGoogleAccountMismatch: {
+    id: "error.googleAccountMismatch",
+    defaultMessage: "Choose the Google account you connected ({email}).",
+  },
+  errorGoogleSigninFailed: {
+    id: "error.googleSigninFailed",
+    defaultMessage: "Google sign-in didn't complete. Try again.",
+  },
+  errorGoogleUnavailable: {
+    id: "error.googleUnavailable",
+    defaultMessage: "Couldn't reach Google. Try again, or use your password.",
+  },
+  errorInviteAllowanceExhausted: {
+    id: "error.inviteAllowanceExhausted",
+    defaultMessage: "You've used all your invitations. The administrator can give you more.",
+  },
+  errorInvitationsDisabled: {
+    id: "error.invitationsDisabled",
+    defaultMessage: "Sending invitations isn't available for your account.",
+  },
+  errorUserCapReached: {
+    id: "error.userCapReached",
+    defaultMessage: "There's no room for new people right now, so no new invitations can be sent.",
+  },
+  errorAlreadyAUser: {
+    id: "error.alreadyAUser",
+    defaultMessage: "{email} already has an account.",
+  },
+  errorInvitationPending: {
+    id: "error.invitationPending",
+    defaultMessage: "{email} already has a pending invitation.",
+  },
+  errorEmailNotInvitable: {
+    id: "error.emailNotInvitable",
+    defaultMessage: "This address can't be invited.",
+  },
+  errorResendLimitReached: {
+    id: "error.resendLimitReached",
+    defaultMessage: "You can resend this invitation again tomorrow.",
+  },
+  errorExportInProgress: {
+    id: "error.exportInProgress",
+    defaultMessage: "Preparing your export…",
+  },
+  errorExportLimitReached: {
+    id: "error.exportLimitReached",
+    defaultMessage: "You can request another export tomorrow.",
+  },
+  errorDeletionInProgress: {
+    id: "error.deletionInProgress",
+    defaultMessage: "Your account is already being deleted.",
+  },
+  signinTitle: {
+    id: "signin.title",
+    defaultMessage: "Sign in",
+  },
+  signinSubmit: {
+    id: "signin.submit",
+    defaultMessage: "Sign in",
+  },
+  signinInviteOnly: {
+    id: "signin.inviteOnly",
+    defaultMessage: "You need an invitation to join. Got one? Open the link in the email.",
+  },
+  inviteChecking: {
+    id: "invite.checking",
+    defaultMessage: "Checking your invitation…",
+  },
+  inviteTitle: {
+    id: "invite.title",
+    defaultMessage: "You've been invited",
+  },
+  inviteFrom: {
+    id: "invite.from",
+    defaultMessage: "{inviter} invited {email} to join.",
+  },
+  inviteFromOwner: {
+    id: "invite.fromOwner",
+    defaultMessage: "Your owner invitation for {email}.",
+  },
+  inviteUsePassword: {
+    id: "invite.usePassword",
+    defaultMessage: "Use a password",
+  },
+  inviteExpires: {
+    id: "invite.expires",
+    defaultMessage: "This invitation expires on {date}.",
+  },
+  inviteHaveAccount: {
+    id: "invite.haveAccount",
+    defaultMessage: "Already have an account? Sign in",
+  },
+  inviteProblemTitle: {
+    id: "invite.problem.title",
+    defaultMessage: "This invitation can't be used",
+  },
+  inviteProblemExpired: {
+    id: "invite.problem.expired",
+    defaultMessage: "It expired on {date}.",
+  },
+  inviteProblemRevoked: {
+    id: "invite.problem.revoked",
+    defaultMessage: "It was cancelled.",
+  },
+  inviteProblemUsed: {
+    id: "invite.problem.used",
+    defaultMessage: "It has already been used. If that was you, sign in.",
+  },
+  inviteProblemInvalid: {
+    id: "invite.problem.invalid",
+    defaultMessage: "This invitation can't be used.",
+  },
+  inviteProblemIncomplete: {
+    id: "invite.problem.incomplete",
+    defaultMessage:
+      "This link isn't complete. Open it again from the email, or copy the whole link.",
+  },
+  inviteProblemReady: {
+    id: "invite.problem.ready",
+    defaultMessage: "Your account is ready. Sign in to continue.",
+  },
+  inviteProblemAskInviter: {
+    id: "invite.problem.askInviter",
+    defaultMessage: "Ask {inviter} to send a new one.",
+  },
+  inviteFull: {
+    id: "invite.full",
+    defaultMessage:
+      "There's no room for new people right now. {inviter} and the administrator have been told.",
+  },
+  setupTitle: {
+    id: "setup.title",
+    defaultMessage: "Set up your account",
+  },
+  setupName: {
+    id: "setup.name",
+    defaultMessage: "Your name",
+  },
+  setupPassword: {
+    id: "setup.password",
+    defaultMessage: "Password",
+  },
+  setupCurrency: {
+    id: "setup.currency",
+    defaultMessage: "Base currency",
+  },
+  setupTimeZone: {
+    id: "setup.timeZone",
+    defaultMessage: "Time zone",
+  },
+  setupLanguage: {
+    id: "setup.language",
+    defaultMessage: "Language",
+  },
+  setupPasswordHint: {
+    id: "setup.passwordHint",
+    defaultMessage: "At least 12 characters.",
+  },
+  setupCurrencyHint: {
+    id: "setup.currencyHint",
+    defaultMessage:
+      "Base currency is used for totals across accounts. You can change these later in Settings.",
+  },
+  setupPrivacy: {
+    id: "setup.privacy",
+    defaultMessage: "By continuing you agree to the privacy notice.",
+  },
+  setupSubmit: {
+    id: "setup.submit",
+    defaultMessage: "Create account",
+  },
+  passwordTooShort: {
+    id: "password.tooShort",
+    defaultMessage: "Use at least 12 characters.",
+  },
+  passwordTooLong: {
+    id: "password.tooLong",
+    defaultMessage: "Use at most 128 characters.",
+  },
+  passwordCommon: {
+    id: "password.common",
+    defaultMessage: "This password is too common. Try a longer phrase.",
+  },
+  passwordContainsEmail: {
+    id: "password.containsEmail",
+    defaultMessage: "Don't include your email address in your password.",
+  },
+  profileNameRequired: {
+    id: "profile.name.required",
+    defaultMessage: "Enter your name.",
+  },
+  profileNameTooLong: {
+    id: "profile.name.tooLong",
+    defaultMessage: "Use at most 80 characters.",
+  },
+  profileCurrencyRequired: {
+    id: "profile.currency.required",
+    defaultMessage: "Choose a base currency.",
+  },
+  profileTimeZoneRequired: {
+    id: "profile.timeZone.required",
+    defaultMessage: "Choose a time zone.",
+  },
+  homeWelcome: {
+    id: "home.welcome",
+    defaultMessage: "Welcome, {name}.",
+  },
+  homeFirstRun: {
+    id: "home.firstRun",
+    defaultMessage: "Add your first account to start.",
+  },
+  privacyIntroTitle: {
+    id: "privacy.intro.title",
+    defaultMessage: "Privacy notice",
+  },
+  privacyIntroBody: {
+    id: "privacy.intro.body",
+    defaultMessage:
+      "{appName} is run by one person for a small invited group. This notice says what {appName} keeps about you, why, and what you can do about it. Last updated {date}.",
+  },
+  privacyCollectedTitle: {
+    id: "privacy.collected.title",
+    defaultMessage: "What we keep",
+  },
+  privacyCollectedBody: {
+    id: "privacy.collected.body",
+    defaultMessage:
+      'Your email address, your name, your language, time zone and base currency; how you sign in (a password stored only as a secure hash, and the Google account you connect, if any); whether two-step verification is on (its secret is encrypted); the devices you\'re signed in on (a label such as "Chrome on Windows", never your IP address); and a 90-day history of security events such as sign-ins and password changes. Everything you record in {appName} (accounts, transactions, budgets) is kept so the app can show it to you.',
+  },
+  privacyGoogleTitle: {
+    id: "privacy.google.title",
+    defaultMessage: "Signing in with Google",
+  },
+  privacyGoogleBody: {
+    id: "privacy.google.body",
+    defaultMessage:
+      "If you sign in with Google, {appName} receives your Google account's ID, email address and name, and uses them only to sign you in. It keeps no Google access tokens for sign-in. Connecting a Gmail inbox for capture is separate and asks for its own permission.",
+  },
+  privacyEmailsTitle: {
+    id: "privacy.emails.title",
+    defaultMessage: "Emails we send",
+  },
+  privacyEmailsBody: {
+    id: "privacy.emails.body",
+    defaultMessage:
+      "Only about your account: invitations, password resets, security notices and deletion notices. No newsletters or tracking.",
+  },
+  privacyExportTitle: {
+    id: "privacy.export.title",
+    defaultMessage: "Your data is yours",
+  },
+  privacyExportBody: {
+    id: "privacy.export.body",
+    defaultMessage:
+      "You can download everything as CSV and JSON at any time from Settings > Your data.",
+  },
+  privacyDeletionTitle: {
+    id: "privacy.deletion.title",
+    defaultMessage: "Deleting your account",
+  },
+  privacyDeletionBody: {
+    id: "privacy.deletion.body",
+    defaultMessage:
+      'You can delete your account from Settings. You have 7 days to change your mind; after that everything you own is erased. Entries you added to shared accounts stay, shown as "Deleted user". Backups that still contain your data are gone within 14 days of the erasure.',
+  },
+  privacyBansTitle: {
+    id: "privacy.bans.title",
+    defaultMessage: "If an address is banned",
+  },
+  privacyBansBody: {
+    id: "privacy.bans.body",
+    defaultMessage:
+      "If the administrator bans an email address, {appName} keeps that address (and nothing else) so it can't be invited again, until the ban is lifted.",
+  },
+  privacyAdminTitle: {
+    id: "privacy.admin.title",
+    defaultMessage: "What the administrator sees",
+  },
+  privacyAdminBody: {
+    id: "privacy.admin.body",
+    defaultMessage:
+      "Your name, email, account status, when you were last active and how many sources you've connected. Never your financial data.",
+  },
+  privacyContactTitle: {
+    id: "privacy.contact.title",
+    defaultMessage: "Questions",
+  },
+  privacyContactBody: {
+    id: "privacy.contact.body",
+    defaultMessage: "Contact the person who invited you, or the {appName} administrator.",
+  },
+  signinSessionEnded: {
+    id: "signin.sessionEnded",
+    defaultMessage: "Your session ended. Sign in again.",
+  },
+  inviteForEmail: {
+    id: "invite.forEmail",
+    defaultMessage: "This invitation is for {email}.",
+  },
+  inviteFullNoInviter: {
+    id: "invite.fullNoInviter",
+    defaultMessage: "There's no room for new people right now. The administrator has been told.",
+  },
+  inviteProblemAskAnyone: {
+    id: "invite.problem.askAnyone",
+    defaultMessage: "Ask someone who already has an account to invite you again.",
+  },
+  signinPrivacy: {
+    id: "signin.privacy",
+    defaultMessage: "Privacy notice",
+  },
+  setupPrivacyNewTab: {
+    id: "setup.privacyNewTab",
+    defaultMessage: "(opens in a new tab)",
+  },
+  signinEmail: {
+    id: "signin.email",
+    defaultMessage: "Email",
+  },
+  signinPassword: {
+    id: "signin.password",
+    defaultMessage: "Password",
+  },
+  signinReuse: {
+    id: "signin.reuse",
+    defaultMessage: "For your security, you've been signed out. Sign in again.",
+  },
+  formEmailRequired: {
+    id: "form.email.required",
+    defaultMessage: "Enter your email.",
+  },
+  formEmailInvalid: {
+    id: "form.email.invalid",
+    defaultMessage: "Enter an email address like name@example.com.",
+  },
+  formPasswordRequired: {
+    id: "form.password.required",
+    defaultMessage: "Enter your password.",
+  },
+  inviteSignedInAsOther: {
+    id: "invite.signedInAsOther",
+    defaultMessage: "You're signed in as {email}. Sign out to accept this invitation.",
+  },
+  inviteSignOutContinue: {
+    id: "invite.signOutContinue",
+    defaultMessage: "Sign out and continue",
+  },
+  settingsTitle: {
+    id: "settings.title",
+    defaultMessage: "Settings",
+  },
+  settingsSecurity: {
+    id: "settings.security",
+    defaultMessage: "Sign-in & security",
+  },
+  menuAccount: {
+    id: "menu.account",
+    defaultMessage: "Account",
+  },
+  menuSettings: {
+    id: "menu.settings",
+    defaultMessage: "Settings",
+  },
+  menuSignOut: {
+    id: "menu.signOut",
+    defaultMessage: "Sign out",
+  },
+  sessionsTitle: {
+    id: "sessions.title",
+    defaultMessage: "Where you're signed in",
+  },
+  sessionsThisDevice: {
+    id: "sessions.thisDevice",
+    defaultMessage: "This device",
+  },
+  sessionsSignedIn: {
+    id: "sessions.signedIn",
+    defaultMessage: "Signed in {date}",
+  },
+  sessionsLastActive: {
+    id: "sessions.lastActive",
+    defaultMessage: "Last active {relative}",
+  },
+  sessionsActiveNow: {
+    id: "sessions.activeNow",
+    defaultMessage: "Active now",
+  },
+  sessionsSignOut: {
+    id: "sessions.signOut",
+    defaultMessage: "Sign out",
+  },
+  sessionsSignOutOthers: {
+    id: "sessions.signOutOthers",
+    defaultMessage: "Sign out of all other devices",
+  },
+  sessionsSignedOutOthers: {
+    id: "sessions.signedOutOthers",
+    defaultMessage:
+      "{n, plural, one {Signed out of # other device.} other {Signed out of # other devices.}}",
+  },
+  confirmTitle: {
+    id: "confirm.title",
+    defaultMessage: "Confirm it's you",
+  },
+  confirmSubmit: {
+    id: "confirm.submit",
+    defaultMessage: "Confirm",
+  },
+  confirmCancel: {
+    id: "confirm.cancel",
+    defaultMessage: "Cancel",
+  },
+  confirmCode: {
+    id: "confirm.code",
+    defaultMessage: "Code from your authenticator app",
+  },
+  confirmPassword: {
+    id: "confirm.password",
+    defaultMessage: "Password",
+  },
+  twostepTitle: {
+    id: "twostep.title",
+    defaultMessage: "Two-step verification",
+  },
+  twostepStatusOn: {
+    id: "twostep.status.on",
+    defaultMessage: "On",
+  },
+  twostepStatusOff: {
+    id: "twostep.status.off",
+    defaultMessage: "Off",
+  },
+  twostepTurnOn: {
+    id: "twostep.turnOn",
+    defaultMessage: "Turn on",
+  },
+  twostepPrompt: {
+    id: "twostep.prompt",
+    defaultMessage: "Enter the 6-digit code from your authenticator app.",
+  },
+  twostepCode: {
+    id: "twostep.code",
+    defaultMessage: "Code",
+  },
+  twostepRecovery: {
+    id: "twostep.recovery",
+    defaultMessage: "Recovery code",
+  },
+  twostepUseRecovery: {
+    id: "twostep.useRecovery",
+    defaultMessage: "Use a recovery code instead",
+  },
+  twostepUseCode: {
+    id: "twostep.useCode",
+    defaultMessage: "Use a code from your app",
+  },
+  twostepVerify: {
+    id: "twostep.verify",
+    defaultMessage: "Verify",
+  },
+  twostepBack: {
+    id: "twostep.back",
+    defaultMessage: "Back to sign in",
+  },
+  twostepCodeInvalid: {
+    id: "twostep.code.invalid",
+    defaultMessage: "Enter the 6 digits from your app.",
+  },
+  twostepRecoveryInvalid: {
+    id: "twostep.recovery.invalid",
+    defaultMessage: "Enter a code like 7KQ2-M3XD-4TRA.",
+  },
+  twostepCodeWrong: {
+    id: "twostep.code.wrong",
+    defaultMessage: "That code didn't work. Check your app and try again.",
+  },
+  twostepTooMany: {
+    id: "twostep.tooMany",
+    defaultMessage: "Too many attempts. Sign in again.",
+  },
+  twostepTimeout: {
+    id: "twostep.timeout",
+    defaultMessage: "This sign-in timed out. Sign in again.",
+  },
+  twostepRecoveryLeft: {
+    id: "twostep.recoveryLeft",
+    defaultMessage:
+      "{n, plural, one {You used a recovery code. # code left.} other {You used a recovery code. # codes left.}}",
+  },
+  twostepCodesLeft: {
+    id: "twostep.codesLeft",
+    defaultMessage: "{n, plural, one {# recovery code left} other {# recovery codes left}}",
+  },
+  twostepCreateNew: {
+    id: "twostep.createNew",
+    defaultMessage: "Create new codes",
+  },
+  twostepLostHelp: {
+    id: "twostep.lostHelp",
+    defaultMessage: "Lost access to your authenticator?",
+  },
+  twostepLostHelpBody: {
+    id: "twostep.lostHelpBody",
+    defaultMessage:
+      "Use one of your recovery codes. If you don't have them, contact the administrator, who can turn two-step verification off for you.",
+  },
+  twostepLimitRecovery: {
+    id: "twostep.limitRecovery",
+    defaultMessage: "You can still use a recovery code.",
+  },
+  twostepSetupTitle: {
+    id: "twostep.setup.title",
+    defaultMessage: "Turn on two-step verification",
+  },
+  twostepSetupStep: {
+    id: "twostep.setup.step",
+    defaultMessage: "Step {n} of 2",
+  },
+  twostepSetupScan: {
+    id: "twostep.setup.scan",
+    defaultMessage: "Scan this code",
+  },
+  twostepSetupCantScan: {
+    id: "twostep.setup.cantScan",
+    defaultMessage: "Can't scan? Enter this key instead:",
+  },
+  twostepSetupSteps: {
+    id: "twostep.setup.steps",
+    defaultMessage:
+      "1. Open your authenticator app (for example Google Authenticator, Microsoft Authenticator, 1Password). 2. Add an account and scan the code. 3. Enter the 6-digit code it shows.",
+  },
+  twostepSetupSubmit: {
+    id: "twostep.setup.submit",
+    defaultMessage: "Verify and turn on",
+  },
+  twostepSetupClockHint: {
+    id: "twostep.setup.clockHint",
+    defaultMessage: "That code didn't work. Check that your phone's time is set automatically.",
+  },
+  twostepSetupExpired: {
+    id: "twostep.setup.expired",
+    defaultMessage: "Setup timed out. Start again.",
+  },
+  twostepSetupStartAgain: {
+    id: "twostep.setup.startAgain",
+    defaultMessage: "Start again",
+  },
+  twostepSetupCopy: {
+    id: "twostep.setup.copy",
+    defaultMessage: "Copy",
+  },
+  twostepCodesTitle: {
+    id: "twostep.codes.title",
+    defaultMessage: "Save your recovery codes",
+  },
+  twostepCodesBody: {
+    id: "twostep.codes.body",
+    defaultMessage:
+      "If you lose your phone, each of these codes lets you sign in once. Keep them somewhere safe, like a password manager.",
+  },
+  twostepCodesCopy: {
+    id: "twostep.codes.copy",
+    defaultMessage: "Copy all",
+  },
+  twostepCodesDownload: {
+    id: "twostep.codes.download",
+    defaultMessage: "Download",
+  },
+  twostepCodesAck: {
+    id: "twostep.codes.ack",
+    defaultMessage: "I've saved my recovery codes",
+  },
+  twostepCodesDone: {
+    id: "twostep.codes.done",
+    defaultMessage: "Done",
+  },
+  twostepCodesUnsaved: {
+    id: "twostep.codes.unsaved",
+    defaultMessage: "You may not have saved your recovery codes.",
+  },
+  twostepOn: {
+    id: "twostep.on",
+    defaultMessage:
+      "Two-step verification is on. Your other devices have been signed out and will ask for a code next time.",
+  },
+  twostepOffConfirm: {
+    id: "twostep.offConfirm",
+    defaultMessage:
+      "Turn off two-step verification? Your account will be protected by your password only.",
+  },
+  twostepOff: {
+    id: "twostep.off",
+    defaultMessage: "Turn off",
+  },
+  twostepOffDone: {
+    id: "twostep.offDone",
+    defaultMessage: "Two-step verification is off.",
+  },
+  twostepReplace: {
+    id: "twostep.replace",
+    defaultMessage: "Replace authenticator app",
+  },
+  twostepReplaced: {
+    id: "twostep.replaced",
+    defaultMessage: "Your authenticator app was replaced.",
+  },
+  twostepNewCodesDone: {
+    id: "twostep.newCodesDone",
+    defaultMessage: "Your old codes no longer work.",
+  },
+  twostepQrAlt: {
+    id: "twostep.qrAlt",
+    defaultMessage: "QR code for your authenticator app. Use the key below if you can't scan.",
+  },
+  twostepCopied: {
+    id: "twostep.copied",
+    defaultMessage: "Copied.",
+  },
+});

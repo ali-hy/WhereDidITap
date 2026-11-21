@@ -1,6 +1,9 @@
 // Builders for the platform objects integration tests pass around (§10.1).
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { getTableName, is } from "drizzle-orm";
+import { PgTable } from "drizzle-orm/pg-core";
+import * as schema from "../../src/db/schema/index.js";
 import type { Config } from "../../src/platform/config/schema.js";
 import { createDatabase } from "../../src/platform/db/client.js";
 import type { runSchemaStep } from "../../src/platform/db/schemaStep.js";
@@ -15,6 +18,22 @@ import { TEST_JOB_REGISTRY, type JobRegistry } from "./jobs.js";
 export const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 type SchemaStepInput = Parameters<typeof runSchemaStep>[0];
+
+/** The platform's own tables (A-512). */
+export const PLATFORM_TABLES = [
+  "currencies",
+  "exchange_rates",
+  "idempotency_records",
+  "rate_limit_counters",
+] as const;
+
+/** Every table in the schema registry (src/db/schema/index.ts), sorted (A-512). */
+export function schemaTableNames(): string[] {
+  return (Object.values(schema) as unknown[])
+    .filter((t): t is PgTable => is(t, PgTable))
+    .map((t) => getTableName(t))
+    .sort();
+}
 export type TestLogger = Logger;
 
 export interface LoggedLine {

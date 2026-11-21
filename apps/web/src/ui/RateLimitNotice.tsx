@@ -2,6 +2,7 @@
 import { createSignal, onCleanup, type Accessor, type JSX } from "solid-js";
 import { messages } from "../i18n/messages.js";
 import { useI18n } from "../i18n/useI18n.js";
+import { Icon } from "./icons/Icon.js";
 
 const DEFAULT_RETRY_AFTER_S = 60;
 
@@ -52,10 +53,22 @@ export function createRateLimitGate(now: () => number = Date.now): {
 export function RateLimitNotice(props: { secondsLeft: number }): JSX.Element {
   const { t } = useI18n();
   return (
-    <p role="status">
-      {props.secondsLeft > 0
-        ? t(messages.errorRateLimited, { minutes: Math.ceil(props.secondsLeft / 60) })
-        : ""}
+    <p
+      role="status"
+      class={
+        props.secondsLeft > 0
+          ? "flex items-center gap-2 rounded-control border border-warning bg-surface p-4 text-fg"
+          : undefined
+      }
+    >
+      {props.secondsLeft > 0 ? (
+        <>
+          <Icon name="alert" class="size-5 shrink-0 text-warning" />
+          {t(messages.errorRateLimited, { minutes: Math.ceil(props.secondsLeft / 60) })}
+        </>
+      ) : (
+        ""
+      )}
     </p>
   );
 }

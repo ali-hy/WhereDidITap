@@ -64,6 +64,10 @@ export const messages = defineMessages({
   offlineBack: { id: "offline.back", defaultMessage: "Back online." },
   offlineBannerWeb: { id: "offline.banner.web", defaultMessage: "You're offline." },
   tableEmpty: { id: "table.empty", defaultMessage: "Nothing to show yet." },
+  uiPasswordHide: { id: "ui.password.hide", defaultMessage: "Hide" },
+  uiPasswordHideLabel: { id: "ui.password.hideLabel", defaultMessage: "Hide password" },
+  uiPasswordShow: { id: "ui.password.show", defaultMessage: "Show" },
+  uiPasswordShowLabel: { id: "ui.password.showLabel", defaultMessage: "Show password" },
   updateRequiredWeb: {
     id: "update.required.web",
     defaultMessage: "This version of {appName} is out of date. Reload to continue.",

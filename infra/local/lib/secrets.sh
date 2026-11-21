@@ -120,7 +120,7 @@ site_default() {
       fi
       ;;
     SMTP_URL) echo "smtp://mailpit:1025" ;;
-    EMAIL_FROM) echo "Budmon <no-reply@budmon.local>" ;;
+    EMAIL_FROM) echo "wDit <no-reply@budmon.local>" ;;
     *) echo "" ;;
   esac
 }

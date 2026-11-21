@@ -31,7 +31,7 @@ work_dir="$(mktemp -d "${TMPDIR:-/tmp}/budmon-dev-smoke.XXXXXX")"
 checkout="$work_dir/budmon"
 dev_pid=""
 
-# shellcheck disable=SC2317 # called through the EXIT trap
+# shellcheck disable=SC2317,SC2329 # called through the EXIT trap
 cleanup() {
   if [[ -n "$dev_pid" ]]; then
     kill -TERM -- "-$dev_pid" 2>/dev/null || true

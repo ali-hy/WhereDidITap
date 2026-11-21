@@ -16,7 +16,12 @@ type SummaryEntry = { fieldId?: string; text: string };
 /** An icon and the message; the id is the input's aria-describedby target. */
 export function FieldError(props: { id: string; message?: string | undefined }): JSX.Element {
   return (
-    <p id={props.id} class="flex items-center gap-1">
+    <p
+      id={props.id}
+      class={
+        props.message === undefined ? undefined : "mt-1 flex items-center gap-1 text-sm text-danger"
+      }
+    >
       <Show when={props.message}>
         {(message) => (
           <>
@@ -43,7 +48,13 @@ export function FormErrorSummary(props: { messages: readonly SummaryEntry[] }): 
   // A-399: nothing is rendered when every issue went to its field.
   return (
     <Show when={props.messages.length > 0}>
-      <div ref={el} role="alert" tabindex="-1">
+      <div
+        ref={el}
+        role="alert"
+        tabindex="-1"
+        class="flex gap-2 rounded-control border border-danger bg-surface p-4 text-fg"
+      >
+        <Icon name="alert" class="mt-0.5 size-5 shrink-0 text-danger" />
         <ul>
           <For each={props.messages}>
             {(m) => (

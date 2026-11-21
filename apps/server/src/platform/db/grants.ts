@@ -1,4 +1,5 @@
 // F-16: table grants for the application roles (schema step 4).
+import { identityGrants } from "../../identity/identityGrants.js";
 import { escapeIdentifier } from "./escape.js";
 import { SchemaStepError } from "./schemaStepError.js";
 import type { DbHandle } from "./types.js";
@@ -24,6 +25,7 @@ export const tableGrants: Readonly<Record<string, TableGrant>> = {
     capture: [],
     credential: false,
   },
+  ...identityGrants,
 };
 
 export async function applyTableGrants(

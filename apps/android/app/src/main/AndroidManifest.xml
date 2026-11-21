@@ -14,8 +14,12 @@
         android:localeConfig="@xml/locales_config"
         android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true"
+        android:icon="@mipmap/ic_launcher"
         android:theme="@style/Theme.Budmon"
+        tools:ignore="CredManMissingDal"
         tools:targetApi="34">
+
+        <meta-data android:name="io.sentry.auto-init" android:value="false" />
 
         <activity
             android:name=".MainActivity"

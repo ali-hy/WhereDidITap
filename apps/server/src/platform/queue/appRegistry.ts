@@ -2,6 +2,7 @@
 // their arrays in their own slices, as with handlers.ts).
 import { captureRewrapJob } from "../crypto/rewrap.js";
 import { fxJobDefinitions } from "../fx/fxJobs.js";
+import { identityJobDefinitions } from "../../identity/identityJobs.js";
 import { platformMaintenanceJobs } from "../maintenance/maintenanceJobs.js";
 import type { JobDefinition } from "./jobs.js";
 import { createJobRegistry, type JobRegistry } from "./registry.js";
@@ -13,5 +14,5 @@ export const platformJobDefinitions: readonly JobDefinition<unknown>[] = [
 ];
 
 export function buildJobRegistry(): JobRegistry {
-  return createJobRegistry([...platformJobDefinitions]);
+  return createJobRegistry([...platformJobDefinitions, ...identityJobDefinitions]);
 }

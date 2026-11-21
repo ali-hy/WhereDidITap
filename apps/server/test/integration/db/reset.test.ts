@@ -3,6 +3,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { resetDevelopmentDatabase } from "../../../src/platform/db/reset.js";
 import { runSchemaStep } from "../../../src/platform/db/schemaStep.js";
+import { schemaTableNames } from "../../support/platform.js";
 import {
   TEST_ROLE_PASSWORDS,
   query,
@@ -82,12 +83,8 @@ describe("TP-2.16 (b): resetDevelopmentDatabase on a local development database"
     expect(calls).toEqual(["runSchemaStep:push", "seed"]);
     expect(deps.schemaStepSpy).toHaveBeenCalledTimes(1);
     expect(deps.seedSpy).toHaveBeenCalledTimes(1);
-    expect(await publicTables()).toEqual([
-      "currencies",
-      "exchange_rates",
-      "idempotency_records",
-      "rate_limit_counters",
-    ]);
+    // The marker table is gone and the whole registry is pushed (A-512).
+    expect(await publicTables()).toEqual(schemaTableNames());
   });
 
   it("TP-2.16 (b): with seed false, seed isn't called", async () => {
