@@ -120,11 +120,12 @@ export function TwoStepPage(): JSX.Element {
         </h1>
         <p class="text-fg">{t(m.twostepPrompt)}</p>
         <FormErrorSummary messages={summary()} />
-        <Show when={!recoveryMode()}>
+        {/* A limit hit by a code is hidden while the recovery code is in use. */}
+        <Show when={!recoveryMode() || !limitedCode()}>
           <RateLimitNotice secondsLeft={gate.blockedFor()} />
-          <Show when={gate.blockedFor() > 0 && limitedCode()}>
-            <p class="text-fg">{t(m.twostepLimitRecovery)}</p>
-          </Show>
+        </Show>
+        <Show when={!recoveryMode() && gate.blockedFor() > 0 && limitedCode()}>
+          <p class="text-fg">{t(m.twostepLimitRecovery)}</p>
         </Show>
         <TwoStepForm onSubmit={submit} allowRecovery busy={busy()} onModeChange={setRecoveryMode} />
         <details>

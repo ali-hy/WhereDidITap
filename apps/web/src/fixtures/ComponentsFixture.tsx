@@ -1,4 +1,5 @@
 // A-527: one section per shared component and state, for axe, contrast and forced-colours checks.
+import { useNavigate } from "@tanstack/solid-router";
 import { createSignal, type JSX } from "solid-js";
 import { Button } from "../ui/Button.js";
 import { CodeField } from "../ui/CodeField.js";
@@ -41,6 +42,7 @@ const noop = (): void => {};
 
 export function ComponentsFixture(): JSX.Element {
   useFixtureTitle("Components");
+  const navigate = useNavigate();
   const [text, setText] = createSignal("");
   const [password, setPassword] = createSignal("");
   const [code, setCode] = createSignal("");
@@ -148,7 +150,15 @@ export function ComponentsFixture(): JSX.Element {
         <p class="text-fg">
           An <a href="/">inline link</a> in a sentence.
         </p>
-        <a href="/__fixtures/slow-heading">Slow heading</a>
+        <a
+          href="/__fixtures/slow-heading"
+          onClick={(e) => {
+            e.preventDefault();
+            void navigate({ to: "/__fixtures/slow-heading" });
+          }}
+        >
+          Slow heading
+        </a>
       </Section>
       <Section name="Toast">
         <Button

@@ -76,6 +76,24 @@ function RootLayout(): JSX.Element {
 }
 
 const HEADING_WAIT_MS = 2000;
+const SETTLE_MS = 1000;
+
+/** A page that re-renders right after arriving replaces its h1; focus follows the new one. */
+function keepFocus(focused: HTMLElement): void {
+  const started = performance.now();
+  let current = focused;
+  const frame = (): void => {
+    if (!current.isConnected && document.activeElement === document.body) {
+      const next = document.querySelector<HTMLElement>("main h1");
+      if (next !== null) {
+        next.focus();
+        current = next;
+      }
+    }
+    if (performance.now() - started < SETTLE_MS) requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
 
 /**
  * A-542: focuses and announces the first `main h1` that differs from the one shown before the
@@ -88,6 +106,7 @@ function focusNewHeading(previous: Element | null): void {
     if (h1 === null || (h1 === previous && !final)) return false;
     h1.focus();
     announce(h1.textContent);
+    keepFocus(h1);
     return true;
   };
   const frame = (): void => {
