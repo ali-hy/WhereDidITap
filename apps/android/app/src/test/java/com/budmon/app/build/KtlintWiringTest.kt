@@ -52,14 +52,15 @@ class KtlintWiringTest {
         plant("app/build/generated/openapi/src/main/kotlin/zz", "PlantedGenerated.kt")
 
         // --rerun-tasks: the filter isn't in the task's cache key, so a cached result could hide it.
-        val result = copy.runner(":app:ktlintMainSourceSetCheck", "--rerun-tasks").buildAndFail()
+        // -x openApiGenerate: it clears its output directory, which would delete the planted file.
+        val result = copy.runner(":app:ktlintMainSourceSetCheck", "--rerun-tasks", "-x", ":app:openApiGenerate").buildAndFail()
 
         assertEquals(result.output, TaskOutcome.FAILED, result.task(":app:ktlintMainSourceSetCheck")?.outcome)
         val reports = File(copy.root, "app/build/reports/ktlint").walkTopDown().filter { it.isFile }.map { it.readText() }
         val text = (sequenceOf(result.output) + reports).joinToString("\n")
         assertTrue(text, text.contains("PlantedSrc.kt"))
         assertFalse(text, text.contains("PlantedGenerated.kt"))
-        // The exclusion only counts if openApiGenerate left the planted file in place.
+        // The exclusion only counts if the planted file was there to lint.
         assertTrue(File(copy.root, "app/build/generated/openapi/src/main/kotlin/zz/PlantedGenerated.kt").exists())
     }
 
