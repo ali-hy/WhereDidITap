@@ -177,6 +177,15 @@ export function ComponentsFixture(): JSX.Element {
         >
           Query heading
         </a>
+        <a
+          href="/__fixtures/slow-heading?field=1"
+          onClick={(e) => {
+            e.preventDefault();
+            void navigate({ href: "/__fixtures/slow-heading?field=1" });
+          }}
+        >
+          Slow heading with field
+        </a>
       </Section>
       <Section name="Toast">
         <Button

@@ -20,14 +20,16 @@ import { identityMessages as m } from "../messages.js";
 interface SetupInfo {
   secret: string;
   otpauthUri: string;
-  expiresAt?: string;
 }
+
+/** How long a setup lasts, on this device's own monotonic clock. */
+const SETUP_TTL_MS = 15 * 60 * 1000;
 
 type Phase =
   | { kind: "loading" }
   | { kind: "failed"; text: string }
   | { kind: "expired" }
-  | { kind: "scan"; info: SetupInfo }
+  | { kind: "scan"; info: SetupInfo; receivedAt: number }
   | { kind: "codes"; codes: readonly string[] };
 
 export function TwoStepSetupPage(): JSX.Element {
@@ -63,7 +65,7 @@ export function TwoStepSetupPage(): JSX.Element {
         await backToSecurity();
         return;
       }
-      setPhase({ kind: "scan", info });
+      setPhase({ kind: "scan", info, receivedAt: performance.now() });
     } catch (e) {
       const key = keyOf(e);
       // A reload after turning on lands here: the codes are gone, S-10 says so.
@@ -83,11 +85,7 @@ export function TwoStepSetupPage(): JSX.Element {
     const code = value.code ?? "";
     // A setup that has already run out goes straight to "timed out", without a request.
     const current = phase();
-    if (
-      current.kind === "scan" &&
-      current.info.expiresAt !== undefined &&
-      Date.now() >= Date.parse(current.info.expiresAt)
-    ) {
+    if (current.kind === "scan" && performance.now() - current.receivedAt >= SETUP_TTL_MS) {
       setPhase({ kind: "expired" });
       return;
     }

@@ -16,7 +16,9 @@ export function SlowHeadingFixture(): JSX.Element {
         }, DELAY_MS);
       }),
   );
-  const replace = new URLSearchParams(window.location.search).get("replace") === "1";
+  const params = new URLSearchParams(window.location.search);
+  const replace = params.get("replace") === "1";
+  const field = params.get("field") === "1";
   // A new number re-creates the h1.
   const [generation, setGeneration] = createSignal(1);
   createEffect(() => {
@@ -27,10 +29,15 @@ export function SlowHeadingFixture(): JSX.Element {
     }
   });
   return (
-    <Suspense fallback={<p>Loading</p>}>
-      <Show when={ready() === true ? generation() : undefined} keyed>
-        <h1 tabindex="-1">Slow heading</h1>
+    <>
+      <Show when={field}>
+        <input aria-label="Early field" />
       </Show>
-    </Suspense>
+      <Suspense fallback={<p>Loading</p>}>
+        <Show when={ready() === true ? generation() : undefined} keyed>
+          <h1 tabindex="-1">Slow heading</h1>
+        </Show>
+      </Suspense>
+    </>
   );
 }

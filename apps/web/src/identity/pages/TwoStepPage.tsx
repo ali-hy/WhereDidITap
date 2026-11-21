@@ -12,6 +12,7 @@ import { showToast } from "../../ui/Toaster.js";
 import { TwoStepForm, type TwoStepResult, type TwoStepValue } from "../components/TwoStepForm.js";
 import { identityErrorMessage } from "../errorMessages.js";
 import { identityMessages as m } from "../messages.js";
+import { requestNewCodes } from "../settings/newCodesIntent.js";
 import { safeNext } from "../routes/guards.js";
 import { useSession } from "../session/SessionProvider.js";
 
@@ -76,8 +77,10 @@ export function TwoStepPage(): JSX.Element {
                 persistent: true,
                 action: {
                   label: t(m.twostepCreateNew),
-                  onClick: () =>
-                    void navigate({ to: "/settings/security", search: { newCodes: 1 } }),
+                  onClick: () => {
+                    requestNewCodes();
+                    void navigate({ to: "/settings/security" });
+                  },
                 },
               }
             : {}),

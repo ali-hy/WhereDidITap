@@ -4,8 +4,8 @@
 import * as AlertDialog from "@kobalte/core/alert-dialog";
 import * as Dialog from "@kobalte/core/dialog";
 import { createQuery } from "@tanstack/solid-query";
-import { useNavigate, useSearch } from "@tanstack/solid-router";
-import { createSignal, Match, onMount, Show, Suspense, Switch, type JSX } from "solid-js";
+import { useNavigate } from "@tanstack/solid-router";
+import { createEffect, createSignal, Match, Show, Suspense, Switch, type JSX } from "solid-js";
 import { useApi } from "../../api/ApiProvider.js";
 import { toAppError } from "../../api/errors.js";
 import { messages } from "../../i18n/messages.js";
@@ -19,6 +19,7 @@ import { RecoveryCodesView } from "../components/RecoveryCodesView.js";
 import { TwoStepForm, type TwoStepResult, type TwoStepValue } from "../components/TwoStepForm.js";
 import { identityErrorMessage } from "../errorMessages.js";
 import { identityMessages as m } from "../messages.js";
+import { newCodesRequested, takeNewCodesRequest } from "./newCodesIntent.js";
 
 const OVERLAY = "fixed inset-0 bg-fg/40";
 const CONTENT =
@@ -28,7 +29,6 @@ export function TwoStepSection(): JSX.Element {
   const { t } = useI18n();
   const api = useApi();
   const navigate = useNavigate();
-  const search: () => { newCodes?: unknown } = useSearch({ strict: false });
   const status = createQuery(() => ({
     queryKey: ["security", "two-step"],
     queryFn: async () => (await api.me.get()).twoStep,
@@ -100,10 +100,12 @@ export function TwoStepSection(): JSX.Element {
     }
   };
 
-  // Arriving with ?newCodes=1 (the sign-in prompt's action) creates the codes once.
-  onMount(() => {
-    if (search().newCodes !== 1) return;
-    void createNew().then(() => navigate({ to: "/settings/security", replace: true }));
+  // The sign-in prompt's action asks for new codes once the status is known.
+  createEffect(() => {
+    if (newCodesRequested() && status.isSuccess) {
+      takeNewCodesRequest();
+      if (status.data.enabled) void createNew();
+    }
   });
 
   const codesDone = async (): Promise<void> => {

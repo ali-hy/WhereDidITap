@@ -107,18 +107,32 @@ function keepFocus(): void {
  */
 function focusNewHeading(previous: Element | null): void {
   const started = performance.now();
+  // A-546: after the first key or pointer press the person is in charge; it only announces.
+  let yielded = false;
+  const yieldToInput = (): void => {
+    yielded = true;
+  };
+  document.addEventListener("keydown", yieldToInput, true);
+  document.addEventListener("pointerdown", yieldToInput, true);
   const attempt = (final: boolean): boolean => {
     const h1 = document.querySelector<HTMLElement>("main h1");
     if (h1 === null || (h1 === previous && !final)) return false;
-    h1.focus();
+    document.removeEventListener("keydown", yieldToInput, true);
+    document.removeEventListener("pointerdown", yieldToInput, true);
+    if (!yielded) {
+      h1.focus();
+      keepFocus();
+    }
     announce(h1.textContent);
-    keepFocus();
     return true;
   };
   const frame = (): void => {
     if (attempt(false)) return;
     if (performance.now() - started >= HEADING_WAIT_MS) {
-      attempt(true);
+      if (!attempt(true)) {
+        document.removeEventListener("keydown", yieldToInput, true);
+        document.removeEventListener("pointerdown", yieldToInput, true);
+      }
       return;
     }
     requestAnimationFrame(frame);
@@ -181,8 +195,6 @@ export async function createAppRouter(opts: { session: SessionStore }) {
   const securityRoute = createRoute({
     getParentRoute: () => settingsRoute,
     path: "/security",
-    validateSearch: (search: Record<string, unknown>): { newCodes?: 1 } =>
-      search.newCodes === 1 || search.newCodes === "1" ? { newCodes: 1 } : {},
     component: SecurityPage,
   });
   const twoStepSetupRoute = createRoute({
