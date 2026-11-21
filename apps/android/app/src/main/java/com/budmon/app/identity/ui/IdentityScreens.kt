@@ -40,6 +40,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -93,6 +95,7 @@ import com.budmon.app.ui.components.AppPasswordField
 import com.budmon.app.ui.components.AppTextField
 import com.budmon.app.ui.components.Wordmark
 import com.budmon.app.ui.theme.AppColors
+import kotlinx.coroutines.launch
 import okhttp3.HttpUrl
 import java.text.DateFormat
 import java.time.Instant
@@ -647,20 +650,25 @@ private fun RecoveryLeftNotice(
     onCreateCodes: () -> Unit,
 ) {
     val host = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     val message = left?.let { pluralStringResource(R.plurals.twostep_recovery_left, it, it) }
     val create = stringResource(R.string.twostep_create_new)
+    val latestCreate = rememberUpdatedState(onCreateCodes)
     LaunchedEffect(left) {
         if (left == null || message == null) return@LaunchedEffect
         val low = left <= LOW_CODES
-        val result =
-            host.showSnackbar(
-                message = message,
-                actionLabel = if (low) create else null,
-                withDismissAction = low,
-                duration = if (low) SnackbarDuration.Indefinite else SnackbarDuration.Long,
-            )
+        // Shown from the composition's scope, so consuming the count doesn't dismiss it.
+        scope.launch {
+            val result =
+                host.showSnackbar(
+                    message = message,
+                    actionLabel = if (low) create else null,
+                    withDismissAction = low,
+                    duration = if (low) SnackbarDuration.Indefinite else SnackbarDuration.Long,
+                )
+            if (result == SnackbarResult.ActionPerformed) latestCreate.value()
+        }
         onShown()
-        if (result == SnackbarResult.ActionPerformed) onCreateCodes()
     }
     Box(Modifier.fillMaxSize()) { SnackbarHost(host, Modifier.align(Alignment.BottomCenter)) }
 }

@@ -159,7 +159,7 @@ fun TwoStepScreen(
         AppTextField(
             value = form.value,
             onValueChange = onValueChange,
-            label = stringResource(if (form.useRecovery) R.string.twostep_recovery else R.string.confirm_code),
+            label = stringResource(if (form.useRecovery) R.string.twostep_recovery else R.string.twostep_code),
             error = form.error?.let { stringResource(it) },
             keyboardType = if (form.useRecovery) KeyboardType.Text else KeyboardType.NumberPassword,
             keyboardActions = KeyboardActions(onDone = { onSubmit() }),
@@ -249,7 +249,7 @@ fun ConfirmItsYouSheet(
                 AppTextField(
                     value = form.value,
                     onValueChange = onValueChange,
-                    label = stringResource(if (form.useRecovery) R.string.twostep_recovery else R.string.twostep_code),
+                    label = stringResource(if (form.useRecovery) R.string.twostep_recovery else R.string.confirm_code),
                     error = form.error?.let { stringResource(it) },
                     keyboardType = if (form.useRecovery) KeyboardType.Text else KeyboardType.NumberPassword,
                     keyboardActions = KeyboardActions(onDone = { onSubmit() }),
