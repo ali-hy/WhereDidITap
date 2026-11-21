@@ -743,7 +743,7 @@ class TwoStepSetupViewModelTest {
         settle("step Scan") { vm.state.step == SetupStep.Scan }
     }
 
-    // ---- TP-4.50 (f), A-107: the expiry pre-check ----
+    // ---- TP-4.50 (f), A-107, A-108: the expiry pre-check, before the code rule ----
 
     private val atExpiry: Clock = Clock.fixed(secret.expiresAt, ZoneOffset.UTC)
 
@@ -766,6 +766,18 @@ class TwoStepSetupViewModelTest {
         coVerify(exactly = 0) { repository.twoStepEnable(any()) }
         coVerify(exactly = 0) { repository.confirm(any(), any(), any()) }
     }
+
+    @Test
+    fun `TP-4_50 (f) submit 12345 with the clock at expiresAt - step Expired, error null, no call (expiry before the code rule, A-108)`() =
+        runTest {
+            val vm = scanningAt(atExpiry)
+
+            send(vm, "12345")
+
+            assertEquals(SetupStep.Expired, vm.state.step)
+            assertNull(vm.state.error)
+            coVerify(exactly = 0) { repository.twoStepEnable(any()) }
+        }
 
     @Test
     fun `TP-4_50x replace mode, submit with the clock past expiresAt - step Expired, no twoStepReplaceConfirm call`() = runTest {

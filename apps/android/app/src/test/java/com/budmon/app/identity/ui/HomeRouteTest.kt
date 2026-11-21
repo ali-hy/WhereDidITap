@@ -1,5 +1,5 @@
-// F-209/F-216 HomeRoute's recovery-code notice (identity LLD §8.2, A-107; HLD J-5). TP-4.50 (c), plus
-// TP-4.50x.
+// F-209/F-216 HomeRoute's recovery-code notice (identity LLD §8.2, A-107, A-108; HLD J-5). TP-4.50 (c)
+// and (g), plus TP-4.50x.
 // The host mirrors MainActivity: recoveryLeft is notice.left's value, and onRecoveryNoticeShown is
 // notice::consume, which turns it to null as soon as the snackbar shows. Texts are §8.1's, matched
 // literally (twostep_recovery_left is a plurals resource).
@@ -108,10 +108,15 @@ class HomeRouteTest {
     }
 
     @Test
-    fun `TP-4_50x HomeRoute with recoveryLeft 2 - Indefinite, still shown a minute later though the notice was consumed`() {
+    fun `TP-4_50 (g) HomeRoute with recoveryLeft 2, the host setting it to null in onRecoveryNoticeShown - the snackbar with Create new codes still shown afterwards`() {
         showHome(2)
         compose.waitUntilAtLeastOneExists(hasText(message(2)), timeoutMillis = 5_000)
+        compose.waitUntil(5_000) {
+            compose.waitForIdle()
+            notice.left.value == null
+        }
 
+        // Indefinite: still there a minute after recoveryLeft turned null.
         compose.mainClock.advanceTimeBy(60_000)
         compose.waitForIdle()
 
