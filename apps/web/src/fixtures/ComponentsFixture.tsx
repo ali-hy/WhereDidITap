@@ -159,6 +159,15 @@ export function ComponentsFixture(): JSX.Element {
         >
           Slow heading
         </a>
+        <a
+          href="/__fixtures/slow-heading?replace=1"
+          onClick={(e) => {
+            e.preventDefault();
+            void navigate({ href: "/__fixtures/slow-heading?replace=1" });
+          }}
+        >
+          Replaced heading
+        </a>
       </Section>
       <Section name="Toast">
         <Button
