@@ -1389,7 +1389,7 @@ test.describe("TP-4.49: S-4 QA's gaps (A-107, A-541, A-542)", () => {
 
   // ---- (c) the J-5 prompt after a recovery-code sign-in ----
 
-  test("TP-4.49 (c): a recovery sign-in with 3 codes left: a persistent toast 'You used a recovery code. 2 codes left.' with Create new codes, which lands on /settings/security with the codes dialog open and the search cleared", async ({
+  test("TP-4.49 (c): a recovery sign-in with 3 codes left: a persistent toast 'You used a recovery code. 2 codes left.' with Create new codes, which lands on /settings/security with the codes dialog open and no search in the URL", async ({
     page,
     request,
   }) => {
@@ -1413,6 +1413,36 @@ test.describe("TP-4.49: S-4 QA's gaps (A-107, A-541, A-542)", () => {
     await expect(toast).toBeVisible();
 
     await action.click();
+
+    const codesDialog = page.getByRole("dialog").filter({ hasText: NEW_CODES_DONE });
+    await expect(codesDialog).toBeVisible();
+    await expect(page).toHaveURL((u) => u.pathname === "/settings/security" && u.search === "");
+    expect(regenerated).toEqual([200]);
+  });
+
+  test("TP-4.49 (c) (A-111): the toast's Create new codes while already on /settings/security opens the codes dialog too", async ({
+    page,
+    request,
+  }) => {
+    const { email } = await signedUpUser(page, request, "Already There Person");
+    const { codes } = await enableTwoStep(page, { acknowledge: true });
+    await useRecoveryCodes(request, email, codes.slice(0, 7));
+    await signInWithRecoveryCode(page, email, codes[7] ?? "");
+    const toast = toastItem(page, looseText("You used a recovery code. 2 codes left."));
+    await expect(toast).toBeVisible();
+    // A client-side navigation keeps the persistent toast.
+    await page.evaluate(() => {
+      history.pushState({}, "", "/settings/security");
+      dispatchEvent(new PopStateEvent("popstate", { state: history.state as unknown }));
+    });
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
+    await expect(toast).toBeVisible();
+    const regenerated: number[] = [];
+    page.on("response", (r) => {
+      if (isPost("/api/v1/me/two-step/recovery-codes")(r)) regenerated.push(r.status());
+    });
+
+    await toast.getByRole("button", { name: catalogText("Create new codes") }).click();
 
     const codesDialog = page.getByRole("dialog").filter({ hasText: NEW_CODES_DONE });
     await expect(codesDialog).toBeVisible();
@@ -1506,35 +1536,100 @@ test.describe("TP-4.49: S-4 QA's gaps (A-107, A-541, A-542)", () => {
 
   // ---- (f) an expired setup ----
 
-  test("TP-4.49 (f): setup with the clock past expiresAt, then Verify and turn on: 'Setup timed out. Start again.', no me.twoStepEnable request and no dialog", async ({
-    page,
-    request,
-  }) => {
-    await page.clock.install();
-    await signedUpUser(page, request, "Expired Clock Person");
+  /** Opens the setup page from Sign-in & security; returns when the code field shows. */
+  async function openSetup(page: Page): Promise<{ secret: string }> {
     await page.goto("/settings/security");
     await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
     const setup = page.waitForResponse(isPost("/api/v1/me/two-step/setup"));
     await twoStepSection(page)
       .getByRole("button", { name: catalogText("Turn on") })
       .click();
-    const { expiresAt } = (await (await setup).json()) as { expiresAt: string };
-    const main = page.locator("main");
-    await expect(main.getByLabel(catalogText("Code"))).toBeVisible();
-    const enables: string[] = [];
+    const { secret } = (await (await setup).json()) as { secret: string };
+    await expect(page.locator("main").getByLabel(catalogText("Code"))).toBeVisible();
+    return { secret };
+  }
+
+  /** Every me.twoStepEnable request the page sends from now on. */
+  function enableRequests(page: Page): string[] {
+    const sent: string[] = [];
     page.on("request", (r) => {
       if (r.method() === "POST" && new URL(r.url()).pathname === "/api/v1/me/two-step/enable") {
-        enables.push(r.url());
+        sent.push(r.url());
       }
     });
-    await page.clock.setSystemTime(new Date(Date.parse(expiresAt) + 1000));
+    return sent;
+  }
 
+  test("TP-4.49 (f) (A-111): setup, then page.clock advanced 15 minutes, then Verify and turn on: 'Setup timed out. Start again.', no me.twoStepEnable request and no dialog", async ({
+    page,
+    request,
+  }) => {
+    await page.clock.install();
+    await signedUpUser(page, request, "Expired Clock Person");
+    await openSetup(page);
+    const enables = enableRequests(page);
+    await page.clock.fastForward("15:00");
+
+    const main = page.locator("main");
     await main.getByLabel(catalogText("Code")).fill("123456");
     await main.getByRole("button", { name: catalogText("Verify and turn on") }).click();
 
     await expect(main.getByText(looseText("Setup timed out. Start again."))).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     expect(enables).toEqual([]);
+  });
+
+  test("TP-4.49 (f2) (A-111): the browser clock 20 minutes ahead before arriving at setup (expiresAt already past by Date.now), a code at once: me.twoStepEnable is sent and two-step turns on", async ({
+    page,
+    request,
+  }) => {
+    await page.clock.install();
+    await signedUpUser(page, request, "Fast Clock Person");
+    await page.clock.setSystemTime(new Date(Date.now() + 20 * 60_000));
+    const { secret } = await openSetup(page);
+    const enables = enableRequests(page);
+    const enable = page.waitForResponse(isPost("/api/v1/me/two-step/enable"));
+
+    const main = page.locator("main");
+    await main
+      .getByLabel(catalogText("Code"))
+      .fill(await TestAuthenticator.fromKey(secret).nextCode());
+    await main.getByRole("button", { name: catalogText("Verify and turn on") }).click();
+
+    const answer = await enable;
+    expect(answer.status(), await answer.text()).toBe(200);
+    expect(enables).toHaveLength(1);
+    await expect(
+      main.getByRole("heading", { level: 2, name: catalogText("Save your recovery codes") }),
+    ).toBeVisible();
+    await expect(main.getByText(looseText("Setup timed out. Start again."))).toHaveCount(0);
+  });
+
+  // ---- (h) no URL regenerates codes ----
+
+  test("TP-4.49 (h) (A-111): opening /settings/security?newCodes=1 directly sends no me.regenerateRecoveryCodes and opens no dialog", async ({
+    page,
+    request,
+  }) => {
+    await signedUpUser(page, request, "Url Codes Person");
+    await enableTwoStep(page, { acknowledge: true });
+    const regenerations: string[] = [];
+    page.on("request", (r) => {
+      if (
+        r.method() === "POST" &&
+        new URL(r.url()).pathname === "/api/v1/me/two-step/recovery-codes"
+      ) {
+        regenerations.push(r.url());
+      }
+    });
+
+    await page.goto("/settings/security?newCodes=1");
+
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
+    await expect(createNewCodes(page)).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    expect(regenerations).toEqual([]);
   });
 
   test("TP-4.32x: the step-up lapses during a setup the server finds expired: Verify and turn on asks for the password first; after Confirm the expired state 'Setup timed out. Start again.' shows", async ({
