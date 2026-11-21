@@ -1,6 +1,7 @@
 // Focus and announcements on navigation (F-216, F-218, A-333, A-336), and the 360 px layout. TP-11.15,
 // TP-11.16, TP-11.38 (A-542: focus waits for the new page's heading), TP-11.39 (A-544: kept across a
-// replaced heading), TP-11.40 (A-545: the h1 stays mounted while query regions load).
+// replaced heading), TP-11.40 (A-545: the h1 stays mounted while query regions load), TP-11.41
+// (A-546: the wait yields to input).
 import { catalogText, expect, test, type Page } from "./fixtures.js";
 
 async function expectFocusedHeading(page: Page, text: string): Promise<void> {
@@ -116,7 +117,7 @@ test("TP-11.38 (A-542): the components gallery's Slow heading link: once the 300
   await expect(page.locator("[data-component]").first()).toBeVisible();
   const galleryHeading = (await h1.textContent()) ?? "";
 
-  await page.getByRole("link", { name: "Slow heading" }).click();
+  await page.getByRole("link", { name: "Slow heading", exact: true }).click();
 
   await expect(page).toHaveURL(/\/__fixtures\/slow-heading$/);
   await expect(h1).toHaveText("Slow heading");
@@ -163,7 +164,7 @@ async function openReplacedHeading(page: Page): Promise<void> {
   await expect(page.locator("[data-component]").first()).toBeVisible();
   await watchHeadings(page);
 
-  await page.getByRole("link", { name: "Replaced heading" }).click();
+  await page.getByRole("link", { name: "Replaced heading", exact: true }).click();
 
   await expect(page).toHaveURL(/\/__fixtures\/slow-heading\?replace=1$/);
   await page.waitForFunction(() => {
@@ -282,7 +283,7 @@ test("TP-11.40 (A-545): Query heading: with both query regions resolved, at 500 
     }).observe(document.body, { childList: true, subtree: true });
   });
 
-  await page.getByRole("link", { name: "Query heading" }).click();
+  await page.getByRole("link", { name: "Query heading", exact: true }).click();
 
   await expect(page).toHaveURL(/\/__fixtures\/query-heading$/);
   await page.waitForFunction(
@@ -316,4 +317,84 @@ test("TP-11.40 (A-545): Query heading: with both query regions resolved, at 500 
     removedLater: false,
     removedIt: false,
   });
+});
+
+// ---- TP-11.41 (A-546): the heading wait yields to input ----
+
+/**
+ * Opens the gallery and clicks Slow heading with field, recording when "Slow heading" first showed
+ * and whether a `main h1` existed at the next pointerdown.
+ */
+async function openSlowHeadingWithField(page: Page): Promise<void> {
+  await page.goto("/__fixtures/components");
+  await expect(page.locator("main h1")).toHaveCount(1);
+  await expect(page.locator("[data-component]").first()).toBeVisible();
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      tp1141: { headingAtPointer: boolean | null; shownAt: number | null };
+    };
+    w.tp1141 = { headingAtPointer: null, shownAt: null };
+    new MutationObserver(() => {
+      const h1 = document.querySelector("main h1");
+      if (w.tp1141.shownAt === null && h1?.textContent === "Slow heading") {
+        w.tp1141.shownAt = performance.now();
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+  });
+  await page.getByRole("link", { name: "Slow heading with field", exact: true }).click();
+  // Armed after the link's own click.
+  await page.evaluate(() => {
+    const w = window as unknown as { tp1141: { headingAtPointer: boolean | null } };
+    document.addEventListener(
+      "pointerdown",
+      () => {
+        w.tp1141.headingAtPointer ??= document.querySelector("main h1") !== null;
+      },
+      true,
+    );
+  });
+}
+
+/** Waits until 3.5 s after "Slow heading" first showed, past keepFocus's window. */
+async function pastHeadingWindow(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const w = window as unknown as { tp1141: { shownAt: number | null } };
+    return w.tp1141.shownAt !== null && performance.now() - w.tp1141.shownAt > 3500;
+  });
+}
+
+test("TP-11.41 (a) (A-546): Slow heading with field, then Early field clicked before the heading renders and 'x' typed: focus stays on the field with 'x'; 'Slow heading' is still announced", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "chromium project only");
+  await openSlowHeadingWithField(page);
+  const field = page.getByRole("textbox", { name: "Early field" });
+
+  await field.click();
+  await page.keyboard.type("x");
+
+  expect(
+    await page.evaluate(
+      () =>
+        (window as unknown as { tp1141: { headingAtPointer: boolean | null } }).tp1141
+          .headingAtPointer,
+    ),
+  ).toBe(false);
+  await expect(page.locator("main h1")).toHaveText("Slow heading");
+  await expect(page.locator("#live-polite")).toHaveText("Slow heading");
+  await pastHeadingWindow(page);
+  await expect(field).toBeFocused();
+  await expect(field).toHaveValue("x");
+});
+
+test("TP-11.41 (b) (A-546): Slow heading with field and no click: focus goes to 'Slow heading'", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "chromium project only");
+  await openSlowHeadingWithField(page);
+
+  const h1 = page.locator("main h1");
+  await expect(h1).toHaveText("Slow heading");
+  await expect(h1).toBeFocused();
+  await expect(page.getByRole("textbox", { name: "Early field" })).toHaveValue("");
 });
