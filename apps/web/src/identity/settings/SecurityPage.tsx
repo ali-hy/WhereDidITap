@@ -1,7 +1,7 @@
 // F-164: Sign-in & security: the two-step section (S-4) and the sessions section (J-10); later
 // slices add the rest.
 import { createQuery, useQueryClient } from "@tanstack/solid-query";
-import { createEffect, createSignal, For, Match, Show, Switch, type JSX } from "solid-js";
+import { createEffect, createSignal, For, Match, Show, Suspense, Switch, type JSX } from "solid-js";
 import { useApi } from "../../api/ApiProvider.js";
 import { toAppError } from "../../api/errors.js";
 import { messages } from "../../i18n/messages.js";
@@ -99,6 +99,13 @@ export function SecurityPage(): JSX.Element {
     return t(descriptor, values);
   };
 
+  // The loading state, also the Suspense fallback (A-545).
+  const sessionsLoading = (
+    <div class="mt-4">
+      <Skeleton rows={3} shape="row" />
+    </div>
+  );
+
   return (
     <>
       <h1 tabindex="-1" class="text-2xl font-semibold text-fg">
@@ -120,68 +127,66 @@ export function SecurityPage(): JSX.Element {
         >
           {t(m.sessionsTitle)}
         </h2>
-        <Switch>
-          <Match when={sessions.isPending}>
-            <div class="mt-4">
-              <Skeleton rows={3} shape="row" />
-            </div>
-          </Match>
-          <Match when={sessions.isError}>
-            <p class="mt-4 text-fg">{loadError()}</p>
-            <div class="mt-4">
-              <Button variant="secondary" onClick={() => void sessions.refetch()}>
-                {t(messages.errorFallbackRetry)}
-              </Button>
-            </div>
-          </Match>
-          <Match when={sessions.data}>
-            {(data) => (
-              <>
-                <ul class="mt-4 flex flex-col divide-y divide-line">
-                  <For each={data().items}>
-                    {(item) => (
-                      <li class="flex flex-wrap items-center justify-between gap-3 py-3">
-                        <div class="min-w-0 [overflow-wrap:anywhere]">
-                          <p class="font-medium text-fg">{item.deviceLabel}</p>
-                          <Show when={item.current}>
-                            <p class="text-sm text-fg">{t(m.sessionsThisDevice)}</p>
-                          </Show>
-                          <p class="text-sm text-fg-muted">
-                            {t(m.sessionsSignedIn, { date: dateOf(item.createdAt) })}
-                          </p>
-                          <p class="text-sm text-fg-muted">{lastActive(item.lastUsedAt)}</p>
-                        </div>
-                        <Show when={!item.current}>
-                          <div data-session-row={item.id}>
-                            <Button
-                              variant="secondary"
-                              size="compact"
-                              busy={busyId() === item.id}
-                              onClick={() => void revoke(item.id)}
-                            >
-                              {t(m.sessionsSignOut)}
-                            </Button>
+        <Suspense fallback={sessionsLoading}>
+          <Switch>
+            <Match when={sessions.isPending}>{sessionsLoading}</Match>
+            <Match when={sessions.isError}>
+              <p class="mt-4 text-fg">{loadError()}</p>
+              <div class="mt-4">
+                <Button variant="secondary" onClick={() => void sessions.refetch()}>
+                  {t(messages.errorFallbackRetry)}
+                </Button>
+              </div>
+            </Match>
+            <Match when={sessions.data}>
+              {(data) => (
+                <>
+                  <ul class="mt-4 flex flex-col divide-y divide-line">
+                    <For each={data().items}>
+                      {(item) => (
+                        <li class="flex flex-wrap items-center justify-between gap-3 py-3">
+                          <div class="min-w-0 [overflow-wrap:anywhere]">
+                            <p class="font-medium text-fg">{item.deviceLabel}</p>
+                            <Show when={item.current}>
+                              <p class="text-sm text-fg">{t(m.sessionsThisDevice)}</p>
+                            </Show>
+                            <p class="text-sm text-fg-muted">
+                              {t(m.sessionsSignedIn, { date: dateOf(item.createdAt) })}
+                            </p>
+                            <p class="text-sm text-fg-muted">{lastActive(item.lastUsedAt)}</p>
                           </div>
-                        </Show>
-                      </li>
-                    )}
-                  </For>
-                </ul>
-                <Show when={data().items.length > 1}>
-                  <div class="mt-4" data-button-row>
-                    <Button
-                      variant="secondary"
-                      busy={busyId() === "others"}
-                      onClick={() => void revokeOthers()}
-                    >
-                      {t(m.sessionsSignOutOthers)}
-                    </Button>
-                  </div>
-                </Show>
-              </>
-            )}
-          </Match>
-        </Switch>
+                          <Show when={!item.current}>
+                            <div data-session-row={item.id}>
+                              <Button
+                                variant="secondary"
+                                size="compact"
+                                busy={busyId() === item.id}
+                                onClick={() => void revoke(item.id)}
+                              >
+                                {t(m.sessionsSignOut)}
+                              </Button>
+                            </div>
+                          </Show>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                  <Show when={data().items.length > 1}>
+                    <div class="mt-4" data-button-row>
+                      <Button
+                        variant="secondary"
+                        busy={busyId() === "others"}
+                        onClick={() => void revokeOthers()}
+                      >
+                        {t(m.sessionsSignOutOthers)}
+                      </Button>
+                    </div>
+                  </Show>
+                </>
+              )}
+            </Match>
+          </Switch>
+        </Suspense>
       </section>
     </>
   );

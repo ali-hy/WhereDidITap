@@ -8,6 +8,7 @@ import { failingLoader, FailingLoaderFixture } from "./FailingLoaderFixture.js";
 import { flakyLoader, FlakyLoaderFixture } from "./FlakyLoaderFixture.js";
 import { invalidateLoader, InvalidateFixture } from "./InvalidateFixture.js";
 import { KobalteSpikeFixture } from "./KobalteSpikeFixture.js";
+import { QueryHeadingFixture } from "./QueryHeadingFixture.js";
 import { RtlProbeFixture } from "./RtlProbeFixture.js";
 import { SlowHeadingFixture } from "./SlowHeadingFixture.js";
 import { startFixtureWorker, VirtualTableFixture } from "./VirtualTableFixture.js";
@@ -29,6 +30,7 @@ export function createFixtureRoutes(rootRoute: AnyRoute): AnyRoute[] {
     route("/__fixtures/invalidate", InvalidateFixture, invalidateLoader),
     route("/__fixtures/a11y-violation", A11yViolationFixture),
     route("/__fixtures/kobalte-spike", KobalteSpikeFixture),
+    route("/__fixtures/query-heading", QueryHeadingFixture),
     route("/__fixtures/slow-heading", SlowHeadingFixture),
     route("/__fixtures/virtual-table", VirtualTableFixture, startFixtureWorker),
   ];

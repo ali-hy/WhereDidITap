@@ -5,7 +5,7 @@ import * as AlertDialog from "@kobalte/core/alert-dialog";
 import * as Dialog from "@kobalte/core/dialog";
 import { createQuery } from "@tanstack/solid-query";
 import { useNavigate, useSearch } from "@tanstack/solid-router";
-import { createSignal, Match, onMount, Show, Switch, type JSX } from "solid-js";
+import { createSignal, Match, onMount, Show, Suspense, Switch, type JSX } from "solid-js";
 import { useApi } from "../../api/ApiProvider.js";
 import { toAppError } from "../../api/errors.js";
 import { messages } from "../../i18n/messages.js";
@@ -121,6 +121,13 @@ export function TwoStepSection(): JSX.Element {
     }
   };
 
+  // The loading state, also the Suspense fallback (A-545).
+  const statusLoading = (
+    <div class="mt-4">
+      <Skeleton rows={1} shape="row" />
+    </div>
+  );
+
   return (
     <section
       class="mt-6"
@@ -130,92 +137,93 @@ export function TwoStepSection(): JSX.Element {
       <h2 id="security-two-step-title" tabindex="-1" class="text-lg font-semibold text-fg">
         {t(m.twostepTitle)}
       </h2>
-      <Switch>
-        <Match when={status.isPending}>
-          <div class="mt-4">
-            <Skeleton rows={1} shape="row" />
-          </div>
-        </Match>
-        <Match when={status.isError}>
-          <p class="mt-4 text-fg">
-            {(() => {
-              const { descriptor, values } = identityErrorMessage(toAppError(status.error), "read");
-              return t(descriptor, values);
-            })()}
-          </p>
-          <div class="mt-4">
-            <Button variant="secondary" onClick={() => void status.refetch()}>
-              {t(messages.errorFallbackRetry)}
-            </Button>
-          </div>
-        </Match>
-        <Match when={status.data}>
-          {(data) => (
-            <div class="mt-3 flex flex-col gap-3">
-              <p class="text-fg">
-                <span class="font-medium">
-                  {t(data().enabled ? m.twostepStatusOn : m.twostepStatusOff)}
-                </span>
-              </p>
-              <Show when={data().enabled}>
-                <p class="text-fg-muted">
-                  {t(m.twostepCodesLeft, { n: data().recoveryCodesLeft })}
+      <Suspense fallback={statusLoading}>
+        <Switch>
+          <Match when={status.isPending}>{statusLoading}</Match>
+          <Match when={status.isError}>
+            <p class="mt-4 text-fg">
+              {(() => {
+                const { descriptor, values } = identityErrorMessage(
+                  toAppError(status.error),
+                  "read",
+                );
+                return t(descriptor, values);
+              })()}
+            </p>
+            <div class="mt-4">
+              <Button variant="secondary" onClick={() => void status.refetch()}>
+                {t(messages.errorFallbackRetry)}
+              </Button>
+            </div>
+          </Match>
+          <Match when={status.data}>
+            {(data) => (
+              <div class="mt-3 flex flex-col gap-3">
+                <p class="text-fg">
+                  <span class="font-medium">
+                    {t(data().enabled ? m.twostepStatusOn : m.twostepStatusOff)}
+                  </span>
                 </p>
-              </Show>
-              <Show when={data().enabled && !data().codesAcknowledged}>
-                <p class="flex items-center gap-2 text-fg">
-                  <Icon name="alert" class="size-5 shrink-0 text-warning" />
-                  {t(m.twostepCodesUnsaved)}
-                </p>
-              </Show>
-              <div class="flex flex-wrap gap-2" data-button-row>
-                <Show
-                  when={data().enabled}
-                  fallback={
-                    <Button
-                      variant="secondary"
-                      onClick={() => void navigate({ to: "/settings/security/two-step" })}
-                    >
-                      {t(m.twostepTurnOn)}
-                    </Button>
-                  }
-                >
-                  <Button
-                    variant="secondary"
-                    onClick={(e) => {
-                      opener = e.currentTarget;
-                      setOffOpen(true);
-                    }}
-                  >
-                    {t(m.twostepOff)}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() =>
-                      void navigate({
-                        to: "/settings/security/two-step",
-                        search: { mode: "replace" },
-                      })
+                <Show when={data().enabled}>
+                  <p class="text-fg-muted">
+                    {t(m.twostepCodesLeft, { n: data().recoveryCodesLeft })}
+                  </p>
+                </Show>
+                <Show when={data().enabled && !data().codesAcknowledged}>
+                  <p class="flex items-center gap-2 text-fg">
+                    <Icon name="alert" class="size-5 shrink-0 text-warning" />
+                    {t(m.twostepCodesUnsaved)}
+                  </p>
+                </Show>
+                <div class="flex flex-wrap gap-2" data-button-row>
+                  <Show
+                    when={data().enabled}
+                    fallback={
+                      <Button
+                        variant="secondary"
+                        onClick={() => void navigate({ to: "/settings/security/two-step" })}
+                      >
+                        {t(m.twostepTurnOn)}
+                      </Button>
                     }
                   >
-                    {t(m.twostepReplace)}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    busy={newCodesBusy()}
-                    onClick={(e) => {
-                      opener = e.currentTarget;
-                      void createNew();
-                    }}
-                  >
-                    {t(m.twostepCreateNew)}
-                  </Button>
-                </Show>
+                    <Button
+                      variant="secondary"
+                      onClick={(e) => {
+                        opener = e.currentTarget;
+                        setOffOpen(true);
+                      }}
+                    >
+                      {t(m.twostepOff)}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() =>
+                        void navigate({
+                          to: "/settings/security/two-step",
+                          search: { mode: "replace" },
+                        })
+                      }
+                    >
+                      {t(m.twostepReplace)}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      busy={newCodesBusy()}
+                      onClick={(e) => {
+                        opener = e.currentTarget;
+                        void createNew();
+                      }}
+                    >
+                      {t(m.twostepCreateNew)}
+                    </Button>
+                  </Show>
+                </div>
               </div>
-            </div>
-          )}
-        </Match>
-      </Switch>
+            )}
+          </Match>
+        </Switch>
+      </Suspense>
 
       <AlertDialog.Root
         open={offOpen()}

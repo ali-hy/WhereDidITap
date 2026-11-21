@@ -168,6 +168,15 @@ export function ComponentsFixture(): JSX.Element {
         >
           Replaced heading
         </a>
+        <a
+          href="/__fixtures/query-heading"
+          onClick={(e) => {
+            e.preventDefault();
+            void navigate({ to: "/__fixtures/query-heading" });
+          }}
+        >
+          Query heading
+        </a>
       </Section>
       <Section name="Toast">
         <Button
