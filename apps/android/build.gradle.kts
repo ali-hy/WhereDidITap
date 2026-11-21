@@ -11,6 +11,9 @@ plugins {
 
 subprojects {
     apply(plugin = "org.jlleitschuh.gradle.ktlint")
+
+    // This subproject's build directory (generated sources live here).
+    val buildDirectory = layout.buildDirectory.get().asFile.toPath()
     configure<org.jlleitschuh.gradle.ktlint.KtlintExtension> {
         version.set(
             rootProject.extensions
@@ -20,8 +23,9 @@ subprojects {
                 .get()
                 .requiredVersion,
         )
+        // Skip generated sources; path-component match works on any OS.
         filter {
-            exclude { it.file.path.contains("/build/") }
+            exclude { it.file.toPath().startsWith(buildDirectory) }
         }
     }
 }
