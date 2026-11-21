@@ -152,7 +152,7 @@ class MainActivity : ComponentActivity() {
                                                                 onSignedOut = sessionModel::onSignedOut,
                                                                 onSecurity = { nav.navigate(ROUTE_SECURITY) },
                                                                 recoveryLeft = recoveryLeft,
-                                                                onRecoveryNoticeShown = recoveryNotice::consume,
+                                                                onRecoveryNoticeDone = recoveryNotice::consume,
                                                                 onCreateCodes = { nav.navigate("$ROUTE_SECURITY?newCodes=true") },
                                                             )
                                                         } else {

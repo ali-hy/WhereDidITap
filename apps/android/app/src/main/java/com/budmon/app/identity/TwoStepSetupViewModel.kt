@@ -15,8 +15,12 @@ import com.budmon.app.core.network.ApiError
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import java.time.Clock
 import javax.inject.Inject
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.TimeMark
+import kotlin.time.TimeSource
+
+private val SETUP_TTL = 15.minutes
 
 enum class SetupStep { Loading, Scan, Codes, Expired, Failed, Done }
 
@@ -40,12 +44,13 @@ class TwoStepSetupViewModel
     constructor(
         private val repository: AuthRepository,
         private val confirmation: ConfirmationCoordinator,
-        private val clock: Clock,
+        private val timeSource: TimeSource,
     ) : ViewModel() {
         var state by mutableStateOf(TwoStepSetupState())
             private set
 
         private var replace = false
+        private var setupMark: TimeMark? = null
 
         /** True once a replacement was confirmed. */
         var replaced = false
@@ -75,6 +80,7 @@ class TwoStepSetupViewModel
                         if (secret == null) {
                             state.copy(step = SetupStep.Done)
                         } else {
+                            setupMark = timeSource.markNow()
                             state.copy(step = SetupStep.Scan, secret = secret)
                         }
                 } catch (e: CancellationException) {
@@ -100,7 +106,7 @@ class TwoStepSetupViewModel
         fun submit() {
             if (state.busy || state.step != SetupStep.Scan) return
             // A setup that has run out goes straight to "timed out", without a request.
-            if (state.secret?.let { !clock.instant().isBefore(it.expiresAt) } == true) {
+            if (setupMark?.let { it.elapsedNow() >= SETUP_TTL } == true) {
                 state = state.copy(step = SetupStep.Expired, code = "", error = null, formError = null)
                 return
             }

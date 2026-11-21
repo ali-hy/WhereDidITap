@@ -220,7 +220,6 @@
     <string name="confirm_cancel">Cancel</string>
     <string name="confirm_password">Password</string>
     <string name="confirm_code">Code from your authenticator app</string>
-    <string name="twostep_notice_dismiss">Dismiss</string>
     <plurals name="twostep_codes_left">
         <item quantity="one">%d recovery code left</item>
         <item quantity="other">%d recovery codes left</item>

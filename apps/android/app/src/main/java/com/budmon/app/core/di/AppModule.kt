@@ -31,6 +31,7 @@ import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import java.time.Clock
 import javax.inject.Named
 import javax.inject.Singleton
+import kotlin.time.TimeSource
 
 /** F-257 (A-352): datastore/budmon_update.preferences_pb. */
 private val Context.updateDataStore: DataStore<Preferences> by preferencesDataStore(name = "budmon_update")
@@ -46,6 +47,10 @@ object AppModule {
     @Provides
     @Singleton
     fun clock(): Clock = Clock.systemUTC()
+
+    @Provides
+    @Singleton
+    fun timeSource(): TimeSource = TimeSource.Monotonic
 
     /** Refreshes the session: no token, no authenticator. */
     @Provides

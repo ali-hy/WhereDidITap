@@ -203,7 +203,7 @@ class SecurityViewModel
         }
 
         /** Back while the codes show: they stay unacknowledged, so the banner shows. */
-        fun leaveNewCodes(onMeUpdated: (Me) -> Unit = {}) {
+        fun leaveNewCodes(onMeUpdated: (Me) -> Unit) {
             state = state.copy(newCodes = null, acknowledged = false)
             refresh(onMeUpdated)
         }
