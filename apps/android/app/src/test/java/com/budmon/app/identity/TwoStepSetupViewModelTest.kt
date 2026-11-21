@@ -866,4 +866,11 @@ class TwoStepSetupViewModelTest {
         coVerify(exactly = 2) { repository.twoStepSetup() }
         coVerify(exactly = 1) { repository.twoStepEnable("123456") }
     }
+
+    // ---- TP-4.52 (A-112): the client setup TTL mirrors the server's TOTP_SETUP_TTL ----
+
+    @Test
+    fun `TP-4_52 SETUP_TTL is 15 minutes, as the server's TOTP_SETUP_TTL and the web's SETUP_TTL_MS`() {
+        assertEquals(15.minutes, SETUP_TTL)
+    }
 }
