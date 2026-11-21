@@ -77,6 +77,90 @@ const codeField = (page: Page) => page.locator("main").getByLabel(catalogText("C
 const confirmDialog = (page: Page) =>
   page.getByRole("dialog").filter({ has: page.getByText(catalogText(CONFIRM_ITS_YOU)) });
 
+// ---- Focus diagnostics (TP-4.49 (b), CI run 44920994318) ----
+
+/**
+ * Init script: once `window.__focusLogOn` is true, logs every focusin/focusout, every `main h1`
+ * change and every `#live-polite` text into `window.__focusLog`. Runs in the page, so it's
+ * self-contained.
+ */
+function recordFocusLog(): void {
+  const w = window as unknown as { __focusLog: string[]; __focusLogOn: boolean };
+  w.__focusLog = [];
+  w.__focusLogOn = false;
+  const describe = (el: EventTarget | Element | null): string => {
+    if (!(el instanceof Element)) return el === null ? "null" : "non-element";
+    const text = el.textContent.trim().replace(/\s+/g, " ").slice(0, 40);
+    return `${el.tagName}${el.id === "" ? "" : `#${el.id}`}[role=${el.getAttribute("role") ?? ""}] "${text}" connected=${String(el.isConnected)}`;
+  };
+  const log = (line: string): void => {
+    if (w.__focusLogOn) w.__focusLog.push(`${performance.now().toFixed(1)} ${line}`);
+  };
+  addEventListener(
+    "focusin",
+    (e) => {
+      log(`focusin ${describe(e.target)}`);
+    },
+    true,
+  );
+  addEventListener(
+    "focusout",
+    (e) => {
+      log(`focusout ${describe(e.target)} -> ${describe(e.relatedTarget)}`);
+    },
+    true,
+  );
+  let heading: Element | null = null;
+  let live = "";
+  /** The h1 that `n` is or holds, if any. */
+  const h1In = (n: Node): Element | null =>
+    n instanceof Element ? (n.tagName === "H1" ? n : n.querySelector("h1")) : null;
+  new MutationObserver((records) => {
+    for (const r of records) {
+      for (const n of r.addedNodes) {
+        const h = h1In(n);
+        if (h !== null) log(`h1 added ${describe(h)}`);
+      }
+      for (const n of r.removedNodes) {
+        const h = h1In(n);
+        if (h !== null) log(`h1 removed ${describe(h)}`);
+      }
+    }
+    const current = document.querySelector("main h1");
+    if (current !== heading) {
+      log(`main h1 now ${describe(current)} (previous ${describe(heading)})`);
+      heading = current;
+    }
+    const text = document.getElementById("live-polite")?.textContent ?? "";
+    if (text !== live) {
+      log(`#live-polite "${text}"`);
+      live = text;
+    }
+  }).observe(document, { childList: true, subtree: true, characterData: true });
+}
+
+/** Starts the log (just before the action under study). */
+async function startFocusLog(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __focusLog: string[]; __focusLogOn: boolean };
+    w.__focusLogOn = true;
+    w.__focusLog.push(
+      `${performance.now().toFixed(1)} start, active ${document.activeElement?.tagName ?? "null"}`,
+    );
+  });
+}
+
+/** Attaches the log to the test and prints it, so it shows in the CI job log. */
+async function dumpFocusLog(page: Page, name: string): Promise<void> {
+  const lines = await page
+    .evaluate(() => (window as unknown as { __focusLog?: string[] }).__focusLog ?? [])
+    .catch((e: unknown) => [`log unavailable: ${String(e)}`]);
+  const body = lines.join("\n");
+  await test.info().attach("focus-log.txt", { body, contentType: "text/plain" });
+  // eslint-disable-next-line no-console -- printed on purpose, so the CI job log shows it
+  console.log(`${name} focus log (${test.info().project.name}):\n${body}`);
+}
+
 /** A promise the test resolves when it chooses (a held route's release). */
 function deferred() {
   let resolve!: () => void;
@@ -1309,6 +1393,7 @@ test.describe("TP-4.49: S-4 QA's gaps (A-107, A-541, A-542)", () => {
     page,
     request,
   }) => {
+    await page.addInitScript(recordFocusLog);
     await signedUpUser(page, request, "Setup Focus Person");
     await page.goto("/settings/security");
     await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
@@ -1330,12 +1415,26 @@ test.describe("TP-4.49: S-4 QA's gaps (A-107, A-541, A-542)", () => {
     await expect(codesHeading).toBeFocused();
 
     await page.getByRole("checkbox", { name: catalogText("I've saved my recovery codes") }).check();
+    await startFocusLog(page);
     await page.getByRole("button", { name: catalogText("Done") }).click();
 
-    await expect(page).toHaveURL(/\/settings\/security$/);
-    const h1 = main.locator("h1");
-    await expect(h1).toHaveText(looseText("Sign-in & security"));
-    await expect(h1).toBeFocused();
+    // Diagnostics only (CI run 44920994318): the log is attached and printed; the assertions are
+    // unchanged.
+    try {
+      await expect(page).toHaveURL(/\/settings\/security$/);
+      const h1 = main.locator("h1");
+      await expect(h1).toHaveText(looseText("Sign-in & security"));
+      await expect(h1).toBeFocused();
+    } catch (error) {
+      const active = await page
+        .evaluate(() => (document.activeElement?.outerHTML ?? "null").slice(0, 400))
+        .catch(() => "unavailable");
+      // eslint-disable-next-line no-console -- printed on purpose, so the CI job log shows it
+      console.log(`TP-4.49 (b) activeElement at failure: ${active}`);
+      throw error;
+    } finally {
+      await dumpFocusLog(page, "TP-4.49 (b)");
+    }
   });
 
   // ---- (c) the J-5 prompt after a recovery-code sign-in ----
