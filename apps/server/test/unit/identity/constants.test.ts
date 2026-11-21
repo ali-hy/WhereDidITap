@@ -102,3 +102,9 @@ describe("TP-0.41x: F-1's constants", () => {
     );
   });
 });
+
+describe("TP-4.52: TOTP_SETUP_TTL, mirrored by the web's SETUP_TTL_MS and Android's SETUP_TTL (A-112)", () => {
+  it("TP-4.52: TOTP_SETUP_TTL = 15 min", () => {
+    expect(seconds(C.TOTP_SETUP_TTL)).toBe(15 * MIN);
+  });
+});

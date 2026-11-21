@@ -1632,6 +1632,91 @@ test.describe("TP-4.49: S-4 QA's gaps (A-107, A-541, A-542)", () => {
     expect(regenerations).toEqual([]);
   });
 
+  // ---- (i) the new-codes request is used by the first settled status read only ----
+
+  /**
+   * A two-step user with 3 codes left, signed in with a recovery code; then GET me answers 503
+   * (the two-step status read fails) and the toast's Create new codes is pressed. Returns the
+   * regeneration requests sent from then on.
+   */
+  async function newCodesWithStatusDown(
+    page: Page,
+    request: Parameters<typeof createInvitation>[0],
+    name: string,
+  ): Promise<string[]> {
+    const { email } = await signedUpUser(page, request, name);
+    const { codes } = await enableTwoStep(page, { acknowledge: true });
+    await useRecoveryCodes(request, email, codes.slice(0, 7));
+    await signInWithRecoveryCode(page, email, codes[7] ?? "");
+    const toast = toastItem(page, looseText("You used a recovery code. 2 codes left."));
+    await expect(toast).toBeVisible();
+    const regenerations: string[] = [];
+    page.on("request", (r) => {
+      if (
+        r.method() === "POST" &&
+        new URL(r.url()).pathname === "/api/v1/me/two-step/recovery-codes"
+      ) {
+        regenerations.push(r.url());
+      }
+    });
+    await page.route("**/api/v1/me", async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.fallback();
+        return;
+      }
+      await route.fulfill({ status: 503, contentType: "text/plain", body: "Service Unavailable" });
+    });
+
+    await toast.getByRole("button", { name: catalogText("Create new codes") }).click();
+
+    await expect(page).toHaveURL(/\/settings\/security$/);
+    await expect(
+      twoStepSection(page).getByRole("button", { name: catalogText("Try again") }),
+    ).toBeVisible();
+    return regenerations;
+  }
+
+  test("TP-4.49 (i) (A-112): the toast's Create new codes with the status read answering 503, then Try again succeeding: no me.regenerateRecoveryCodes request and no codes dialog", async ({
+    page,
+    request,
+  }) => {
+    const regenerations = await newCodesWithStatusDown(page, request, "Status Down Person");
+    await page.unroute("**/api/v1/me");
+
+    await twoStepSection(page)
+      .getByRole("button", { name: catalogText("Try again") })
+      .click();
+
+    await expect(createNewCodes(page)).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    expect(regenerations).toEqual([]);
+  });
+
+  test("TP-4.49 (i) (A-112): the toast's Create new codes with the status read answering 503, then leaving and coming back with it succeeding: no me.regenerateRecoveryCodes request and no codes dialog", async ({
+    page,
+    request,
+  }) => {
+    const regenerations = await newCodesWithStatusDown(page, request, "Come Back Person");
+    await page.unroute("**/api/v1/me");
+    const go = async (path: string) => {
+      await page.evaluate((to) => {
+        history.pushState({}, "", to);
+        dispatchEvent(new PopStateEvent("popstate", { state: history.state as unknown }));
+      }, path);
+    };
+
+    await go("/settings");
+    await expect(page).toHaveURL(/\/settings$/);
+    await go("/settings/security");
+
+    await expect(page.locator("main h1")).toHaveText(looseText("Sign-in & security"));
+    await expect(createNewCodes(page)).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    expect(regenerations).toEqual([]);
+  });
+
   test("TP-4.32x: the step-up lapses during a setup the server finds expired: Verify and turn on asks for the password first; after Confirm the expired state 'Setup timed out. Start again.' shows", async ({
     page,
     request,
