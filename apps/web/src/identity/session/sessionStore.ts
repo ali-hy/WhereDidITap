@@ -5,6 +5,7 @@ import { createSignal, type Accessor } from "solid-js";
 import type { ApiClient } from "../../api/client.js";
 import { toAppError } from "../../api/errors.js";
 import { safeNext } from "../routes/guards.js";
+import { clearNewCodesRequest } from "../settings/newCodesIntent.js";
 
 export type Me = Awaited<ReturnType<ApiClient["me"]["get"]>>;
 export type SessionStatus = "loading" | "signed_in" | "signed_out" | "unavailable";
@@ -146,6 +147,7 @@ export function createSessionStore(deps: {
         signingOut = false;
       }
       removeMarker();
+      clearNewCodesRequest();
       deps.queryClient.clear();
       setMe(null);
       settle("signed_out");
@@ -153,6 +155,7 @@ export function createSessionStore(deps: {
     },
     sessionEnded(next) {
       removeMarker();
+      clearNewCodesRequest();
       if (signingOut) return;
       setMe(null);
       // During the boot probe the guard that awaits `ready()` does the one redirect. The probe's

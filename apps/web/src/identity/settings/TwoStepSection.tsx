@@ -5,7 +5,16 @@ import * as AlertDialog from "@kobalte/core/alert-dialog";
 import * as Dialog from "@kobalte/core/dialog";
 import { createQuery } from "@tanstack/solid-query";
 import { useNavigate } from "@tanstack/solid-router";
-import { createEffect, createSignal, Match, Show, Suspense, Switch, type JSX } from "solid-js";
+import {
+  createEffect,
+  createSignal,
+  Match,
+  onCleanup,
+  Show,
+  Suspense,
+  Switch,
+  type JSX,
+} from "solid-js";
 import { useApi } from "../../api/ApiProvider.js";
 import { toAppError } from "../../api/errors.js";
 import { messages } from "../../i18n/messages.js";
@@ -19,7 +28,8 @@ import { RecoveryCodesView } from "../components/RecoveryCodesView.js";
 import { TwoStepForm, type TwoStepResult, type TwoStepValue } from "../components/TwoStepForm.js";
 import { identityErrorMessage } from "../errorMessages.js";
 import { identityMessages as m } from "../messages.js";
-import { newCodesRequested, takeNewCodesRequest } from "./newCodesIntent.js";
+import { useSession } from "../session/SessionProvider.js";
+import { clearNewCodesRequest, newCodesRequested, takeNewCodesRequest } from "./newCodesIntent.js";
 
 const OVERLAY = "fixed inset-0 bg-fg/40";
 const CONTENT =
@@ -29,6 +39,7 @@ export function TwoStepSection(): JSX.Element {
   const { t } = useI18n();
   const api = useApi();
   const navigate = useNavigate();
+  const session = useSession();
   const status = createQuery(() => ({
     queryKey: ["security", "two-step"],
     queryFn: async () => (await api.me.get()).twoStep,
@@ -102,11 +113,12 @@ export function TwoStepSection(): JSX.Element {
 
   // The sign-in prompt's action asks for new codes once the status is known.
   createEffect(() => {
-    if (newCodesRequested() && status.isSuccess) {
-      takeNewCodesRequest();
-      if (status.data.enabled) void createNew();
+    if (newCodesRequested() && !status.isPending) {
+      const ok = takeNewCodesRequest(session.me()?.id);
+      if (ok && status.isSuccess && status.data.enabled) void createNew();
     }
   });
+  onCleanup(clearNewCodesRequest);
 
   const codesDone = async (): Promise<void> => {
     setCodesBusy(true);

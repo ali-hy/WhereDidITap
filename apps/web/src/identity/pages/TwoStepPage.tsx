@@ -78,7 +78,8 @@ export function TwoStepPage(): JSX.Element {
                 action: {
                   label: t(m.twostepCreateNew),
                   onClick: () => {
-                    requestNewCodes();
+                    const id = session.me()?.id;
+                    if (id !== undefined) requestNewCodes(id);
                     void navigate({ to: "/settings/security" });
                   },
                 },

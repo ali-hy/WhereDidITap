@@ -22,8 +22,8 @@ interface SetupInfo {
   otpauthUri: string;
 }
 
-/** How long a setup lasts, on this device's own monotonic clock. */
-const SETUP_TTL_MS = 15 * 60 * 1000;
+/** F-1's TOTP_SETUP_TTL: this, the Android view model and the server change together. */
+export const SETUP_TTL_MS = 15 * 60 * 1000;
 
 type Phase =
   | { kind: "loading" }

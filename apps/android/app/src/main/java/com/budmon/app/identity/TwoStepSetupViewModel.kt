@@ -20,6 +20,7 @@ import kotlin.time.Duration.Companion.minutes
 import kotlin.time.TimeMark
 import kotlin.time.TimeSource
 
+// F-1's TOTP_SETUP_TTL: the web page, this and the server change together.
 private val SETUP_TTL = 15.minutes
 
 enum class SetupStep { Loading, Scan, Codes, Expired, Failed, Done }
