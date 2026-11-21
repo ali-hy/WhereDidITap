@@ -79,17 +79,14 @@ const HEADING_WAIT_MS = 2000;
 const SETTLE_MS = 3000;
 
 /**
- * A page that re-renders after arriving replaces its h1 and drops focus to the body; focus follows
- * the new h1. Watches for a few seconds, and stops at the first key press or pointer press.
+ * A page that re-renders or suspends after arriving detaches its h1 (or replaces it) and drops
+ * focus to the body; focus goes back to the page's h1. Watches for a few seconds, and stops at
+ * the first key press or pointer press.
  */
-function keepFocus(focused: HTMLElement): void {
-  let current = focused;
+function keepFocus(): void {
   const follow = (): void => {
-    if (current.isConnected || document.activeElement !== document.body) return;
-    const next = document.querySelector<HTMLElement>("main h1");
-    if (next === null) return;
-    next.focus();
-    current = next;
+    if (document.activeElement !== document.body) return;
+    document.querySelector<HTMLElement>("main h1")?.focus();
   };
   const observer = new MutationObserver(follow);
   observer.observe(document.body, { childList: true, subtree: true });
@@ -115,7 +112,7 @@ function focusNewHeading(previous: Element | null): void {
     if (h1 === null || (h1 === previous && !final)) return false;
     h1.focus();
     announce(h1.textContent);
-    keepFocus(h1);
+    keepFocus();
     return true;
   };
   const frame = (): void => {
