@@ -1,6 +1,6 @@
 // Focus and announcements on navigation (F-216, F-218, A-333, A-336), and the 360 px layout. TP-11.15,
 // TP-11.16, TP-11.38 (A-542: focus waits for the new page's heading), TP-11.39 (A-544: kept across a
-// replaced heading).
+// replaced heading), TP-11.40 (A-545: the h1 stays mounted while query regions load).
 import { catalogText, expect, test, type Page } from "./fixtures.js";
 
 async function expectFocusedHeading(page: Page, text: string): Promise<void> {
@@ -248,4 +248,72 @@ test("TP-11.39 (b) (A-544): Replaced heading, then Tab once within 1 s of the he
     }),
   ).toBe(true);
   await expect(page.locator("main h1")).not.toBeFocused();
+});
+
+test("TP-11.40 (A-545): Query heading: with both query regions resolved, at 500 ms the h1 first focused is still the same connected element, still focused, and never removed", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "chromium project only");
+  await page.goto("/__fixtures/components");
+  await expect(page.locator("main h1")).toHaveCount(1);
+  await expect(page.locator("[data-component]").first()).toBeVisible();
+  // Before the click: the first main h1 to take focus, and every removed node holding it.
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      tp1140: { start: number; focused: Element | null; removedIt: boolean; removed: Node[] };
+    };
+    w.tp1140 = { start: performance.now(), focused: null, removedIt: false, removed: [] };
+    addEventListener(
+      "focusin",
+      (e) => {
+        const h1 = document.querySelector("main h1");
+        if (w.tp1140.focused === null && e.target === h1 && h1?.textContent === "Query heading") {
+          w.tp1140.focused = h1;
+        }
+      },
+      true,
+    );
+    new MutationObserver((records) => {
+      for (const r of records) for (const n of r.removedNodes) w.tp1140.removed.push(n);
+      const it = w.tp1140.focused;
+      if (it !== null && w.tp1140.removed.some((n) => n === it || n.contains(it))) {
+        w.tp1140.removedIt = true;
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+  });
+
+  await page.getByRole("link", { name: "Query heading" }).click();
+
+  await expect(page).toHaveURL(/\/__fixtures\/query-heading$/);
+  await page.waitForFunction(
+    () => (window as unknown as { tp1140: { focused: Element | null } }).tp1140.focused !== null,
+  );
+  const main = page.locator("main");
+  await expect(main.locator("h1")).toHaveText("Query heading");
+  await expect(main.getByText("Loading…")).toHaveCount(0);
+  await page.waitForFunction(
+    () =>
+      performance.now() - (window as unknown as { tp1140: { start: number } }).tp1140.start >= 500,
+  );
+
+  const at500 = await page.evaluate(() => {
+    const w = window as unknown as {
+      tp1140: { focused: Element | null; removedIt: boolean; removed: Node[] };
+    };
+    const it = w.tp1140.focused;
+    return {
+      same: it !== null && it === document.querySelector("main h1"),
+      connected: it?.isConnected ?? false,
+      focused: it !== null && document.activeElement === it,
+      removedLater: it !== null && w.tp1140.removed.some((n) => n === it || n.contains(it)),
+      removedIt: w.tp1140.removedIt,
+    };
+  });
+  expect(at500).toEqual({
+    same: true,
+    connected: true,
+    focused: true,
+    removedLater: false,
+    removedIt: false,
+  });
 });
