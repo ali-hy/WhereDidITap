@@ -1,5 +1,6 @@
 // Focus and announcements on navigation (F-216, F-218, A-333, A-336), and the 360 px layout. TP-11.15,
-// TP-11.16, TP-11.38 (A-542: focus waits for the new page's heading).
+// TP-11.16, TP-11.38 (A-542: focus waits for the new page's heading), TP-11.39 (A-544: kept across a
+// replaced heading).
 import { catalogText, expect, test, type Page } from "./fixtures.js";
 
 async function expectFocusedHeading(page: Page, text: string): Promise<void> {
@@ -123,4 +124,128 @@ test("TP-11.38 (A-542): the components gallery's Slow heading link: once the 300
   expect(await page.evaluate(() => document.activeElement?.tagName)).toBe("H1");
   expect(galleryHeading).not.toBe("Slow heading");
   await expect(page.locator("#live-polite")).toHaveText("Slow heading");
+});
+
+// ---- TP-11.39 (A-544): focus kept across a replaced heading ----
+
+/**
+ * Watches the page for TP-11.39: the first `main h1` and when it showed (`performance.now()`), and
+ * every non-empty text written to `#live-polite`.
+ */
+async function watchHeadings(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      tp1139: { first: Element | null; shownAt: number | null; announced: string[] };
+    };
+    w.tp1139 = { first: null, shownAt: null, announced: [] };
+    const gallery = document.querySelector("main h1");
+    new MutationObserver(() => {
+      const h1 = document.querySelector("main h1");
+      if (w.tp1139.first === null && h1 !== null && h1 !== gallery) {
+        w.tp1139.first = h1;
+        w.tp1139.shownAt = performance.now();
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+    const live = document.getElementById("live-polite");
+    if (live !== null) {
+      new MutationObserver(() => {
+        const text = live.textContent;
+        if (text !== "") w.tp1139.announced.push(text);
+      }).observe(live, { childList: true, characterData: true, subtree: true });
+    }
+  });
+}
+
+/** Opens the gallery and clicks Replaced heading; waits until the first heading has been replaced. */
+async function openReplacedHeading(page: Page): Promise<void> {
+  await page.goto("/__fixtures/components");
+  await expect(page.locator("main h1")).toHaveCount(1);
+  await expect(page.locator("[data-component]").first()).toBeVisible();
+  await watchHeadings(page);
+
+  await page.getByRole("link", { name: "Replaced heading" }).click();
+
+  await expect(page).toHaveURL(/\/__fixtures\/slow-heading\?replace=1$/);
+  await page.waitForFunction(() => {
+    const w = window as unknown as { tp1139: { first: Element | null } };
+    return w.tp1139.first !== null && !w.tp1139.first.isConnected;
+  });
+}
+
+/** Waits until 1.2 s have passed since the first heading showed (past keepFocus's 1 s). */
+async function pastKeepFocus(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const w = window as unknown as { tp1139: { shownAt: number | null } };
+    return w.tp1139.shownAt !== null && performance.now() - w.tp1139.shownAt > 1200;
+  });
+}
+
+test("TP-11.39 (a) (A-544): Replaced heading: after the swap, focus is on the new 'Slow heading' element (the first is detached), and #live-polite received 'Slow heading' once", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "chromium project only");
+
+  await openReplacedHeading(page);
+
+  const h1 = page.locator("main h1");
+  await expect(h1).toHaveText("Slow heading");
+  await expect(h1).toBeFocused();
+  expect(
+    await page.evaluate(() => {
+      const w = window as unknown as { tp1139: { first: Element | null } };
+      return document.activeElement !== w.tp1139.first && document.activeElement?.isConnected;
+    }),
+  ).toBe(true);
+  await pastKeepFocus(page);
+  await expect(h1).toBeFocused();
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { tp1139: { announced: string[] } }).tp1139.announced,
+    ),
+  ).toEqual(["Slow heading"]);
+});
+
+test("TP-11.39 (b) (A-544): Replaced heading, then Tab once within 1 s of the heading first showing: focus stays where Tab put it", async ({
+  page,
+}, testInfo) => {
+  // The fixture has nothing focusable after its h1, so Tab leaves the page and activeElement is
+  // BODY; keepFocus must leave it there (the new heading isn't detached).
+  test.skip(testInfo.project.name !== "chromium", "chromium project only");
+  await openReplacedHeading(page);
+  await page.waitForFunction(() => {
+    const h1 = document.querySelector("main h1");
+    return h1 !== null && document.activeElement === h1;
+  });
+  await page.evaluate(() => {
+    const w = window as unknown as { tp1139: { tabAt?: number } };
+    addEventListener("keydown", () => {
+      w.tp1139.tabAt ??= performance.now();
+    });
+  });
+
+  await page.keyboard.press("Tab");
+
+  const tabbed = await page.evaluate(() => {
+    const w = window as unknown as {
+      tp1139: { shownAt: number | null; tabAt?: number; tabbed?: Element | null };
+    };
+    w.tp1139.tabbed = document.activeElement;
+    return {
+      tag: document.activeElement?.tagName ?? null,
+      within:
+        w.tp1139.shownAt !== null &&
+        w.tp1139.tabAt !== undefined &&
+        w.tp1139.tabAt - w.tp1139.shownAt < 1000,
+    };
+  });
+  expect(tabbed.within).toBe(true);
+  expect(tabbed.tag).not.toBe("H1");
+  await pastKeepFocus(page);
+  expect(
+    await page.evaluate(() => {
+      const w = window as unknown as { tp1139: { tabbed?: Element | null } };
+      return document.activeElement === w.tp1139.tabbed;
+    }),
+  ).toBe(true);
+  await expect(page.locator("main h1")).not.toBeFocused();
 });
