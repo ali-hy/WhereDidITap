@@ -3,11 +3,8 @@
 // SDK and runs only where the android job provides it.
 //
 // A-348: `testImplementation(gradleTestKit())` in app/build.gradle.kts, which also sets the system
-// property `budmon.androidRoot`. Each case builds a temporary copy of apps/android (without build/,
-// .gradle/ and local.properties), so it never contends with the outer build. The copy keeps the
-// repository layout (<tmp>/apps/android) and brings the two files the build reads from outside
-// apps/android: packages/contract/openapi.json (openApiGenerate) and packages/shared/test-vectors.
-// AGP paths are in AgpPaths.kt.
+// property `budmon.androidRoot`. Each case builds its own copy (AndroidProjectCopy.kt). AGP paths
+// are in AgpPaths.kt.
 package com.budmon.app.build
 
 import org.gradle.testkit.runner.BuildResult
@@ -21,8 +18,8 @@ import java.nio.file.Files
 
 class BuildPropertiesTest {
     private val source: File = File(checkNotNull(System.getProperty("budmon.androidRoot")) { "budmon.androidRoot not set" })
-    private lateinit var base: File
-    private lateinit var root: File
+    private lateinit var copy: AndroidProjectCopy
+    private val root: File get() = copy.root
 
     /**
      * Review B-10: the nested build's own home (HOME and user.home), never the real one. One
@@ -33,41 +30,15 @@ class BuildPropertiesTest {
 
     @Before
     fun copyProject() {
-        base = Files.createTempDirectory("budmon-android-testkit-").toFile()
-        root = File(base, "apps/android")
-        val skip = setOf("build", ".gradle", "local.properties")
-        source.walkTopDown()
-            .onEnter { dir -> dir == source || dir.name !in skip }
-            .filter { it.isFile && it.name !in skip }
-            .forEach { file -> file.copyTo(File(root, file.relativeTo(source).path), overwrite = true) }
-        File(root, "gradlew").setExecutable(true)
-        val repo = source.resolve("../..").canonicalFile
-        for (path in listOf("packages/contract/openapi.json", "packages/shared/test-vectors")) {
-            repo.resolve(path).copyRecursively(base.resolve(path), overwrite = true)
-        }
-        home.deleteRecursively()
-        home.mkdirs()
-        // The nested daemon reads ~/.budmon/android.properties through user.home (F-264).
-        val properties = File(root, "gradle.properties")
-        val lines = properties.readLines().filterNot { it.startsWith("org.gradle.jvmargs=") }
-        val jvmArgs = source.resolve("gradle.properties").readLines()
-            .firstOrNull { it.startsWith("org.gradle.jvmargs=") }
-            ?.removePrefix("org.gradle.jvmargs=")
-            ?: ""
-        properties.writeText((lines + "org.gradle.jvmargs=$jvmArgs -Duser.home=${home.path}").joinToString("\n", postfix = "\n"))
+        copy = AndroidProjectCopy(source, home)
     }
 
     @After
     fun removeCopy() {
-        base.deleteRecursively()
+        copy.delete()
     }
 
-    private fun gradle(vararg args: String): GradleRunner = GradleRunner.create()
-        .withProjectDir(root)
-        .withEnvironment(System.getenv() + ("HOME" to home.path))
-        // The daemon also takes the client's system properties for each build, so user.home is
-        // passed on the command line too; the jvmargs copy only keeps one daemon per home.
-        .withArguments(*args, "-Duser.home=${home.path}", "--stacktrace", "-q")
+    private fun gradle(vararg args: String): GradleRunner = copy.runner(*args, "-q")
 
     private fun fails(vararg args: String): BuildResult = gradle(*args).buildAndFail()
     private fun succeeds(vararg args: String): BuildResult = gradle(*args).build()
