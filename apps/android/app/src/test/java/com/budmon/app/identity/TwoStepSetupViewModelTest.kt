@@ -13,8 +13,9 @@
 // mode's TWO_STEP_NOT_ENABLED → Done; submit's errors; finish(). SetupStep.Failed is looked up by
 // name, so while it's missing only the tests that use it fail, not the build.
 // TP-4.48 (a), A-106: replaced is true only after a confirmed replacement.
-// TP-4.50 (f), A-107: submit checks the setup's expiry first (a fixed Clock), so a dead setup asks for
-// no step-up. Every other test runs at beforeExpiry.
+// TP-4.50 (f) and (f2), A-107, A-108, A-111: submit checks the setup's expiry first, measured on a
+// TestTimeSource from the secret's arrival (never against expiresAt), so a dead setup asks for no
+// step-up. Every other test leaves the time source where it started.
 // TP-4.47x: startAgain() is ignored while a load is in flight (A-105, "ignored while busy").
 // Setup: a MockK AuthRepository, the real ConfirmationCoordinator around it,
 // Dispatchers.setMain(StandardTestDispatcher). `settle` advances virtual time until a condition
@@ -50,10 +51,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import java.time.Clock
 import java.time.Instant
-import java.time.ZoneOffset
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.TestTimeSource
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -78,13 +80,13 @@ class TwoStepSetupViewModelTest {
         Dispatchers.resetMain()
     }
 
-    /** Ten minutes before the secret's expiresAt. */
-    private val beforeExpiry: Clock = Clock.fixed(Instant.parse("2026-11-15T10:00:00Z"), ZoneOffset.UTC)
+    /** The view model's monotonic time source (A-111); only the (f) tests move it. */
+    private val time = TestTimeSource()
 
-    private fun TestScope.subject(clock: Clock = beforeExpiry): Pair<TwoStepSetupViewModel, ConfirmationCoordinator> {
+    private fun TestScope.subject(): Pair<TwoStepSetupViewModel, ConfirmationCoordinator> {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         val coordinator = ConfirmationCoordinator(repository)
-        return TwoStepSetupViewModel(repository, coordinator, clock) to coordinator
+        return TwoStepSetupViewModel(repository, coordinator, time) to coordinator
     }
 
     private fun TestScope.settle(
@@ -743,13 +745,11 @@ class TwoStepSetupViewModelTest {
         settle("step Scan") { vm.state.step == SetupStep.Scan }
     }
 
-    // ---- TP-4.50 (f), A-107, A-108: the expiry pre-check, before the code rule ----
+    // ---- TP-4.50 (f), (f2), A-107, A-108, A-111: the expiry pre-check, before the code rule ----
 
-    private val atExpiry: Clock = Clock.fixed(secret.expiresAt, ZoneOffset.UTC)
-
-    /** A view model on Scan whose clock is [clock] (setup unless [replace]). */
-    private fun TestScope.scanningAt(clock: Clock, replace: Boolean = false): TwoStepSetupViewModel {
-        val (vm, _) = subject(clock)
+    /** A view model on Scan, its time source [time] marked as the secret arrived (setup unless [replace]). */
+    private fun TestScope.scanningTimed(replace: Boolean = false): TwoStepSetupViewModel {
+        val (vm, _) = subject()
         vm.start(replace)
         advanceUntilIdle()
         assertEquals(SetupStep.Scan, vm.state.step)
@@ -757,8 +757,9 @@ class TwoStepSetupViewModelTest {
     }
 
     @Test
-    fun `TP-4_50 (f) submit with the clock at expiresAt - step Expired, no twoStepEnable call`() = runTest {
-        val vm = scanningAt(atExpiry)
+    fun `TP-4_50 (f) submit 15 minutes after the secret arrived - step Expired, no twoStepEnable call`() = runTest {
+        val vm = scanningTimed()
+        time += 15.minutes
 
         send(vm, "123456")
 
@@ -768,9 +769,10 @@ class TwoStepSetupViewModelTest {
     }
 
     @Test
-    fun `TP-4_50 (f) submit 12345 with the clock at expiresAt - step Expired, error null, no call (expiry before the code rule, A-108)`() =
+    fun `TP-4_50 (f) submit 12345 15 minutes after the secret arrived - step Expired, error null, no call (expiry before the code rule, A-108)`() =
         runTest {
-            val vm = scanningAt(atExpiry)
+            val vm = scanningTimed()
+            time += 15.minutes
 
             send(vm, "12345")
 
@@ -780,8 +782,23 @@ class TwoStepSetupViewModelTest {
         }
 
     @Test
-    fun `TP-4_50x replace mode, submit with the clock past expiresAt - step Expired, no twoStepReplaceConfirm call`() = runTest {
-        val vm = scanningAt(Clock.fixed(secret.expiresAt.plusSeconds(60), ZoneOffset.UTC), replace = true)
+    fun `TP-4_50 (f2) a secret whose expiresAt is 20 minutes in the past by wall clock, submitted at once - twoStepEnable called, step Codes`() =
+        runTest {
+            val stale = secret.copy(expiresAt = Instant.now().minusSeconds(20 * 60))
+            coEvery { repository.twoStepSetup() } returns stale
+            val vm = scanningTimed()
+
+            vm.onCodeChange("123456")
+            vm.submit()
+            settle("step Codes") { vm.state.step == SetupStep.Codes }
+
+            coVerify(exactly = 1) { repository.twoStepEnable("123456") }
+        }
+
+    @Test
+    fun `TP-4_50x replace mode, submit 16 minutes after the secret arrived - step Expired, no twoStepReplaceConfirm call`() = runTest {
+        val vm = scanningTimed(replace = true)
+        time += 16.minutes
 
         send(vm, "123456")
 
@@ -790,8 +807,9 @@ class TwoStepSetupViewModelTest {
     }
 
     @Test
-    fun `TP-4_50x submit 1 ms before expiresAt - twoStepEnable(123456) called, step Codes`() = runTest {
-        val vm = scanningAt(Clock.fixed(secret.expiresAt.minusMillis(1), ZoneOffset.UTC))
+    fun `TP-4_50x submit 1 ms short of 15 minutes - twoStepEnable(123456) called, step Codes`() = runTest {
+        val vm = scanningTimed()
+        time += 15.minutes - 1.milliseconds
 
         vm.onCodeChange("123456")
         vm.submit()
@@ -801,16 +819,51 @@ class TwoStepSetupViewModelTest {
     }
 
     @Test
-    fun `TP-4_50x submit at expiresAt needing a step-up - no step-up asked, step Expired`() = runTest {
+    fun `TP-4_50x submit 15 minutes after arrival when a step-up would be needed - no step-up asked, step Expired`() = runTest {
         coEvery { repository.twoStepEnable(any()) } throws
             ApiException(ApiError.Defined("CONFIRMATION_REQUIRED", 403, buildJsonObject { put("factor", "password") }))
-        val (vm, coordinator) = subject(atExpiry)
+        val (vm, coordinator) = subject()
         vm.start(false)
         advanceUntilIdle()
+        time += 15.minutes
 
         send(vm, "123456")
 
         assertNull(coordinator.request.value)
         assertEquals(SetupStep.Expired, vm.state.step)
+    }
+
+    @Test
+    fun `TP-4_50x time passing before the secret arrives doesn't count - submitted at once after arrival, twoStepEnable called`() =
+        runTest {
+            val (vm, _) = subject()
+            vm.start(false)
+            time += 20.minutes
+            advanceUntilIdle()
+            assertEquals(SetupStep.Scan, vm.state.step)
+
+            vm.onCodeChange("123456")
+            vm.submit()
+            settle("step Codes") { vm.state.step == SetupStep.Codes }
+
+            coVerify(exactly = 1) { repository.twoStepEnable("123456") }
+        }
+
+    @Test
+    fun `TP-4_50x Expired by time, then startAgain - the new secret's 15 minutes start on its arrival`() = runTest {
+        val vm = scanningTimed()
+        time += 15.minutes
+        send(vm, "123456")
+        assertEquals(SetupStep.Expired, vm.state.step)
+
+        vm.startAgain()
+        settle("step Scan") { vm.state.step == SetupStep.Scan }
+        time += 14.minutes
+        vm.onCodeChange("123456")
+        vm.submit()
+        settle("step Codes") { vm.state.step == SetupStep.Codes }
+
+        coVerify(exactly = 2) { repository.twoStepSetup() }
+        coVerify(exactly = 1) { repository.twoStepEnable("123456") }
     }
 }

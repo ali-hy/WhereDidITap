@@ -431,7 +431,7 @@ class SecurityViewModelTest {
         val vm = viewModel()
         showNewCodes(vm)
 
-        vm.leaveNewCodes()
+        vm.leaveNewCodes(onMeUpdated)
         advanceUntilIdle()
 
         assertNull(vm.state.newCodes)

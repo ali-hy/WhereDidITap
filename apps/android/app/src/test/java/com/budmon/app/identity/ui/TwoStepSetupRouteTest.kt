@@ -64,9 +64,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
-import java.time.Clock
 import java.time.Instant
-import java.time.ZoneOffset
+import kotlin.time.TestTimeSource
 
 @OptIn(ExperimentalTestApi::class)
 @RunWith(AndroidJUnit4::class)
@@ -83,8 +82,9 @@ class TwoStepSetupRouteTest {
         otpauthUri = otpauth,
         expiresAt = Instant.parse("2026-11-15T10:10:00Z"),
     )
-    /** Before the secret's expiresAt (A-107's pre-check). */
-    private val clock: Clock = Clock.fixed(Instant.parse("2026-11-15T10:00:00Z"), ZoneOffset.UTC)
+
+    /** The setup's monotonic time source (A-111), never advanced here. */
+    private val time = TestTimeSource()
 
     private val repository = mockk<AuthRepository> {
         coEvery { twoStepSetup() } returns secret
@@ -99,7 +99,7 @@ class TwoStepSetupRouteTest {
         shown: androidx.compose.runtime.MutableState<Boolean> = mutableStateOf(true),
         replace: Boolean = false,
     ): TwoStepSetupViewModel {
-        val vm = TwoStepSetupViewModel(repository, ConfirmationCoordinator(repository), clock)
+        val vm = TwoStepSetupViewModel(repository, ConfirmationCoordinator(repository), time)
         compose.setContent {
             AppTheme(ThemeSetting.LIGHT) {
                 if (shown.value) TwoStepSetupRoute(viewModel = vm, replace = replace, onDone = {})
@@ -459,7 +459,7 @@ class TwoStepSetupRouteTest {
 
     /** Shows the route in replace mode with a counting onDone; returns the view model and the counter. */
     private fun showReplace(): Pair<TwoStepSetupViewModel, Counter> {
-        val vm = TwoStepSetupViewModel(repository, ConfirmationCoordinator(repository), clock)
+        val vm = TwoStepSetupViewModel(repository, ConfirmationCoordinator(repository), time)
         val done = Counter()
         compose.setContent {
             AppTheme(ThemeSetting.LIGHT) {
